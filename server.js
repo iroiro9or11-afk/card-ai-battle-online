@@ -31,8 +31,8 @@ function sample(arr,n){ const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=
 
 function copySessionProfileToRoom(r,s){ if(s?.profile) r.profiles[s.sessionId]=JSON.parse(JSON.stringify(s.profile)); }
 function createRoom(owner, cfg){
-  const room={roomId:uid('room'),roomName:safeName(cfg.roomName,'カードバトル'),ownerId:owner.sessionId,ownerName:owner.name,passwordHash:hashPassword(cfg.password),rule:['unlimited','rental','super_rental','random_pot'].includes(cfg.rule)?cfg.rule:'unlimited',allowSpectators:cfg.allowSpectators!==false,maxSpectators:Math.max(0,Math.min(50,Number(cfg.maxSpectators)||10)),status:'waiting',players:[null,null],spectators:new Set(),profiles:{},selected:{},pools:{},battle:null,createdAt:Date.now(),updatedAt:Date.now()};
-  room.players[0]={sessionId:owner.sessionId,name:owner.name,ws:owner.ws,ready:false,online:true,lastSeen:Date.now()}; rooms.set(room.roomId,room); owner.roomId=room.roomId; return room;
+  const room={roomId:uid('room'),roomName:safeName(cfg.roomName,'カードバトル'),ownerId:owner.sessionId,ownerName:owner.name,passwordHash:hashPassword(cfg.password),rule:['unlimited','rental','super_rental','random_pot'].includes(cfg.rule)?cfg.rule:'unlimited',allowSpectators:cfg.allowSpectators!==false,maxSpectators:Math.max(0,Math.min(50,Number(cfg.maxSpectators)||10)),status:'waiting',players:[null,null],spectators:new Set(),profiles:{},selected:{},deckSelections:{},pools:{},battle:null,createdAt:Date.now(),updatedAt:Date.now()};
+  room.players[0]={sessionId:owner.sessionId,name:owner.name,ws:owner.ws,ready:false,online:true,lastSeen:Date.now()}; copySessionProfileToRoom(room,owner); rooms.set(room.roomId,room); owner.roomId=room.roomId; return room;
 }
 function joinPlayer(r,sid,ws,password){
   if(r.passwordHash && hashPassword(password)!==r.passwordHash) return {ok:false,error:'パスワードが違います。'};
@@ -64,7 +64,6 @@ function executeAction(b,side,u,action){const actorSide=side;const resource=side
 function pubUnit(u,includeSkills=false){const x={instanceId:u.instanceId,cardId:u.cardId,name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,maxHp:u.maxHp,currentHp:u.currentHp,atk:u.atk,priority:u.priority,effectiveAtk:effAtk(u),effectiveSpeed:effSpeed(u),side:u.side,isActive:u.isActive,buffs:u.buffs,debuffs:u.debuffs,image:u.image||null};if(includeSkills)x.skills=u.skills;return x;}
 function publicBattle(b,viewerSide){return {battleId:b.battleId,turn:b.turn,phase:b.phase,deadline:b.deadline,p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(u=>pubUnit(u,viewerSide==='player1')),magicIds:viewerSide==='player1'?b.p1.magicIds:[]},p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(u=>pubUnit(u,viewerSide==='player2')),magicIds:viewerSide==='player2'?b.p2.magicIds:[]},yourSide:viewerSide,winner:b.winner,events:(b.events||[]).slice(-30)};}
 function startBattle(r){
- if(!r||r.battle||r.status==='battle'||r.status==='finished') return false;
  const a=r.players[0],c=r.players[1];
  const ca=r.profiles[a.sessionId],cb=r.profiles[c.sessionId];
  const da=r.selected[a.sessionId],db=r.selected[c.sessionId];
@@ -79,22 +78,17 @@ function startBattle(r){
    const units=(sel.unitIds||[]).map(id=>cards.get(id)).filter(Boolean);
    const active=(sel.active&&sel.active.length?sel.active:units.slice(0,3).map(x=>x.id)).filter(id=>units.some(x=>x.id===id)).slice(0,3);
    const reserve=(sel.reserve||units.filter(x=>!active.includes(x.id)).map(x=>x.id)).filter(id=>units.some(x=>x.id===id)&&!active.includes(id)).slice(0,2);
-   return {sessionId,name:profile.name,side,ap:0,units:units.map(x=>buildUnit(x,side,active.includes(x.id))),reserveQueue:reserve,magicIds:(sel.magicIds||[]).filter(id=>cards.has(id)),usedMagic:[],actions:null};
+   return {sessionId,name:profile.name,side,ap:0,units:units.map(x=>buildUnit(x,side,active.includes(x.id))),reserveQueue:reserve,magicIds:(sel.magicIds||[]).filter(id=>cards.has(id)),usedMagic:[],actions:null,magicCards:Object.fromEntries((sel.magicIds||[]).map(id=>[id,cards.get(id)]).filter(([,c])=>c))};
  };
-  const validSelection=s=>{
-    const units=Array.isArray(s?.unitIds)?s.unitIds:[];
-    const magics=Array.isArray(s?.magicIds)?s.magicIds:[];
-    return units.length>=3&&units.length<=5&&magics.length<=10;
-  };
-  if(!validSelection(da)||!validSelection(db))return false;
-  r.status='battle';
+ if((da.unitIds||[]).length<3||(db.unitIds||[]).length<3)return false;
+ r.status='battle';
  r.battle={battleId:uid('battle'),turn:1,phase:'decision',deadline:Date.now()+90000,p1:make(a.sessionId,ca,da,'player1'),p2:make(c.sessionId,cb,db,'player2'),winner:null,events:[]};
  passive(r.battle,'battle_start');passive(r.battle,'deploy');broadcastBattle(r,'battle_start');scheduleTurn(r);return true;
 }
 function broadcastBattle(r,type,extra={}){for(const p of r.players.filter(Boolean)){const side=p===r.players[0]?'player1':'player2';send(p.ws,type,{...extra,state:publicBattle(r.battle,side)});}for(const sid of r.spectators){const s=sessions.get(sid);if(s?.ws)send(s.ws,type,{...extra,state:publicBattle(r.battle,'spectator')});}}
 function scheduleTurn(r){if(!r.battle)return;clearTimeout(r.timer);r.battle.deadline=Date.now()+90000;r.battle.phase='decision';r.battle.p1.ap=Math.min(100,r.battle.p1.ap+20);r.battle.p2.ap=Math.min(100,r.battle.p2.ap+20);for(const u of allUnits(r.battle))if(u.currentHp>0)u.reservedAction={type:'attack',targetInstanceId:null};r.battle.p1.actions=null;r.battle.p2.actions=null;broadcastBattle(r,'turn_start');r.timer=setTimeout(()=>{if(!r.battle||r.battle.phase!=='decision')return;for(const side of ['player1','player2']){const pl=battlePlayer(r.battle,side);if(!pl.actions){chooseAuto(r.battle,side);pl.actions={units:pl.units.filter(u=>u.isActive&&u.currentHp>0).map(u=>({unitInstanceId:u.instanceId,...u.reservedAction})),magicId:null,actionId:uid('timeout')};}}try{executeTurn(r);}catch(err){console.error('Battle timeout execution error:',err);r.battle.phase='decision';r.battle.p1.actions=null;r.battle.p2.actions=null;broadcastBattle(r,'battle_error',{message:'自動行動処理でエラーが発生しました。'});scheduleTurn(r);}},90000);}
 function validateActionSet(b,side,actions){const pl=side==='player1'?b.p1:b.p2;const units=activeUnits(b,side);const byId=new Map(units.map(u=>[u.instanceId,u]));const out={units:[],magicId:null,actionId:actions.actionId||uid('action')};for(const a of actions.units||[]){const u=byId.get(a.unitInstanceId);if(!u)continue;if(a.type==='attack'){out.units.push({unitInstanceId:u.instanceId,type:'attack',targetInstanceId:a.targetInstanceId||null});}else if(a.type==='skill'){const sk=u.skills[a.skillIndex];if(!sk||sk.type!=='active')continue;if(pl.ap<Number(sk.cost||0))continue;out.units.push({unitInstanceId:u.instanceId,type:'skill',skillIndex:a.skillIndex,targetInstanceId:a.targetInstanceId||null});}}if(actions.magicId && pl.magicIds.includes(actions.magicId)) out.magicId=actions.magicId;return out;}
-function executeTurn(r){const b=r.battle;if(!b||b.phase!=='decision')return;clearTimeout(r.timer);b.phase='execution';const pending=new Map();for(const side of ['player1','player2']){const pl=battlePlayer(b,side);const actions=pl.actions||{units:[],magicId:null};for(const a of actions.units||[]){const u=pl.units.find(x=>x.instanceId===a.unitInstanceId);if(u)pending.set(u.instanceId,{side,u,a});}if(actions.magicId){const card=(r.profiles[pl.sessionId]?.cards||[]).find(c=>c.id===actions.magicId);if(card)pending.set('magic_'+side,{side,magic:card,a:{type:'magic'}});}}
+function executeTurn(r){const b=r.battle;if(!b||b.phase!=='decision')return;clearTimeout(r.timer);b.phase='execution';const pending=new Map();for(const side of ['player1','player2']){const pl=battlePlayer(b,side);const actions=pl.actions||{units:[],magicId:null};for(const a of actions.units||[]){const u=pl.units.find(x=>x.instanceId===a.unitInstanceId);if(u)pending.set(u.instanceId,{side,u,a});}if(actions.magicId){const card=pl.magicCards?.[actions.magicId] || (r.profiles[pl.sessionId]?.cards||[]).find(c=>c.id===actions.magicId);if(card)pending.set('magic_'+side,{side,magic:card,a:{type:'magic'}});}}
  while(pending.size&&!b.winner){const arr=[...pending.values()].filter(x=>x.magic|| (x.u&&x.u.currentHp>0&&x.u.isActive));if(!arr.length)break;arr.sort((x,y)=>(x.magic?(x.magic.stats?.priority??999):effSpeed(x.u))-(y.magic?(y.magic.stats?.priority??999):effSpeed(y.u))||crypto.randomInt(2)-0.5);const x=arr[0];const key=x.u?x.u.instanceId:'magic_'+x.side;pending.delete(key);const ev=x.magic?executeMagic(b,x.side,x.magic):executeAction(b,x.side,x.u,x.a);if(ev){b.events.push(ev);broadcastBattle(r,'battle_event',{event:ev});}checkWin(r);}
  passive(b,'turn_end');tickStatuses(b);replaceDead(b);checkWin(r);if(!b.winner){b.turn++;scheduleTurn(r);}else{r.status='finished';broadcastBattle(r,'battle_end',{winner:b.winner});}}
 function replaceDead(b){for(const side of ['player1','player2']){const pl=battlePlayer(b,side);for(const u of pl.units.filter(x=>x.isActive&&x.currentHp<=0)){u.isActive=false;const id=pl.reserveQueue.shift();if(id){const n=pl.units.find(x=>x.cardId===id&&!x.isActive&&x.currentHp>0);if(n){n.isActive=true;passiveOne(b,'deploy',n);}}}}}
@@ -116,7 +110,7 @@ server.on('upgrade',(req,socket)=>{const key=req.headers['sec-websocket-key'];if
      const pi=rr.players.findIndex(p=>p?.sessionId===sid);
      if(pi>=0){
        rr.players[pi].ws=ws;rr.players[pi].online=true;rr.players[pi].lastSeen=Date.now();
-       send(ws,'room_recovered',{room:publicRoom(rr),slot:pi,ready:!!rr.players[pi].ready,players:rr.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});
+       send(ws,'room_recovered',{room:publicRoom(rr),slot:pi,ready:!!rr.players[pi].ready,players:rr.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online,deckName:rr.deckSelections[p.sessionId]?.name||null}:null)});
        if(rr.battle){send(ws,'battle_state',{state:publicBattle(rr.battle,pi===0?'player1':'player2')});resumeBattleAfterReconnect(rr);}
      } else if(rr.spectators.has(sid)) {
        send(ws,'spectate_recovered',{room:publicRoom(rr)});
@@ -127,41 +121,82 @@ server.on('upgrade',(req,socket)=>{const key=req.headers['sec-websocket-key'];if
  }
  if(!sid)return;const s=sessions.get(sid);s.ws=ws;s.lastSeen=Date.now();
  if(type==='room_list'){send(ws,'room_list',{rooms:[...rooms.values()].filter(r=>r.status!=='closed').map(publicRoom)});return;}
- if(type==='room_create'){const r=createRoom(s,{roomName:m.roomName,password:m.password,rule:m.rule,allowSpectators:m.allowSpectators,maxSpectators:m.maxSpectators});send(ws,'room_joined',{room:publicRoom(r),slot:0,rentalDecks:r.rule==='rental'&&r.profiles[s.sessionId]?r.profiles[s.sessionId].decks:[]});broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});return;}
- if(type==='room_join'){const r=rooms.get(m.roomId);if(!r)return send(ws,'error',{message:'部屋がありません。'});const res=joinPlayer(r,sid,ws,m.password);if(!res.ok)return send(ws,'error',{message:res.error});copySessionProfileToRoom(r,s);send(ws,'room_joined',{room:publicRoom(r),slot:res.index,rentalDecks:r.rule==='rental'&&r.profiles[r.ownerId]?r.profiles[r.ownerId].decks:[]});broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});return;}
+ if(type==='room_create'){
+   const profileMsg=m.profile;
+   if(profileMsg){s.profile={name:s.name,cards:uniqueById((profileMsg.cards||[]).map(x=>sanitizeCard(x,true))),decks:(profileMsg.decks||[]).map(sanitizeDeck)};}
+   const r=createRoom(s,{roomName:m.roomName,password:m.password,rule:m.rule,allowSpectators:m.allowSpectators,maxSpectators:m.maxSpectators});
+   send(ws,'room_joined',{room:publicRoom(r),slot:0,myDecks:s.profile?.decks||[],rentalDecks:r.rule==='rental'&&r.profiles[r.ownerId]?r.profiles[r.ownerId].decks:[]});
+   broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});return;
+ }
+ if(type==='room_join'){
+   const r=rooms.get(m.roomId);if(!r)return send(ws,'error',{message:'部屋がありません。'});
+   const profileMsg=m.profile;
+   if(profileMsg){s.profile={name:s.name,cards:uniqueById((profileMsg.cards||[]).map(x=>sanitizeCard(x,true))),decks:(profileMsg.decks||[]).map(sanitizeDeck)};}
+   const res=joinPlayer(r,sid,ws,m.password);if(!res.ok)return send(ws,'error',{message:res.error});copySessionProfileToRoom(r,s);
+   send(ws,'room_joined',{room:publicRoom(r),slot:res.index,myDecks:s.profile?.decks||[],rentalDecks:r.rule==='rental'&&r.profiles[r.ownerId]?r.profiles[r.ownerId].decks:[]});
+   broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});return;
+ }
  const r=roomBySession(sid);
  if(type==='room_leave'){leaveRoom(sid);send(ws,'left_room');return;}
  if(type==='spectate_join'){const r2=rooms.get(m.roomId);if(!r2||!r2.allowSpectators)return send(ws,'error',{message:'観戦できません。'});if(r2.spectators.size>=r2.maxSpectators)return send(ws,'error',{message:'観戦人数が上限です。'});if(r2.passwordHash&&hashPassword(m.password)!==r2.passwordHash)return send(ws,'error',{message:'パスワードが違います。'});r2.spectators.add(sid);s.roomId=r2.roomId;send(ws,'spectate_joined',{room:publicRoom(r2)});if(r2.battle)send(ws,'battle_state',{state:publicBattle(r2.battle,'spectator')});return;}
  if(!r)return;
- if(type==='profile_sync'){const profile={name:s.name,cards:uniqueById((m.cards||[]).map(x=>sanitizeCard(x,true))),decks:(m.decks||[]).map(sanitizeDeck)};s.profile=profile;if(r){r.profiles[sid]=JSON.parse(JSON.stringify(profile));if(r.rule==='rental'&&r.ownerId===sid)broadcastRoom(r,'rental_decks',{decks:r.profiles[sid].decks});if(r.players.every(Boolean)&&r.players.every(x=>x.ready)&&r.selected[r.players[0].sessionId]&&r.selected[r.players[1].sessionId]&&r.rule!=='super_rental'&&r.rule!=='random_pot'){const ok=startBattle(r);if(ok)return;}}return;}
+ if(type==='profile_sync'){
+   const profile={name:s.name,cards:uniqueById((m.cards||[]).map(x=>sanitizeCard(x,true))),decks:(m.decks||[]).map(sanitizeDeck)};s.profile=profile;r.profiles[sid]=JSON.parse(JSON.stringify(profile));
+   if(r.rule==='rental'&&r.ownerId===sid)broadcastRoom(r,'rental_decks',{decks:r.profiles[sid].decks});
+   return;
+ }
+ if(type==='deck_select'){
+   const p=r.players.find(x=>x?.sessionId===sid);if(!p)return;
+   const requested=String(m.deckId||'');
+   let deck=null;
+   if(r.rule==='rental') deck=(r.profiles[r.ownerId]?.decks||[]).find(d=>d?.id===requested)||null;
+   else deck=(s.profile?.decks||r.profiles[sid]?.decks||[]).find(d=>d?.id===requested)||null;
+   if(!deck)return send(ws,'error',{message:'そのデッキはオンライン対戦で使用できません。'});
+   r.deckSelections[sid]=sanitizeDeck(deck);r.selected[sid]={deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};
+   p.ready=false;r.status='waiting';r.pools={};
+   for(const q of r.players.filter(Boolean)){q.ready=false;}
+   r.updatedAt=Date.now();
+   broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online,deckName:r.deckSelections[p.sessionId]?.name||null}:null)});
+   if(r.rule==='rental'&&r.ownerId===sid)broadcastRoom(r,'rental_decks',{decks:r.profiles[r.ownerId]?.decks||[]});
+   return;
+ }
  if(type==='room_ready'){
-    const p=r.players.find(x=>x?.sessionId===sid);if(!p)return;
-    copySessionProfileToRoom(r,s);
-    p.ready=!!m.ready;
-    r.updatedAt=Date.now();
-    if(p.ready && m.selection) r.selected[sid]=m.selection;
-    if(!p.ready) delete r.selected[sid];
-    if(r.players.every(Boolean)&&r.players.every(x=>x.ready)) r.status='preparing';
-    else if(r.status==='preparing') r.status='waiting';
-    broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});
-    return;
+   const p=r.players.find(x=>x?.sessionId===sid);if(!p)return;
+   copySessionProfileToRoom(r,s);
+   if(m.ready && !r.selected[sid])return send(ws,'error',{message:'先に使用するデッキを選択してください。'});
+   p.ready=!!m.ready;r.updatedAt=Date.now();
+   if(r.players.every(Boolean)&&r.players.every(x=>x.ready)){
+     r.status='preparing';
+     if(r.rule==='super_rental'||r.rule==='random_pot'){
+       const a=r.players[0],b=r.players[1];
+       if(!r.pools[a.sessionId]||!r.pools[b.sessionId]){
+         const da=r.deckSelections[a.sessionId],db=r.deckSelections[b.sessionId];
+         const pa=r.profiles[a.sessionId],pb=r.profiles[b.sessionId];
+         if(!da||!db||!pa||!pb)return broadcastRoom(r,'error',{message:'両者のデッキ同期を待っています。'});
+         const deckCards=(profile,deck)=>{const ids=new Set([...(deck.unitIds||[]),...(deck.magicIds||[])]);return (profile.cards||[]).filter(c=>ids.has(c.id));};
+         let source=r.rule==='super_rental'?deckCards(pa,da):uniqueById([...deckCards(pa,da),...deckCards(pb,db)]);
+         const chars=source.filter(x=>x.cardType==='unit'),mags=source.filter(x=>x.cardType==='magic');
+         if(chars.length<3)return broadcastRoom(r,'error',{message:'抽選に必要なキャラクターカードが3枚未満です。'});
+         r.pools[a.sessionId]={units:sample(chars,Math.min(10,chars.length)),magics:sample(mags,Math.min(20,mags.length))};
+         r.pools[b.sessionId]={units:sample(chars,Math.min(10,chars.length)),magics:sample(mags,Math.min(20,mags.length))};
+         for(const q of r.players)send(q.ws,'pool_ready',{units:r.pools[q.sessionId].units.map(x=>sanitizeCard(x,true)),magics:r.pools[q.sessionId].magics.map(x=>sanitizeCard(x,true))});
+       }
+     } else {
+       const ok=startBattle(r);if(!ok)broadcastRoom(r,'error',{message:'対戦開始に必要なデッキ情報が不足しています。'});
+     }
+   } else if(r.status==='preparing')r.status='waiting';
+   broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online,deckName:r.deckSelections[p.sessionId]?.name||null}:null)});
+   return;
  }
  if(type==='battle_select'){
    if(!r.players.some(p=>p?.sessionId===sid))return;
-   if(s.profile) r.profiles[sid]=JSON.parse(JSON.stringify(s.profile));
-   r.selected[sid]=m.selection||{};r.updatedAt=Date.now();
-   if(r.players.every(Boolean)&&r.players.every(p=>p.ready)&&r.selected[r.players[0].sessionId]&&r.selected[r.players[1].sessionId]){
-     if((r.rule==='super_rental'||r.rule==='random_pot')&&!r.pools[r.players[0].sessionId]){
-       const a=r.profiles[r.players[0].sessionId],b=r.profiles[r.players[1].sessionId];
-       if(!a||!b)return broadcastRoom(r,'error',{message:'カード情報の同期を待っています。もう一度準備完了を押してください。'});
-       let source=r.rule==='super_rental'?a.cards:uniqueById([...a.cards,...b.cards]);
-       const chars=source.filter(x=>x.cardType==='unit'),mags=source.filter(x=>x.cardType==='magic');
-        if(chars.length<3)return broadcastRoom(r,'error',{message:'超レンタル／闇鍋はキャラクターカードが3枚以上必要です。マジックカードは0～10枚でも開始できます。'});
-        for(const p of r.players){r.pools[p.sessionId]={units:sample(chars,Math.min(10,chars.length)),magics:sample(mags,Math.min(20,mags.length))};send(p.ws,'pool_ready',{units:r.pools[p.sessionId].units.map(x=>sanitizeCard(x,true)),magics:r.pools[p.sessionId].magics.map(x=>sanitizeCard(x,true))});}
-       return;
-     }
-     const ok=startBattle(r);
-     if(!ok)broadcastRoom(r,'error',{message:'対戦開始に必要なデッキ情報が不足しています。デッキを確認して、準備完了を押し直してください。'});
+   if(s.profile)r.profiles[sid]=JSON.parse(JSON.stringify(s.profile));
+   const sel=m.selection||{};
+   if((r.rule==='super_rental'||r.rule==='random_pot') && (!r.pools[sid]))return send(ws,'error',{message:'カード候補の抽選がまだ完了していません。'});
+   if((sel.unitIds||[]).length<3 || (sel.unitIds||[]).length>5 || (sel.magicIds||[]).length>10)return send(ws,'error',{message:'キャラクターは3～5枚、マジックは0～10枚で選択してください。'});
+   r.selected[sid]={...r.selected[sid],...sel};r.updatedAt=Date.now();
+   if(r.players.every(Boolean)&&r.players.every(p=>p.ready)&&r.selected[r.players[0].sessionId]?.unitIds?.length>=3&&r.selected[r.players[1].sessionId]?.unitIds?.length>=3){
+     const ok=startBattle(r);if(!ok)broadcastRoom(r,'error',{message:'対戦開始に必要なデッキ情報が不足しています。'});
    }
    return;
  }

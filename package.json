@@ -1,1 +1,8 @@
-{"name":"card-ai-online","version":"1.0.0","private":true,"scripts":{"start":"node server/server.js"}}
+{
+  "name": "card-ai-battle-online",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  }
+}

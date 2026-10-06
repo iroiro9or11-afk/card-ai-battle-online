@@ -2,5 +2,7 @@ services:
   - type: web
     name: card-ai-battle-online
     runtime: node
-    buildCommand: npm install
+    plan: free
+    buildCommand: npm install --omit=dev
     startCommand: node server.js
+    healthCheckPath: /health
