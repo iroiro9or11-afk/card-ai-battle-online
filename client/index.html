@@ -3106,7 +3106,7 @@
   const waitForAppReady = async () => { for(let i=0;i<200 && !window.__cardBattleAppReady;i++) await new Promise(r=>setTimeout(r,50)); };
   let onlineWS=null, onlineSessionId=localStorage.getItem('cardBattleOnlineSession')||null;
   let onlineRoom=null, onlineSlot=null, onlineReady=false, onlineSpectating=false, onlinePool=null, onlineSelection=null;
-  let onlineMode=false, onlinePending={units:{},magicId:null}, onlineSelectedUnitId=null, onlineTimerHandle=null, onlineDeadline=0, onlineSubmitted=false, onlineLastTurn=0, onlineLastState=null;
+  var onlineMode=false, onlinePending={units:{},magicId:null}, onlineSelectedUnitId=null, onlineTimerHandle=null, onlineDeadline=0, onlineSubmitted=false, onlineLastTurn=0, onlineLastState=null;
   const $=id=>document.getElementById(id);
   const ruleName={unlimited:'無制限',rental:'レンタル',super_rental:'超レンタル',random_pot:'闇鍋'};
   function serverUrl(){return (location.protocol==='https:'?'wss://':'ws://')+location.host;}
