@@ -619,8 +619,6 @@
     let currentDetailCardId = null;
     let deploymentSelection = { player: { active: [], reserve: [] }, enemy: { active: [], reserve: [] } };
 
-    let longPressTimer = null;
-    let isLongPressTriggered = false;
 
     // 戦闘状態管理
     let battleState = {
@@ -671,49 +669,184 @@
       }
     }
 
-    // スマホでカード画像を長押しした際のOS/ブラウザ画像メニューを抑止。
-    const longPressStyle = document.createElement("style");
-    longPressStyle.textContent = `[data-card-id], [data-card-id] img { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; -webkit-user-drag: none !important; touch-action: manipulation; }`;
-    document.head.appendChild(longPressStyle);
+    // カードのタップ・長押し共通処理。
+    // 既存の pointer 系だけに依存せず、touchstart/touchend も明示的に処理する。
+    const cardLongPressStyle = document.createElement("style");
+    cardLongPressStyle.textContent = `
+      .card-element[data-card-id],
+      .card-element[data-card-id] img {
+        -webkit-touch-callout: none !important;
+        -webkit-user-select: none !important;
+        user-select: none !important;
+        -webkit-user-drag: none !important;
+        touch-action: manipulation !important;
+      }
+    `;
+    document.head.appendChild(cardLongPressStyle);
 
-    // 長押しグローバルリスナー
+    let cardTouchTimer = null;
+    let cardTouchActive = false;
+    let cardTouchTriggered = false;
+    let cardTouchId = null;
+    let cardTouchStartX = 0;
+    let cardTouchStartY = 0;
+    let suppressCardClickUntil = 0;
+
+    function getAnyCardElement(target) {
+      return target instanceof Element ? target.closest('[data-card-id]') : null;
+    }
+
+    function getDetailCardElement(target) {
+      return target instanceof Element ? target.closest('.card-element[data-card-id]') : null;
+    }
+
+    function clearCardTouchTimer() {
+      if (cardTouchTimer !== null) {
+        clearTimeout(cardTouchTimer);
+        cardTouchTimer = null;
+      }
+    }
+
+    function resetCardTouchState() {
+      clearCardTouchTimer();
+      cardTouchActive = false;
+      cardTouchTriggered = false;
+      cardTouchId = null;
+      cardTouchStartX = 0;
+      cardTouchStartY = 0;
+    }
+
+    function startCardLongPress(cardId, x, y) {
+      resetCardTouchState();
+      cardTouchActive = true;
+      cardTouchId = String(cardId);
+      cardTouchStartX = Number(x) || 0;
+      cardTouchStartY = Number(y) || 0;
+      cardTouchTriggered = false;
+      cardTouchTimer = setTimeout(() => {
+        if (!cardTouchActive || !cardTouchId) return;
+        cardTouchTriggered = true;
+        suppressCardClickUntil = Date.now() + 800;
+        openCardDetail(cardTouchId);
+      }, 450);
+    }
+
+    function moveCardLongPress(x, y) {
+      if (!cardTouchActive) return;
+      const dx = (Number(x) || 0) - cardTouchStartX;
+      const dy = (Number(y) || 0) - cardTouchStartY;
+      if ((dx * dx) + (dy * dy) > 12 * 12) resetCardTouchState();
+    }
+
+    function finishCardTouch(e) {
+      if (!cardTouchActive) return;
+      const wasLongPress = cardTouchTriggered;
+      const cardId = cardTouchId;
+      clearCardTouchTimer();
+      if (wasLongPress) {
+        suppressCardClickUntil = Date.now() + 800;
+        if (e?.cancelable) e.preventDefault();
+        if (e?.stopPropagation) e.stopPropagation();
+      } else if (cardId) {
+        suppressCardClickUntil = Date.now() + 800;
+        if (e?.cancelable) e.preventDefault();
+        openCardDetail(cardId);
+      }
+      resetCardTouchState();
+    }
+
+    // タッチ端末：通常タップはtouchend、長押しは450msで即時表示。
     function initLongPressGlobalListener() {
-      document.addEventListener("pointerdown", (e) => {
-        const cardEl = e.target.closest("[data-card-id]");
-        if (!cardEl) return;
-        const cardId = cardEl.getAttribute("data-card-id");
-        if (!cardId) return;
+      document.addEventListener("touchstart", (e) => {
+        const cardEl = getAnyCardElement(e.target);
+        if (!cardEl || !e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        startCardLongPress(cardEl.getAttribute("data-card-id"), t.clientX, t.clientY);
+      }, { capture: true, passive: true });
 
-        isLongPressTriggered = false;
-        longPressTimer = setTimeout(() => {
-          isLongPressTriggered = true;
+      document.addEventListener("touchmove", (e) => {
+        if (!cardTouchActive || !e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        moveCardLongPress(t.clientX, t.clientY);
+      }, { capture: true, passive: true });
+
+      document.addEventListener("touchend", (e) => {
+        if (!cardTouchActive) return;
+        const cardId = cardTouchId;
+        const wasLongPress = cardTouchTriggered;
+        const detailCard = getDetailCardElement(e.target);
+        clearCardTouchTimer();
+        if (wasLongPress) {
+          suppressCardClickUntil = Date.now() + 800;
+          if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
+        } else if (cardId && detailCard) {
+          // 通常のカードタップもここで確実に詳細を開く。
+          suppressCardClickUntil = Date.now() + 800;
+          if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
           openCardDetail(cardId);
-        }, 500);
-      });
-
-      const cancelTimer = () => {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
         }
-      };
+        resetCardTouchState();
+      }, { capture: true, passive: false });
 
-      document.addEventListener("pointerup", cancelTimer);
-      document.addEventListener("pointercancel", cancelTimer);
-      document.addEventListener("pointermove", (e) => {
-        if (Math.abs(Number(e.movementX)||0) > 5 || Math.abs(Number(e.movementY)||0) > 5) cancelTimer();
-      });
+      document.addEventListener("touchcancel", () => {
+        resetCardTouchState();
+      }, { capture: true, passive: true });
 
-      document.addEventListener("contextmenu", (e) => {
-        if (e.target.closest("[data-card-id]")) e.preventDefault();
+      // ペン入力も同じ長押し判定を使う。マウスは通常clickに任せる。
+      document.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "pen") return;
+        const cardEl = getDetailCardElement(e.target);
+        if (!cardEl) return;
+        startCardLongPress(cardEl.getAttribute("data-card-id"), e.clientX, e.clientY);
       }, true);
 
+      document.addEventListener("pointermove", (e) => {
+        if (e.pointerType !== "pen") return;
+        moveCardLongPress(e.clientX, e.clientY);
+      }, true);
+
+      document.addEventListener("pointerup", (e) => {
+        if (e.pointerType !== "pen" || !cardTouchActive) return;
+        const cardId = cardTouchId;
+        const wasLongPress = cardTouchTriggered;
+        const detailCard = getDetailCardElement(e.target);
+        clearCardTouchTimer();
+        if (wasLongPress) {
+          suppressCardClickUntil = Date.now() + 800;
+          if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
+        } else if (cardId && detailCard) {
+          suppressCardClickUntil = Date.now() + 800;
+          if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
+          openCardDetail(cardId);
+        }
+        resetCardTouchState();
+      }, true);
+
+      document.addEventListener("pointercancel", (e) => {
+        if (e.pointerType === "pen") resetCardTouchState();
+      }, true);
+
+      // 長押し後にブラウザが生成するclickを抑止。通常のPCクリックはここで詳細を開く。
       document.addEventListener("click", (e) => {
-        if (isLongPressTriggered) {
+        const cardEl = getDetailCardElement(e.target);
+        if (!cardEl) return;
+        if (Date.now() < suppressCardClickUntil) {
           e.preventDefault();
           e.stopPropagation();
-          isLongPressTriggered = false;
+          return;
         }
+        e.preventDefault();
+        e.stopPropagation();
+        openCardDetail(cardEl.getAttribute("data-card-id"));
+      }, true);
+
+      // スマホ長押し時の画像保存/コンテキストメニューを抑止。
+      document.addEventListener("contextmenu", (e) => {
+        if (getAnyCardElement(e.target)) e.preventDefault();
       }, true);
     }
 
@@ -1541,20 +1674,7 @@
         const wrap = document.createElement("div");
         wrap.innerHTML = getCardHTML({ id: card.id, cardType: card.cardType, name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: card.stats?.hp || 0, atk: card.stats?.atk || 0, prio: card.stats?.priority ?? 999, img: getCardImage(card), desc: card.desc });
         const cardEl = wrap.querySelector(`[data-card-id="${card.id}"]`);
-        if (cardEl) {
-          let touchTapAt = 0;
-          cardEl.addEventListener("pointerup", (e) => {
-            if (e.pointerType === "touch" || e.pointerType === "pen") {
-              touchTapAt = Date.now();
-              if (!isLongPressTriggered) openCardDetail(card.id);
-            }
-          });
-          cardEl.addEventListener("click", (e) => {
-            if (Date.now() - touchTapAt < 700) { e.preventDefault(); return; }
-            if (isLongPressTriggered) { isLongPressTriggered = false; e.preventDefault(); return; }
-            openCardDetail(card.id);
-          });
-        }
+        // カードのタップ・長押しはinitLongPressGlobalListener()の委譲処理で統一。
         list.appendChild(wrap);
       });
     }
@@ -1733,9 +1853,7 @@
             <button onclick="deleteDeck('${deck.id}')" class="px-3 py-1 bg-rose-900 hover:bg-rose-800 text-rose-200 font-bold rounded text-xs">削除</button>
           </div>
         `;
-        item.querySelectorAll("[data-card-id]").forEach(cardEl => {
-          cardEl.addEventListener("click", () => openCardDetail(cardEl.getAttribute("data-card-id")));
-        });
+        // カードのタップ・長押しはグローバル委譲処理で統一。
         container.appendChild(item);
       });
     }
