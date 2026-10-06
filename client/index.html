@@ -522,7 +522,7 @@
           <div id="detail-card-body" class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs sm:text-sm space-y-3"></div>
         </div>
         <div class="pt-2 border-t border-slate-800 flex justify-between items-center">
-          <div class="flex gap-2"><button id="btn-edit-card" onclick="" class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-cyan-100 rounded font-bold text-xs">✏️ カード編集</button><button id="btn-delete-card" onclick="" class="px-4 py-2 bg-rose-900 hover:bg-rose-800 text-rose-200 rounded font-bold text-xs">🗑 カード削除</button></div>
+          <div class="flex gap-2"><button id="btn-edit-card" onclick="" class="hidden px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-cyan-100 rounded font-bold text-xs">✏️ カード編集</button><button id="btn-delete-card" onclick="" class="hidden px-4 py-2 bg-rose-900 hover:bg-rose-800 text-rose-200 rounded font-bold text-xs">🗑 カード削除</button></div>
           <button onclick="closeCardDetailModal()" class="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded">閉じる</button>
         </div>
       </div>
@@ -1548,7 +1548,10 @@
     }
 
     function openCardDetail(cardId) {
-      document.getElementById("btn-edit-card")?.classList.remove("hidden"); document.getElementById("btn-delete-card")?.classList.remove("hidden");
+      const battleView = document.getElementById("view-battle");
+       const battleLocked = !!(onlineMode || (battleView && !battleView.classList.contains("hidden")));
+       document.getElementById("btn-edit-card")?.classList.toggle("hidden", battleLocked);
+       document.getElementById("btn-delete-card")?.classList.toggle("hidden", battleLocked);
       const card = allCards.find(c => c.id === cardId); if (!card) return;
       currentDetailCardId = card.id;
       document.getElementById("detail-card-title").innerText = card.name;
@@ -3111,15 +3114,40 @@
   function spectateRoom(r){const pw=r.password?prompt('観戦パスワードを入力してください。')||'':'';sendOnline('spectate_join',{roomId:r.roomId,password:pw});}
   function leaveOnlineRoom(){sendOnline('room_leave');onlineRoom=null;onlinePool=null;onlineSelection=null;onlineReady=false;onlineSpectating=false;$('online-room-panel').classList.add('hidden');$('online-pool-area').classList.add('hidden');$('online-lobby').classList.remove('hidden');clearInterval(onlineTimerHandle);if(onlineMode){onlineMode=false;$('online-controls').classList.add('hidden');}}
   window.leaveOnlineRoom=leaveOnlineRoom;
-  function toggleOnlineReady(){if(!onlineRoom)return;onlineReady=!onlineReady;$('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';sendOnline('room_ready',{ready:onlineReady});if(onlineReady){syncProfile();setTimeout(submitSelection,150);}}
+  function toggleOnlineReady(){
+    if(!onlineRoom)return;
+    onlineReady=!onlineReady;
+    $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
+    let selection=null;
+    if(onlineReady && onlineRoom.rule!=='super_rental' && onlineRoom.rule!=='random_pot') selection=buildLocalSelection();
+    if(onlineReady && onlineRoom.rule!=='super_rental' && onlineRoom.rule!=='random_pot' && !selection){
+      onlineReady=false;
+      $('online-ready-btn').innerText='準備完了';
+      return;
+    }
+    if(selection) onlineSelection=selection;
+    syncProfile();
+    sendOnline('room_ready',{ready:onlineReady,selection:selection||onlineSelection||null});
+    if(onlineReady) setTimeout(submitSelection,150);
+  }
   window.toggleOnlineReady=toggleOnlineReady;
   function submitSelection(){if(!onlineRoom)return;if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot'){sendOnline('battle_select',{selection:onlineSelection||{}});return;}const sel=buildLocalSelection();if(!sel){onlineReady=false;$('online-ready-btn').innerText='準備完了';return;}onlineSelection=sel;sendOnline('battle_select',{selection:sel});}
   function buildLocalSelection(){let deck=null;if(onlineRoom.rule==='rental'){deck=onlineRentalDecks.find(d=>d.id===(onlineSelection?.deckId||onlineRentalDecks[0]?.id));if(!deck){showOnlineError('使用するレンタルデッキを選択してください。');return null;}return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};}else{deck=allDecks.find(d=>d.id===$('select-player-deck')?.value)||allDecks[0];}if(!deck)return null;let active=deploymentSelection.player.active.filter(id=>(deck.unitIds||[]).includes(id));if(active.length!==3)active=(deck.unitIds||[]).slice(0,3);let reserve=deploymentSelection.player.reserve.filter(id=>(deck.unitIds||[]).includes(id)&&!active.includes(id));if(!reserve.length)reserve=(deck.unitIds||[]).filter(id=>!active.includes(id)).slice(0,2);return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active,reserve};}
   let onlineRentalDecks=[];
   function renderRentalDecks(decks){onlineRentalDecks=decks||[];const area=$('online-selection-area');area.innerHTML=`<div class="text-xs text-slate-300 font-bold">レンタルデッキ</div><select id="online-rental-deck" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${onlineRentalDecks.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select><div class="text-[10px] text-slate-500">対戦相手は部屋作成者が公開したデッキ一覧から選択します。</div>`;if(onlineRentalDecks.length)onlineSelection={deckId:onlineRentalDecks[0].id};$('online-rental-deck').onchange=e=>{onlineSelection={deckId:e.target.value};};}
   function renderOnlineSelection(){const a=$('online-selection-area');if(onlineRoom.rule==='unlimited'){a.innerHTML='<div class="text-xs text-slate-300">無制限：現在の「対戦準備」で選択中のデッキを使用します。出撃3体・控え順もその設定を使用します。</div>';return;}if(onlineRoom.rule==='rental'){if(onlineRentalDecks.length)renderRentalDecks(onlineRentalDecks);else a.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}if(onlinePool){renderPoolBuilder();}else a.innerHTML='<div class="text-xs text-slate-400">両者の準備完了後、サーバーがランダム候補を抽選します。</div>';}
-  function renderPoolBuilder(){const p=onlinePool;let selectedUnits=onlineSelection?.unitIds||[],selectedMagic=onlineSelection?.magicIds||[];const card=(c,sel,kind)=>`<button onclick="toggleOnlinePoolCard('${kind}','${c.id}')" class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;$('online-pool-area').classList.remove('hidden');$('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラ3枚・マジック10枚を選択してください。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/3</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(c.id),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(c.id),'magic')).join('')}</div>`;}
-  window.toggleOnlinePoolCard=function(kind,id){onlineSelection=onlineSelection||{unitIds:[],magicIds:[]};const key=kind==='unit'?'unitIds':'magicIds',max=kind==='unit'?3:10;onlineSelection[key]=onlineSelection[key]||[];if(onlineSelection[key].includes(id))onlineSelection[key]=onlineSelection[key].filter(x=>x!==id);else if(onlineSelection[key].length<max)onlineSelection[key].push(id);renderPoolBuilder();if(onlineSelection.unitIds.length===3&&onlineSelection.magicIds.length===10)sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:[]}});};
+  function renderPoolBuilder(){const p=onlinePool;let selectedUnits=onlineSelection?.unitIds||[],selectedMagic=onlineSelection?.magicIds||[];const card=(c,sel,kind)=>`<button onclick="toggleOnlinePoolCard('${kind}','${c.id}')" class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;$('online-pool-area').classList.remove('hidden');$('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラ3枚以上・マジック0～10枚を選択してください。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/5（3～5）</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(c.id),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(c.id),'magic')).join('')}</div>`;}
+  window.toggleOnlinePoolCard=function(kind,id){
+    onlineSelection=onlineSelection||{unitIds:[],magicIds:[]};
+    const key=kind==='unit'?'unitIds':'magicIds',max=kind==='unit'?5:10;
+    onlineSelection[key]=onlineSelection[key]||[];
+    if(onlineSelection[key].includes(id)) onlineSelection[key]=onlineSelection[key].filter(x=>x!==id);
+    else if(onlineSelection[key].length<max) onlineSelection[key].push(id);
+    renderPoolBuilder();
+    if(onlineSelection.unitIds.length>=3){
+      sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:onlineSelection.unitIds.slice(3,5)}});
+    }
+  };
   function applyOnlineState(st){
     if(!st)return;
     onlineMode=true;
