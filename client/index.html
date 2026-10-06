@@ -681,7 +681,6 @@
       document.addEventListener("pointerdown", (e) => {
         const cardEl = e.target.closest("[data-card-id]");
         if (!cardEl) return;
-        if (e.pointerType === "touch") e.preventDefault();
         const cardId = cardEl.getAttribute("data-card-id");
         if (!cardId) return;
 
@@ -1541,10 +1540,20 @@
       allCards.filter(c => (c.cardType || "unit") === activeDeckFilter).forEach(card => {
         const wrap = document.createElement("div");
         wrap.innerHTML = getCardHTML({ id: card.id, cardType: card.cardType, name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: card.stats?.hp || 0, atk: card.stats?.atk || 0, prio: card.stats?.priority ?? 999, img: getCardImage(card), desc: card.desc });
-        const cardEl = wrap.querySelector(`[data-card-id="${card.id}"]`);
-        if (cardEl) cardEl.addEventListener("click", () => openCardDetail(card.id));
         list.appendChild(wrap);
       });
+    }
+
+    // 詳細表示のクリック経路をグローバルにも用意。タップ/クリックで確実に開く。
+    if (!window.__cardDetailClickBound) {
+      window.__cardDetailClickBound = true;
+      document.addEventListener("click", (e) => {
+        if (isLongPressTriggered) return;
+        const cardEl = e.target.closest("[data-card-id]");
+        if (!cardEl || e.target.closest("#card-detail-modal")) return;
+        const cardId = cardEl.getAttribute("data-card-id");
+        if (cardId && allCards.some(c => c.id === cardId)) openCardDetail(cardId);
+      }, true);
     }
 
     function openCardDetail(cardId) {
@@ -1568,17 +1577,19 @@
         statsWrap.classList.add("hidden");
         bodyWrap.innerHTML = `<div class="text-sm text-purple-100 space-y-2"><div><b>消費AP:</b> ${card.effect?.cost || 0}</div><div><b>行動値:</b> ${prioDisplay}</div><div class="pt-3 border-t border-slate-800 text-base leading-relaxed">${card.desc || ''}</div></div>`;
       } else {
-        imgWrap.innerHTML = getCardHTML({ id: card.id, cardType: "unit", name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: card.stats.hp, atk: card.stats.atk, prio: card.stats.priority, img: getCardImage(card) });
+        const stats = card.stats || {};
+        imgWrap.innerHTML = getCardHTML({ id: card.id, cardType: "unit", name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: stats.hp ?? 0, atk: stats.atk ?? 0, prio: stats.priority ?? 999, img: getCardImage(card) });
         statsWrap.classList.remove("hidden");
-        document.getElementById("detail-hp").innerText = card.stats.hp;
-        document.getElementById("detail-atk").innerText = card.stats.atk;
-        document.getElementById("detail-prio").innerText = card.stats.priority;
+        document.getElementById("detail-hp").innerText = stats.hp ?? 0;
+        document.getElementById("detail-atk").innerText = stats.atk ?? 0;
+        document.getElementById("detail-prio").innerText = stats.priority ?? 999;
         let html = '<b class="text-amber-300 text-base">スキル一覧</b>';
         (card.skills || []).forEach(s => { html += `<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm text-slate-100 mt-2"><div class="font-black text-amber-200">[${s.type.toUpperCase()}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc || ''}</div></div>`; });
         bodyWrap.innerHTML = html;
       }
       const editBtn = document.getElementById("btn-edit-card");
       // 編集対象IDを詳細画面側に保持し、動的DOMや画面切替の影響を受けないようにする。
+      if (!editBtn) { console.error("btn-edit-card not found"); return; }
       editBtn.onclick = null;
       editBtn.addEventListener("click", function handleCardEditClick(e) {
         e.preventDefault();
@@ -3090,28 +3101,41 @@
 <script>
 (function(){
   const waitForAppReady = async () => { for(let i=0;i<200 && !window.__cardBattleAppReady;i++) await new Promise(r=>setTimeout(r,50)); };
-  let onlineWS=null, onlineSessionId=localStorage.getItem('cardBattleOnlineSession')||null;
+  let onlineWS=null, onlineSessionId=localStorage.getItem('cardBattleOnlineSession')||('sess_'+Date.now()+'_'+Math.random().toString(36).slice(2));
+  localStorage.setItem('cardBattleOnlineSession',onlineSessionId);
   let onlineRoom=null, onlineSlot=null, onlineReady=false, onlineSpectating=false, onlinePool=null, onlineSelection=null;
   let onlineMode=false, onlinePending={units:{},magicId:null}, onlineSelectedUnitId=null, onlineTimerHandle=null, onlineDeadline=0, onlineSubmitted=false, onlineLastTurn=0, onlineLastState=null;
   const $=id=>document.getElementById(id);
   const ruleName={unlimited:'無制限',rental:'レンタル',super_rental:'超レンタル',random_pot:'闇鍋'};
   function serverUrl(){return (location.protocol==='https:'?'wss://':'ws://')+location.host;}
-  function sendOnline(type,payload={}){if(onlineWS&&onlineWS.readyState===1)onlineWS.send(JSON.stringify({type,...payload}));}
+  let onlineSendQueue=[];
+  function sendOnline(type,payload={}){
+    const msg=JSON.stringify({type,...payload});
+    if(onlineWS&&onlineWS.readyState===1){onlineWS.send(msg);return true;}
+    onlineSendQueue.push(msg);
+    if(!onlineWS||onlineWS.readyState===3||onlineWS.readyState===2) connectOnline();
+    return false;
+  }
+  function flushOnlineQueue(){
+    if(!onlineWS||onlineWS.readyState!==1)return;
+    const q=onlineSendQueue; onlineSendQueue=[];
+    for(const msg of q) onlineWS.send(msg);
+  }
   function stripCard(c){if(!c)return null;const x=JSON.parse(JSON.stringify(c,(k,v)=>{if((k==='image'||k==='img'||k==='imageUrl')&&typeof v!=='string')return undefined;return v;}));if(typeof c.image==='string')x.image=c.image;else if(typeof c.img==='string')x.image=c.img;if(typeof c.imageUrl==='string')x.imageUrl=c.imageUrl;return x;}
   function syncProfile(){sendOnline('profile_sync',{cards:allCards.map(stripCard),decks:allDecks,name:playerName});}
   let onlineReconnectTimer=null,onlineReconnectDelay=1000;
-  function connectOnline(){if(onlineWS&&onlineWS.readyState<=1)return;clearTimeout(onlineReconnectTimer);onlineWS=new WebSocket(serverUrl());onlineWS.onopen=async()=>{onlineReconnectDelay=1000;sendOnline('hello',{sessionId:onlineSessionId,name:playerName});await waitForAppReady();syncProfile();};onlineWS.onclose=()=>{$('online-status').innerText='サーバーから切断されました。再接続を試みています。';if(onlineRoom&&onlineSessionId){clearTimeout(onlineReconnectTimer);onlineReconnectTimer=setTimeout(connectOnline,onlineReconnectDelay);onlineReconnectDelay=Math.min(10000,onlineReconnectDelay*2);}};onlineWS.onerror=()=>{};onlineWS.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch{return;}handleOnlineMessage(m)}}
+  function connectOnline(){if(onlineWS&&onlineWS.readyState<=1)return;clearTimeout(onlineReconnectTimer);onlineWS=new WebSocket(serverUrl());onlineWS.onopen=async()=>{onlineReconnectDelay=1000;sendOnline('hello',{sessionId:onlineSessionId,name:playerName});await waitForAppReady();syncProfile();flushOnlineQueue();};onlineWS.onclose=()=>{$('online-status').innerText='サーバーから切断されました。再接続を試みています。';if(onlineRoom&&onlineSessionId){clearTimeout(onlineReconnectTimer);onlineReconnectTimer=setTimeout(connectOnline,onlineReconnectDelay);onlineReconnectDelay=Math.min(10000,onlineReconnectDelay*2);}};onlineWS.onerror=()=>{};onlineWS.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch{return;}handleOnlineMessage(m)}}
   function showOnlineError(msg){const e=$('online-error');e.innerText=msg;e.classList.remove('hidden');setTimeout(()=>e.classList.add('hidden'),5000);}
   function openOnlineView(){switchView('online');connectOnline();setTimeout(()=>{syncProfile();requestRoomList();},150);}
   window.openOnlineView=openOnlineView;
   function requestRoomList(){connectOnline();sendOnline('room_list');}
   window.requestRoomList=requestRoomList;
   function onlineProfilePayload(){return {name:playerName,cards:allCards.map(stripCard),decks:allDecks};}
-  function createOnlineRoom(){sendOnline('room_create',{roomName:$('online-room-name').value,password:$('online-room-password').value,rule:$('online-room-rule').value,allowSpectators:$('online-allow-spectators').checked,maxSpectators:Number($('online-max-spectators').value)||10,profile:onlineProfilePayload()});}
+  function createOnlineRoom(){connectOnline();sendOnline('room_create',{roomName:$('online-room-name').value,password:$('online-room-password').value,rule:$('online-room-rule').value,allowSpectators:$('online-allow-spectators').checked,maxSpectators:Number($('online-max-spectators').value)||10,profile:onlineProfilePayload()});}
   window.createOnlineRoom=createOnlineRoom;
   function renderRooms(list){$('online-room-list').innerHTML='';if(!list.length){$('online-room-list').innerHTML='<div class="text-xs text-slate-500">募集中の部屋はありません。</div>';return;}for(const r of list){const d=document.createElement('div');d.className='bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center gap-2';d.innerHTML=`<div class="flex-1 min-w-[180px]"><div class="font-bold text-xs text-white">${esc(r.roomName)} ${r.password?'🔒':''}</div><div class="text-[10px] text-slate-400">${esc(r.ownerName)} / ${ruleName[r.rule]} / ${r.players}/2 / 観戦 ${r.spectators}/${r.maxSpectators} / ${r.status==='battle'?'対戦中':'募集中'}</div></div>`;if(r.players<2&&r.status!=='finished'){const b=document.createElement('button');b.className='px-3 py-1.5 bg-cyan-700 rounded text-[10px] font-bold';b.innerText='入室';b.onclick=()=>joinOnlineRoom(r);d.appendChild(b);}if(r.status==='battle'&&r.spectators<r.maxSpectators){const b=document.createElement('button');b.className='px-3 py-1.5 bg-purple-700 rounded text-[10px] font-bold';b.innerText='観戦';b.onclick=()=>spectateRoom(r);d.appendChild(b);} $('online-room-list').appendChild(d);}}
-  function joinOnlineRoom(r){const pw=r.password?prompt('部屋のパスワードを入力してください。')||'':'';sendOnline('room_join',{roomId:r.roomId,password:pw,profile:onlineProfilePayload()});}
-  function spectateRoom(r){const pw=r.password?prompt('観戦パスワードを入力してください。')||'':'';sendOnline('spectate_join',{roomId:r.roomId,password:pw});}
+  function joinOnlineRoom(r){connectOnline();const pw=r.password?prompt('部屋のパスワードを入力してください。')||'':'';sendOnline('room_join',{roomId:r.roomId,password:pw,profile:onlineProfilePayload()});}
+  function spectateRoom(r){connectOnline();const pw=r.password?prompt('観戦パスワードを入力してください。')||'':'';sendOnline('spectate_join',{roomId:r.roomId,password:pw});}
   function leaveOnlineRoom(){sendOnline('room_leave');onlineRoom=null;onlinePool=null;onlineSelection=null;onlineReady=false;onlineSpectating=false;onlineRentalDecks=[];$('online-room-panel').classList.add('hidden');$('online-pool-area').classList.add('hidden');$('online-lobby').classList.remove('hidden');clearInterval(onlineTimerHandle);if(onlineMode){onlineMode=false;$('online-controls').classList.add('hidden');}}
   window.leaveOnlineRoom=leaveOnlineRoom;
   function selectOnlineDeck(deckId){
