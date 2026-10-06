@@ -1548,10 +1548,9 @@
     }
 
     function openCardDetail(cardId) {
-      const battleView = document.getElementById("view-battle");
-       const battleLocked = !!(onlineMode || (battleView && !battleView.classList.contains("hidden")));
-       document.getElementById("btn-edit-card")?.classList.toggle("hidden", battleLocked);
-       document.getElementById("btn-delete-card")?.classList.toggle("hidden", battleLocked);
+      const battleLocked = !!(onlineMode || document.getElementById("online-battle-view")?.classList.contains("hidden") === false);
+      if (!battleLocked) { document.getElementById("btn-edit-card")?.classList.remove("hidden"); document.getElementById("btn-delete-card")?.classList.remove("hidden"); }
+      else { document.getElementById("btn-edit-card")?.classList.add("hidden"); document.getElementById("btn-delete-card")?.classList.add("hidden"); }
       const card = allCards.find(c => c.id === cardId); if (!card) return;
       currentDetailCardId = card.id;
       document.getElementById("detail-card-title").innerText = card.name;
@@ -3107,47 +3106,84 @@
   window.openOnlineView=openOnlineView;
   function requestRoomList(){connectOnline();sendOnline('room_list');}
   window.requestRoomList=requestRoomList;
-  function createOnlineRoom(){sendOnline('room_create',{roomName:$('online-room-name').value,password:$('online-room-password').value,rule:$('online-room-rule').value,allowSpectators:$('online-allow-spectators').checked,maxSpectators:Number($('online-max-spectators').value)||10});}
+  function onlineProfilePayload(){return {name:playerName,cards:allCards.map(stripCard),decks:allDecks};}
+  function createOnlineRoom(){sendOnline('room_create',{roomName:$('online-room-name').value,password:$('online-room-password').value,rule:$('online-room-rule').value,allowSpectators:$('online-allow-spectators').checked,maxSpectators:Number($('online-max-spectators').value)||10,profile:onlineProfilePayload()});}
   window.createOnlineRoom=createOnlineRoom;
   function renderRooms(list){$('online-room-list').innerHTML='';if(!list.length){$('online-room-list').innerHTML='<div class="text-xs text-slate-500">募集中の部屋はありません。</div>';return;}for(const r of list){const d=document.createElement('div');d.className='bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center gap-2';d.innerHTML=`<div class="flex-1 min-w-[180px]"><div class="font-bold text-xs text-white">${esc(r.roomName)} ${r.password?'🔒':''}</div><div class="text-[10px] text-slate-400">${esc(r.ownerName)} / ${ruleName[r.rule]} / ${r.players}/2 / 観戦 ${r.spectators}/${r.maxSpectators} / ${r.status==='battle'?'対戦中':'募集中'}</div></div>`;if(r.players<2&&r.status!=='finished'){const b=document.createElement('button');b.className='px-3 py-1.5 bg-cyan-700 rounded text-[10px] font-bold';b.innerText='入室';b.onclick=()=>joinOnlineRoom(r);d.appendChild(b);}if(r.status==='battle'&&r.spectators<r.maxSpectators){const b=document.createElement('button');b.className='px-3 py-1.5 bg-purple-700 rounded text-[10px] font-bold';b.innerText='観戦';b.onclick=()=>spectateRoom(r);d.appendChild(b);} $('online-room-list').appendChild(d);}}
-  function joinOnlineRoom(r){const pw=r.password?prompt('部屋のパスワードを入力してください。')||'':'';sendOnline('room_join',{roomId:r.roomId,password:pw});}
+  function joinOnlineRoom(r){const pw=r.password?prompt('部屋のパスワードを入力してください。')||'':'';sendOnline('room_join',{roomId:r.roomId,password:pw,profile:onlineProfilePayload()});}
   function spectateRoom(r){const pw=r.password?prompt('観戦パスワードを入力してください。')||'':'';sendOnline('spectate_join',{roomId:r.roomId,password:pw});}
-  function leaveOnlineRoom(){sendOnline('room_leave');onlineRoom=null;onlinePool=null;onlineSelection=null;onlineReady=false;onlineSpectating=false;$('online-room-panel').classList.add('hidden');$('online-pool-area').classList.add('hidden');$('online-lobby').classList.remove('hidden');clearInterval(onlineTimerHandle);if(onlineMode){onlineMode=false;$('online-controls').classList.add('hidden');}}
+  function leaveOnlineRoom(){sendOnline('room_leave');onlineRoom=null;onlinePool=null;onlineSelection=null;onlineReady=false;onlineSpectating=false;onlineRentalDecks=[];$('online-room-panel').classList.add('hidden');$('online-pool-area').classList.add('hidden');$('online-lobby').classList.remove('hidden');clearInterval(onlineTimerHandle);if(onlineMode){onlineMode=false;$('online-controls').classList.add('hidden');}}
   window.leaveOnlineRoom=leaveOnlineRoom;
+  function selectOnlineDeck(deckId){
+    if(!onlineRoom||onlineSpectating)return;
+    onlineSelection={...(onlineSelection||{}),deckId:String(deckId||'')};
+    if(onlineReady){onlineReady=false;$('online-ready-btn').innerText='準備完了';}
+    sendOnline('deck_select',{deckId:String(deckId||'')});
+    renderOnlineSelection();
+  }
+  window.selectOnlineDeck=selectOnlineDeck;
   function toggleOnlineReady(){
-    if(!onlineRoom)return;
-    onlineReady=!onlineReady;
-    $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
-    let selection=null;
-    if(onlineReady && onlineRoom.rule!=='super_rental' && onlineRoom.rule!=='random_pot') selection=buildLocalSelection();
-    if(onlineReady && onlineRoom.rule!=='super_rental' && onlineRoom.rule!=='random_pot' && !selection){
+    if(!onlineRoom||onlineSpectating)return;
+    if(!onlineReady){
+      const deckId=onlineSelection?.deckId;
+      if(!deckId){showOnlineError('先にオンライン対戦で使用するデッキを選択してください。');return;}
+      onlineReady=true;
+      $('online-ready-btn').innerText='準備を解除';
+      sendOnline('deck_select',{deckId});
+      sendOnline('room_ready',{ready:true});
+    }else{
       onlineReady=false;
       $('online-ready-btn').innerText='準備完了';
-      return;
+      sendOnline('room_ready',{ready:false});
     }
-    if(selection) onlineSelection=selection;
-    syncProfile();
-    sendOnline('room_ready',{ready:onlineReady,selection:selection||onlineSelection||null});
-    if(onlineReady) setTimeout(submitSelection,150);
   }
   window.toggleOnlineReady=toggleOnlineReady;
-  function submitSelection(){if(!onlineRoom)return;if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot'){sendOnline('battle_select',{selection:onlineSelection||{}});return;}const sel=buildLocalSelection();if(!sel){onlineReady=false;$('online-ready-btn').innerText='準備完了';return;}onlineSelection=sel;sendOnline('battle_select',{selection:sel});}
-  function buildLocalSelection(){let deck=null;if(onlineRoom.rule==='rental'){deck=onlineRentalDecks.find(d=>d.id===(onlineSelection?.deckId||onlineRentalDecks[0]?.id));if(!deck){showOnlineError('使用するレンタルデッキを選択してください。');return null;}return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};}else{deck=allDecks.find(d=>d.id===$('select-player-deck')?.value)||allDecks[0];}if(!deck)return null;let active=deploymentSelection.player.active.filter(id=>(deck.unitIds||[]).includes(id));if(active.length!==3)active=(deck.unitIds||[]).slice(0,3);let reserve=deploymentSelection.player.reserve.filter(id=>(deck.unitIds||[]).includes(id)&&!active.includes(id));if(!reserve.length)reserve=(deck.unitIds||[]).filter(id=>!active.includes(id)).slice(0,2);return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active,reserve};}
-  let onlineRentalDecks=[];
-  function renderRentalDecks(decks){onlineRentalDecks=decks||[];const area=$('online-selection-area');area.innerHTML=`<div class="text-xs text-slate-300 font-bold">レンタルデッキ</div><select id="online-rental-deck" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${onlineRentalDecks.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select><div class="text-[10px] text-slate-500">対戦相手は部屋作成者が公開したデッキ一覧から選択します。</div>`;if(onlineRentalDecks.length)onlineSelection={deckId:onlineRentalDecks[0].id};$('online-rental-deck').onchange=e=>{onlineSelection={deckId:e.target.value};};}
-  function renderOnlineSelection(){const a=$('online-selection-area');if(onlineRoom.rule==='unlimited'){a.innerHTML='<div class="text-xs text-slate-300">無制限：現在の「対戦準備」で選択中のデッキを使用します。出撃3体・控え順もその設定を使用します。</div>';return;}if(onlineRoom.rule==='rental'){if(onlineRentalDecks.length)renderRentalDecks(onlineRentalDecks);else a.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}if(onlinePool){renderPoolBuilder();}else a.innerHTML='<div class="text-xs text-slate-400">両者の準備完了後、サーバーがランダム候補を抽選します。</div>';}
-  function renderPoolBuilder(){const p=onlinePool;let selectedUnits=onlineSelection?.unitIds||[],selectedMagic=onlineSelection?.magicIds||[];const card=(c,sel,kind)=>`<button onclick="toggleOnlinePoolCard('${kind}','${c.id}')" class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;$('online-pool-area').classList.remove('hidden');$('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラ3枚以上・マジック0～10枚を選択してください。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/5（3～5）</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(c.id),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(c.id),'magic')).join('')}</div>`;}
-  window.toggleOnlinePoolCard=function(kind,id){
-    onlineSelection=onlineSelection||{unitIds:[],magicIds:[]};
-    const key=kind==='unit'?'unitIds':'magicIds',max=kind==='unit'?5:10;
-    onlineSelection[key]=onlineSelection[key]||[];
-    if(onlineSelection[key].includes(id)) onlineSelection[key]=onlineSelection[key].filter(x=>x!==id);
-    else if(onlineSelection[key].length<max) onlineSelection[key].push(id);
-    renderPoolBuilder();
-    if(onlineSelection.unitIds.length>=3){
-      sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:onlineSelection.unitIds.slice(3,5)}});
+  function submitSelection(){
+    if(!onlineRoom||onlineRoom.rule!=='super_rental'&&onlineRoom.rule!=='random_pot')return;
+    if((onlineSelection?.unitIds||[]).length<3){showOnlineError('候補からキャラクターを3枚以上選択してください。');return;}
+    sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:onlineSelection.unitIds.slice(3,5)}});
+  }
+  function buildLocalSelection(){
+    const deckId=onlineSelection?.deckId;
+    if(!deckId)return null;
+    if(onlineRoom.rule==='rental'){
+      const deck=onlineRentalDecks.find(d=>d.id===deckId);
+      if(!deck)return null;
+      return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};
     }
-  };
+    const deck=allDecks.find(d=>d.id===deckId);
+    if(!deck)return null;
+    return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};
+  }
+  let onlineRentalDecks=[];
+  function renderRentalDecks(decks){
+    onlineRentalDecks=decks||[];
+    const area=$('online-selection-area');
+    if(!onlineRentalDecks.length){area.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}
+    const current=onlineSelection?.deckId&&onlineRentalDecks.some(d=>d.id===onlineSelection.deckId)?onlineSelection.deckId:onlineRentalDecks[0].id;
+    onlineSelection={...(onlineSelection||{}),deckId:current};
+    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">使用するデッキ</div><select id="online-rental-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${onlineRentalDecks.map(d=>`<option value="${d.id}" ${d.id===current?'selected':''}>${esc(d.name)}</option>`).join('')}</select><div class="text-[10px] text-slate-500">部屋作成者が公開したデッキから選択します。</div>`;
+  }
+  function renderOwnOnlineDeckSelector(){
+    const area=$('online-selection-area');
+    const decks=allDecks||[];
+    if(!decks.length){area.innerHTML='<div class="text-xs text-amber-300">使用できるデッキがありません。先に「デッキ編成」でデッキを作成してください。</div>';return;}
+    const current=onlineSelection?.deckId&&decks.some(d=>d.id===onlineSelection.deckId)?onlineSelection.deckId:decks[0].id;
+    onlineSelection={...(onlineSelection||{}),deckId:current};
+    const deck=decks.find(d=>d.id===current);
+    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">オンライン対戦で使用するデッキ</div><select id="online-own-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${decks.map(d=>`<option value="${d.id}" ${d.id===current?'selected':''}>${esc(d.name)}（キャラ${(d.unitIds||[]).length} / マジック${(d.magicIds||[]).length}）</option>`).join('')}</select><div class="text-[10px] text-slate-500">ここで選ぶデッキがオンライン対戦専用の使用デッキです。「対戦準備」のデッキ設定とは別です。</div><div class="text-[10px] text-slate-400">現在：${esc(deck?.name||'未選択')} / キャラ ${(deck?.unitIds||[]).length}枚 / マジック ${(deck?.magicIds||[]).length}枚</div>`;
+  }
+  function renderOnlineSelection(){
+    const a=$('online-selection-area');
+    if(onlineRoom.rule==='rental'){if(onlineRentalDecks.length)renderRentalDecks(onlineRentalDecks);else a.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}
+    if(onlinePool){renderPoolBuilder();return;}
+    renderOwnOnlineDeckSelector();
+    if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot'){
+      const note=document.createElement('div');note.className='text-[10px] text-purple-300';note.innerText='両者がこの部屋でデッキを選び、準備完了するとサーバーが候補カードを抽選します。';a.appendChild(note);
+    }
+  }
+  function renderPoolBuilder(){const p=onlinePool;let selectedUnits=onlineSelection?.unitIds||[],selectedMagic=onlineSelection?.magicIds||[];const card=(c,sel,kind)=>`<button onclick="toggleOnlinePoolCard('${kind}','${c.id}')" class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;$('online-pool-area').classList.remove('hidden');$('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラ3枚・マジック10枚を選択してください。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/3</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(c.id),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(c.id),'magic')).join('')}</div>`;}
+  window.toggleOnlinePoolCard=function(kind,id){onlineSelection=onlineSelection||{unitIds:[],magicIds:[]};const key=kind==='unit'?'unitIds':'magicIds',max=kind==='unit'?3:10;onlineSelection[key]=onlineSelection[key]||[];if(onlineSelection[key].includes(id))onlineSelection[key]=onlineSelection[key].filter(x=>x!==id);else if(onlineSelection[key].length<max)onlineSelection[key].push(id);renderPoolBuilder();if(onlineSelection.unitIds.length===3&&onlineSelection.magicIds.length===10)sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:[]}});};
   function applyOnlineState(st){
     if(!st)return;
     onlineMode=true;
@@ -3245,7 +3281,7 @@
       $('online-current-room').innerText='部屋：'+onlineRoom.roomName;
       $('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];
       $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
-      $('online-players').innerHTML=(m.players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');
+      $('online-players').innerHTML=(m.players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div><div class="text-[10px] text-cyan-300">${p?.deckName?`使用デッキ：${esc(p.deckName)}`:'デッキ未選択'}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');
       renderOnlineSelection();
       return;
     }
@@ -3258,10 +3294,10 @@
       return;
     }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
-    if(m.type==='room_joined'){onlineRoom=m.room;onlineSlot=m.slot;syncProfile();onlineSpectating=false;$('online-lobby').classList.add('hidden');$('online-room-panel').classList.remove('hidden');$('online-current-room').innerText='部屋：'+onlineRoom.roomName;$('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];renderOnlineSelection();return;}
+    if(m.type==='room_joined'){onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;$('online-lobby').classList.add('hidden');$('online-room-panel').classList.remove('hidden');$('online-current-room').innerText='部屋：'+onlineRoom.roomName;$('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];renderOnlineSelection();return;}
     if(m.type==='rental_decks'){renderRentalDecks(m.decks||[]);return;}
-    if(m.type==='room_update'){if(m.room){onlineRoom=m.room;$('online-current-room').innerText='部屋：'+onlineRoom.roomName;$('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];}$('online-players').innerHTML=(m.players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');return;}
-    if(m.type==='pool_ready'){onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={unitIds:[],magicIds:[]};renderPoolBuilder();return;}
+    if(m.type==='room_update'){if(m.room){onlineRoom=m.room;$('online-current-room').innerText='部屋：'+onlineRoom.roomName;$('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];}$('online-players').innerHTML=(m.players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div><div class="text-[10px] text-cyan-300">${p?.deckName?`使用デッキ：${esc(p.deckName)}`:'デッキ未選択'}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');return;}
+    if(m.type==='pool_ready'){onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={...(onlineSelection||{}),unitIds:[],magicIds:[]};renderPoolBuilder();return;}
     if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineSpectating=false;applyOnlineState(m.state);if(m.state.deadline)startOnlineTimer(m.state.deadline);return;}
     if(m.type==='battle_state'||m.type==='turn_start'){if(m.type==='turn_start'||(m.state?.phase==='decision'&&Number(m.state?.turn||0)>Number(onlineLastTurn||0)))resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||onlineLastTurn||0);applyOnlineState(m.state);if(m.state.phase==='decision'){if(m.state.deadline)startOnlineTimer(m.state.deadline);else showOnlinePausedTimer();}return;}
     if(m.type==='battle_paused'){showOnlinePausedTimer();$('online-confirmed-status').innerText='対戦相手の接続待ちです。タイマーは停止しています。';return;}
