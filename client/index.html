@@ -566,6 +566,11 @@
                 <div class="grid grid-cols-2 gap-2">
                   <input type="text" id="input-rival-name" placeholder="ライバル名" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1 text-xs">
                   <select id="select-rival-deck" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1 text-xs"></select>
+                  <select id="select-rival-intelligence" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1 text-xs" title="AIの賢さ">
+                    <option value="novice">AIの賢さ：素人</option>
+                    <option value="normal" selected>AIの賢さ：凡人</option>
+                    <option value="expert">AIの賢さ：玄人</option>
+                  </select>
                 </div>
                 <div class="flex gap-2">
                   <input type="file" id="input-rival-icon-file" accept="image/*" onchange="handleIconUpload(event, 'rival')" class="hidden">
@@ -626,9 +631,13 @@
       playerUnits: [],
       enemyUnits: [],
       magicHand: [],
+      enemyMagicHand: [],
       usedMagicCardIds: new Set(),
+      enemyUsedMagicCardIds: new Set(),
       reservedMagic: null,
+      reservedEnemyMagic: null,
       selectedPlayerInstanceId: null,
+      enemyIntelligence: "normal",
       playerName: "あなた",
       enemyName: "ライバル",
       playerIconUrl: null,
@@ -662,11 +671,17 @@
       }
     }
 
+    // スマホでカード画像を長押しした際のOS/ブラウザ画像メニューを抑止。
+    const longPressStyle = document.createElement("style");
+    longPressStyle.textContent = `[data-card-id], [data-card-id] img { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; -webkit-user-drag: none !important; touch-action: manipulation; }`;
+    document.head.appendChild(longPressStyle);
+
     // 長押しグローバルリスナー
     function initLongPressGlobalListener() {
       document.addEventListener("pointerdown", (e) => {
         const cardEl = e.target.closest("[data-card-id]");
         if (!cardEl) return;
+        if (e.pointerType === "touch") e.preventDefault();
         const cardId = cardEl.getAttribute("data-card-id");
         if (!cardId) return;
 
@@ -689,6 +704,10 @@
       document.addEventListener("pointermove", (e) => {
         if (Math.abs(e.movementX) > 5 || Math.abs(e.movementY) > 5) cancelTimer();
       });
+
+      document.addEventListener("contextmenu", (e) => {
+        if (e.target.closest("[data-card-id]")) e.preventDefault();
+      }, true);
 
       document.addEventListener("click", (e) => {
         if (isLongPressTriggered) {
@@ -745,7 +764,7 @@
         case "hp_ratio_lte": return `${prefix}のHPが${cond.val}%以下`;
         case "ap_val_gte": return `自分のAPが${cond.val}以上`;
         case "ap_val_lte": return `自分のAPが${cond.val}以下`;
-        case "ally_has_attr": return `自分以外の味方に[${cond.attr || '炎'}]属性がいる場合`;
+        case "ally_has_attr": return `味方に[${cond.attr || '炎'}]属性がいる場合`;
         case "enemy_has_attr": return `敵に[${cond.attr || '炎'}]属性がいる場合`;
         case "all_ally_attr": return `味方全員が[${cond.attr || '炎'}]属性`;
         case "all_enemy_attr": return `敵全員が[${cond.attr || '炎'}]属性`;
@@ -947,7 +966,7 @@
     }
 
     async function seedDefaultRivals() {
-      const r = { id: "rival_def_1", name: "CPU ライバル", deckId: allDecks[0]?.id || "", iconImage: null };
+      const r = { id: "rival_def_1", name: "CPU ライバル", deckId: allDecks[0]?.id || "", iconImage: null, intelligence: "normal" };
       await saveToStore("rivals", r);
       allRivals = await getAllFromStore("rivals");
     }
@@ -1157,7 +1176,7 @@
                 <option value="hp_ratio_lte">自分のHPが○％以下</option>
                 <option value="ap_val_gte">自分のAPが○以上</option>
                 <option value="ap_val_lte">自分のAPが○以下</option>
-                <option value="ally_has_attr">自分以外の味方に◯属性がいる場合</option>
+                <option value="ally_has_attr">味方に◯属性がいる場合</option>
                 <option value="enemy_has_attr">敵に◯属性がいる場合</option>
                 <option value="all_ally_attr">味方全員が◯属性</option>
                 <option value="all_enemy_attr">敵全員が◯属性</option>
@@ -1836,8 +1855,9 @@
     async function saveRival() {
       const name = document.getElementById("input-rival-name").value.trim() || "ライバル";
       const deckId = document.getElementById("select-rival-deck").value;
+      const intelligence = document.getElementById("select-rival-intelligence")?.value || "normal";
       if (!deckId) { alert("デッキを選択してください。"); return; }
-      const newRival = { id: generateUniqueId("rival"), name, deckId, iconImage: tempRivalIcon };
+      const newRival = { id: generateUniqueId("rival"), name, deckId, iconImage: tempRivalIcon, intelligence };
       await saveToStore("rivals", newRival);
       allRivals = await getAllFromStore("rivals");
       document.getElementById("input-rival-name").value = "";
@@ -1871,7 +1891,7 @@
             </div>
             <div>
               <div class="font-bold text-rose-300">${r.name}</div>
-              <div class="text-[10px] text-slate-400">使用デッキ: ${d ? d.name : '不明'}</div>
+              <div class="text-[10px] text-slate-400">使用デッキ: ${d ? d.name : '不明'} ／ AI: ${{novice:'素人',normal:'凡人',expert:'玄人'}[r.intelligence||'normal']}</div>
             </div>
           </div>
           <button onclick="deleteRival('${r.id}')" class="px-2 py-1 bg-rose-900/80 hover:bg-rose-800 text-rose-200 rounded text-[10px] font-bold">削除</button>
@@ -1972,7 +1992,10 @@
       battleState={phase:'decision',turn:1,playerAp:0,enemyAp:0,
         playerUnits:(pDeck.unitIds||[]).map(id=>createBattleUnit(id,'player',deploymentSelection.player.active.includes(id))),
         enemyUnits:enemyIds.map(id=>createBattleUnit(id,'enemy',enemyActive.includes(id))),
-        magicHand:(pDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),usedMagicCardIds:new Set(),reservedMagic:null,selectedPlayerInstanceId:null,
+        magicHand:(pDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),
+        enemyMagicHand:(eDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),
+        usedMagicCardIds:new Set(),enemyUsedMagicCardIds:new Set(),reservedMagic:null,reservedEnemyMagic:null,selectedPlayerInstanceId:null,
+        enemyIntelligence:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.intelligence)||'normal',
         playerName:playerName,enemyName:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.name)||'ライバル',playerIconUrl:playerIcon,
         enemyIconUrl:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.iconImage)||null,
         playerReserveQueue:[...deploymentSelection.player.reserve],enemyReserveQueue:[...enemyReserve]};
@@ -2031,6 +2054,7 @@
       battleState.playerAp = Math.min(100, battleState.playerAp + 20);
       battleState.enemyAp = Math.min(100, battleState.enemyAp + 20);
       battleState.reservedMagic = null;
+      battleState.reservedEnemyMagic = null;
 
       // 前ターンの予約行動を完全に破棄し、毎ターン必ず通常攻撃から開始する。
       battleState.playerUnits.forEach(u => {
@@ -2041,8 +2065,9 @@
       // そのためターン開始時には減らさず、登場時に付いた1ターン効果もそのターンを維持する。
       runPassiveSkills('turn_start');
 
-      // 敵だけAIで行動を決定。
+      // 敵AI：ユニット行動とマジックを同時に思考する。
       chooseAiActions('enemy');
+      chooseAiMagic();
 
       renderBattleState();
       await showTurnStartOverlay(battleState.turn);
@@ -2182,6 +2207,9 @@
       const queue = [];
       if (battleState.reservedMagic) {
         queue.push({ type: 'magic', name: battleState.reservedMagic.name, speed: battleState.reservedMagic.stats?.priority ?? 999, side: 'player' });
+      }
+      if (battleState.reservedEnemyMagic) {
+        queue.push({ type: 'magic', name: battleState.reservedEnemyMagic.name, speed: battleState.reservedEnemyMagic.stats?.priority ?? 999, side: 'enemy' });
       }
       [...getActiveUnits('player'), ...getActiveUnits('enemy')].forEach(u => {
         queue.push({ type: 'unit', name: u.name, speed: getEffectiveSpeed(u), side: u.side });
@@ -2415,45 +2443,135 @@
       renderBattleState();
     }
 
+    function getAiIntelligence() {
+      return battleState.enemyIntelligence === 'novice' || battleState.enemyIntelligence === 'expert'
+        ? battleState.enemyIntelligence : 'normal';
+    }
+
+    function getAiTargetsForSkill(skill, unit) {
+      const pool = getManualTargetCandidates(skill, unit);
+      if (skillNeedsManualTarget(skill)) return pool;
+      const resolved = resolveTargets(skill.targetType, skill.targetCond, unit, false, null, false);
+      return resolved.filter(t => t && !t.__playerTarget);
+    }
+
+    function scoreAiTarget(target, skill, unit) {
+      if (!target) return -9999;
+      const effect = skill.mainEffect || {};
+      let score = Math.random() * 2;
+      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
+        score += (target.currentHp / Math.max(1, target.maxHp)) < 0.35 ? 55 : 10;
+        if (effect.type === 'dmg_fixed' && Number(effect.val) >= target.currentHp) score += 100;
+      }
+      if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
+        score += (1 - target.currentHp / Math.max(1, target.maxHp)) * 80;
+      }
+      if (effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') {
+        score += target.side === unit.side ? 45 : 15;
+      }
+      if (effect.type === 'damage_cut_ratio') score += target.side === unit.side ? 60 : 5;
+      if (effect.type === 'heal_block' || effect.type === 'skill_block') score += target.side !== unit.side ? 55 : -20;
+      return score;
+    }
+
     function chooseAiActions(side) {
       const units = getActiveUnits(side);
       const aliveEnemies = side === 'player' ? getActiveUnits('enemy') : getActiveUnits('player');
-
       if (aliveEnemies.length === 0) return;
+      const intelligence = side === 'enemy' ? getAiIntelligence() : 'expert';
+      const ap = side === 'player' ? battleState.playerAp : battleState.enemyAp;
 
       units.forEach(u => {
         if (u.currentHp <= 0) return;
-        let chosen = false;
-
-        // スキル禁止中はスキルを選ばない
         const skillBlocked = (u.debuffs || []).some(d => d.type === 'skill_block' && d.duration > 0);
-
+        const usable = [];
         if (!skillBlocked) {
-          const usable = [];
           for (let sIdx = 0; sIdx < (u.skills || []).length; sIdx++) {
             const sk = u.skills[sIdx];
-            if (sk.type !== 'active') continue;
-            if (!evalCond(sk.selfCond, u, side === 'player')) continue;
-            const sideAp = side === 'player' ? battleState.playerAp : battleState.enemyAp;
-            if (sideAp < (sk.cost || 0)) continue;
-            const candidates = getManualTargetCandidates(sk, u);
+            if (sk.type !== 'active' || !evalCond(sk.selfCond, u, side === 'player') || ap < (sk.cost || 0)) continue;
+            const candidates = getAiTargetsForSkill(sk, u);
             if (skillNeedsManualTarget(sk) && candidates.length === 0) continue;
-            usable.push({ sIdx, sk, candidates });
-          }
-          if (usable.length > 0) {
-            const pick = usable[Math.floor(Math.random() * usable.length)];
-            const targetInstanceId = skillNeedsManualTarget(pick.sk)
-              ? pick.candidates[Math.floor(Math.random() * pick.candidates.length)].instanceId
-              : null;
-            u.reservedAction = { type: 'skill', skillIndex: pick.sIdx, targetInstanceId };
-            chosen = true;
+            usable.push({sIdx, sk, candidates});
           }
         }
 
-        if (!chosen) {
-          u.reservedAction = { type: 'attack', targetInstanceId: null };
+        let pick = null;
+        if (usable.length) {
+          if (intelligence === 'novice') {
+            // 素人：使えるスキルをたまに使う。対象もほぼランダム。
+            if (Math.random() < 0.35) pick = usable[Math.floor(Math.random() * usable.length)];
+          } else if (intelligence === 'normal') {
+            // 凡人：コストと対象を考慮して、比較的有利なスキルを選ぶ。
+            pick = usable.map(x => ({x, score: 10 + (x.sk.mainEffect?.val || 0) + Math.random() * 10 + (x.sk.cost || 0) * -0.2})).sort((a,b)=>b.score-a.score)[0]?.x || null;
+          } else {
+            // 玄人：各対象への効果まで評価して最も期待値の高いスキルを選ぶ。
+            let best = null, bestScore = -Infinity;
+            for (const x of usable) {
+              const targets = x.candidates.length ? x.candidates : getAiTargetsForSkill(x.sk, u);
+              const targetScore = targets.length ? Math.max(...targets.map(t => scoreAiTarget(t, x.sk, u))) : 15;
+              const effectVal = Number(x.sk.mainEffect?.val || 0);
+              const score = targetScore + effectVal * 0.35 - Number(x.sk.cost || 0) * 0.45;
+              if (score > bestScore) { bestScore = score; best = x; }
+            }
+            pick = best;
+          }
+        }
+
+        if (pick) {
+          const candidates = pick.candidates.length ? pick.candidates : getAiTargetsForSkill(pick.sk, u);
+          let targetInstanceId = null;
+          if (skillNeedsManualTarget(pick.sk) && candidates.length) {
+            if (intelligence === 'expert') {
+              targetInstanceId = candidates.slice().sort((a,b)=>scoreAiTarget(b,pick.sk,u)-scoreAiTarget(a,pick.sk,u))[0].instanceId;
+            } else targetInstanceId = candidates[Math.floor(Math.random()*candidates.length)].instanceId;
+          }
+          u.reservedAction = { type:'skill', skillIndex:pick.sIdx, targetInstanceId };
+        } else {
+          // 通常攻撃も玄人なら撃破優先、凡人以下はランダム寄り。
+          let target = aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
+          if (intelligence === 'expert') target = aliveEnemies.slice().sort((a,b)=>((a.currentHp/b.maxHp)-(b.currentHp/a.maxHp)) || (a.currentHp-b.currentHp))[0];
+          u.reservedAction = { type:'attack', targetInstanceId:target?.instanceId || null };
         }
       });
+    }
+
+    function scoreAiMagic(card) {
+      const eff = card?.effect;
+      if (!eff) return -9999;
+      const targets = resolveTargets(eff.targetType, eff.targetCond, {side:'enemy',currentHp:1,maxHp:1}, false, null, true);
+      let score = 0;
+      const effect = eff.mainEffect || {};
+      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
+        score += targets.reduce((n,t)=>n + (t && t.currentHp <= Number(effect.val||0) ? 100 : 20), 0);
+      } else if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
+        score += targets.reduce((n,t)=>n + (t && t.currentHp < t.maxHp ? 40 + (1-t.currentHp/t.maxHp)*60 : 0), 0);
+      } else if (effect.type === 'mod_ap') {
+        score += Number(effect.val||0) > 0 ? 35 : -20;
+      } else if (effect.type === 'skill_block' || effect.type === 'heal_block') {
+        score += targets.some(t=>t?.side==='player') ? 50 : 15;
+      } else if (effect.type === 'damage_cut_ratio') score += 45;
+      return score + Math.random()*8;
+    }
+
+    function chooseAiMagic() {
+      battleState.reservedEnemyMagic = null;
+      const cards = (battleState.enemyMagicHand || []).filter(c => !battleState.enemyUsedMagicCardIds.has(c.id));
+      if (!cards.length) return;
+      const ap = battleState.enemyAp;
+      const usable = cards.filter(c => ap >= Number(c.effect?.cost || 0));
+      if (!usable.length) return;
+      const intelligence = getAiIntelligence();
+      let chosen = null;
+      if (intelligence === 'novice') {
+        if (Math.random() < 0.35) chosen = usable[Math.floor(Math.random()*usable.length)];
+      } else if (intelligence === 'normal') {
+        const useful = usable.filter(c => scoreAiMagic(c) > 10);
+        if (useful.length && Math.random() < 0.75) chosen = useful.sort((a,b)=>scoreAiMagic(b)-scoreAiMagic(a))[0];
+      } else {
+        const useful = usable.slice().sort((a,b)=>scoreAiMagic(b)-scoreAiMagic(a));
+        if (useful.length && scoreAiMagic(useful[0]) > 5) chosen = useful[0];
+      }
+      if (chosen) battleState.reservedEnemyMagic = chosen;
     }
 
     async function confirmPlayerActions() {
@@ -2465,24 +2583,29 @@
       // そのため、行動値バフ/デバフが同一ターン中に即座に行動順へ反映される。
       const pendingUnits = new Set(getActiveUnits('player').concat(getActiveUnits('enemy')));
       const magic = battleState.reservedMagic ? battleState.reservedMagic : null;
+      const enemyMagic = battleState.reservedEnemyMagic ? battleState.reservedEnemyMagic : null;
       if (magic) battleState.usedMagicCardIds.add(magic.id);
+      if (enemyMagic) battleState.enemyUsedMagicCardIds.add(enemyMagic.id);
 
       let magicPending = !!magic;
-      while ((pendingUnits.size > 0 || magicPending) && !checkBattleEnd()) {
+      let enemyMagicPending = !!enemyMagic;
+      while ((pendingUnits.size > 0 || magicPending || enemyMagicPending) && !checkBattleEnd()) {
         const candidates = [];
         pendingUnits.forEach(u => {
           if (u.currentHp > 0 && u.isActive) candidates.push({ type:'unit', unit:u, speed:getEffectiveSpeed(u) });
           else pendingUnits.delete(u);
         });
-        if (magicPending && magic) candidates.push({ type:'magic', card:magic, speed:magic.stats?.priority ?? 999 });
+        if (magicPending && magic) candidates.push({ type:'magic', card:magic, side:'player', speed:magic.stats?.priority ?? 999 });
+        if (enemyMagicPending && enemyMagic) candidates.push({ type:'magic', card:enemyMagic, side:'enemy', speed:enemyMagic.stats?.priority ?? 999 });
         if (!candidates.length) break;
 
         candidates.forEach(x => x.tieRandom = Math.random());
         candidates.sort((a,b) => (b.speed-a.speed) || (a.tieRandom-b.tieRandom));
         const item = candidates[0];
         if (item.type === 'magic') {
-          magicPending = false;
-          await executeMagicCard(item.card);
+          if (item.side === 'player') magicPending = false;
+          else enemyMagicPending = false;
+          await executeMagicCard(item.card, item.side);
         } else {
           pendingUnits.delete(item.unit);
           if (item.unit.currentHp > 0 && item.unit.isActive) await executeUnitAction(item.unit);
@@ -2502,7 +2625,7 @@
       }
     }
 
-    async function executeMagicCard(card) {
+    async function executeMagicCard(card, side = 'player') {
       if (!card) return;
       const effectLines = [];
       const resultLines = [];
@@ -2510,25 +2633,31 @@
       const targetEntities = [];
       if (card.effect) {
         const eff = card.effect;
-        const actor = { side: 'player', currentHp: 1, maxHp: 1 };
-        const mainTargets = resolveTargets(eff.targetType, eff.targetCond, actor, true, null, true);
+        const actor = { side, currentHp: 1, maxHp: 1 };
+        const isPlayerActor = side === 'player';
+        const cost = Number(eff.cost || 0);
+        if ((isPlayerActor ? battleState.playerAp : battleState.enemyAp) < cost) return;
+        if (isPlayerActor) battleState.playerAp = Math.max(0, battleState.playerAp - cost); else battleState.enemyAp = Math.max(0, battleState.enemyAp - cost);
+        const mainTargets = resolveTargets(eff.targetType, eff.targetCond, actor, isPlayerActor, null, true);
         mainTargets.forEach(t => {
           targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
           if (t && !t.__playerTarget) targetEntities.push(t);
-          const r = applyEffect(eff.mainEffect, t, true, true, actor);
+          const r = applyEffect(eff.mainEffect, t, isPlayerActor, true, actor);
           if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
         });
         if (eff.hasSubEffect && eff.subEffect) {
-          const subTargets = resolveTargets(eff.subEffect.targetType || eff.targetType, eff.subEffect.targetCond || eff.targetCond, actor, true, eff.subEffect.targetInstanceId || null, true);
+          const subTargets = resolveTargets(eff.subEffect.targetType || eff.targetType, eff.subEffect.targetCond || eff.targetCond, actor, isPlayerActor, eff.subEffect.targetInstanceId || null, true);
           subTargets.forEach(t => {
             targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
-            const r = applyEffect(eff.subEffect, t, true, true, actor);
+            const r = applyEffect(eff.subEffect, t, isPlayerActor, true, actor);
             if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
           });
         }
       }
-      logBattle(`📜 ${battleState.playerName} がマジックカード【${card.name}】を発動！`);
-      await showActionPopup({ name: battleState.playerName, image: getCardImage(card) || battleState.playerIconUrl, side: 'player' }, card.name, card, {
+      const actorName = isPlayerActor ? battleState.playerName : battleState.enemyName;
+      const actorImage = isPlayerActor ? battleState.playerIconUrl : battleState.enemyIconUrl;
+      logBattle(`📜 ${actorName} がマジックカード【${card.name}】を発動！`);
+      await showActionPopup({ name: actorName, image: getCardImage(card) || actorImage, side }, card.name, card, {
         target: targetNames.length ? [...new Set(targetNames)].join(' / ') : '対象なし',
         effect: effectLines.length ? effectLines.join('\n') : '効果なし',
         result: resultLines.length ? resultLines.join('\n') : '変化なし',
