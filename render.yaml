@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: card-ai-battle-online
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
