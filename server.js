@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
+const SERVER_VERSION = '3.0.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -227,4 +228,4 @@ function resumeBattleAfterReconnect(r){
 }
 
 setInterval(()=>{for(const [sid,s] of sessions){if(!s.online&&Date.now()-s.lastSeen>10*60*1000) sessions.delete(sid);}},60000);
-server.listen(PORT,()=>console.log(`Card AI Battle Online: http://localhost:${PORT}`));
+server.listen(PORT,()=>console.log(`Card AI Battle Online v${SERVER_VERSION}: http://localhost:${PORT}`));
