@@ -64,6 +64,7 @@ function executeAction(b,side,u,action){const actorSide=side;const resource=side
 function pubUnit(u,includeSkills=false){const x={instanceId:u.instanceId,cardId:u.cardId,name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,maxHp:u.maxHp,currentHp:u.currentHp,atk:u.atk,priority:u.priority,effectiveAtk:effAtk(u),effectiveSpeed:effSpeed(u),side:u.side,isActive:u.isActive,buffs:u.buffs,debuffs:u.debuffs,image:u.image||null};if(includeSkills)x.skills=u.skills;return x;}
 function publicBattle(b,viewerSide){return {battleId:b.battleId,turn:b.turn,phase:b.phase,deadline:b.deadline,p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(u=>pubUnit(u,viewerSide==='player1')),magicIds:viewerSide==='player1'?b.p1.magicIds:[]},p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(u=>pubUnit(u,viewerSide==='player2')),magicIds:viewerSide==='player2'?b.p2.magicIds:[]},yourSide:viewerSide,winner:b.winner,events:(b.events||[]).slice(-30)};}
 function startBattle(r){
+ if(!r||r.battle||r.status==='battle'||r.status==='finished') return false;
  const a=r.players[0],c=r.players[1];
  const ca=r.profiles[a.sessionId],cb=r.profiles[c.sessionId];
  const da=r.selected[a.sessionId],db=r.selected[c.sessionId];
@@ -80,8 +81,13 @@ function startBattle(r){
    const reserve=(sel.reserve||units.filter(x=>!active.includes(x.id)).map(x=>x.id)).filter(id=>units.some(x=>x.id===id)&&!active.includes(id)).slice(0,2);
    return {sessionId,name:profile.name,side,ap:0,units:units.map(x=>buildUnit(x,side,active.includes(x.id))),reserveQueue:reserve,magicIds:(sel.magicIds||[]).filter(id=>cards.has(id)),usedMagic:[],actions:null};
  };
- if((da.unitIds||[]).length<3||(db.unitIds||[]).length<3)return false;
- r.status='battle';
+  const validSelection=s=>{
+    const units=Array.isArray(s?.unitIds)?s.unitIds:[];
+    const magics=Array.isArray(s?.magicIds)?s.magicIds:[];
+    return units.length>=3&&units.length<=5&&magics.length<=10;
+  };
+  if(!validSelection(da)||!validSelection(db))return false;
+  r.status='battle';
  r.battle={battleId:uid('battle'),turn:1,phase:'decision',deadline:Date.now()+90000,p1:make(a.sessionId,ca,da,'player1'),p2:make(c.sessionId,cb,db,'player2'),winner:null,events:[]};
  passive(r.battle,'battle_start');passive(r.battle,'deploy');broadcastBattle(r,'battle_start');scheduleTurn(r);return true;
 }
@@ -127,16 +133,22 @@ server.on('upgrade',(req,socket)=>{const key=req.headers['sec-websocket-key'];if
  if(type==='room_leave'){leaveRoom(sid);send(ws,'left_room');return;}
  if(type==='spectate_join'){const r2=rooms.get(m.roomId);if(!r2||!r2.allowSpectators)return send(ws,'error',{message:'観戦できません。'});if(r2.spectators.size>=r2.maxSpectators)return send(ws,'error',{message:'観戦人数が上限です。'});if(r2.passwordHash&&hashPassword(m.password)!==r2.passwordHash)return send(ws,'error',{message:'パスワードが違います。'});r2.spectators.add(sid);s.roomId=r2.roomId;send(ws,'spectate_joined',{room:publicRoom(r2)});if(r2.battle)send(ws,'battle_state',{state:publicBattle(r2.battle,'spectator')});return;}
  if(!r)return;
- if(type==='profile_sync'){const profile={name:s.name,cards:uniqueById((m.cards||[]).map(x=>sanitizeCard(x,true))),decks:(m.decks||[]).map(sanitizeDeck)};s.profile=profile;if(r){r.profiles[sid]=JSON.parse(JSON.stringify(profile));if(r.rule==='rental'&&r.ownerId===sid)broadcastRoom(r,'rental_decks',{decks:r.profiles[sid].decks});}return;}
+ if(type==='profile_sync'){const profile={name:s.name,cards:uniqueById((m.cards||[]).map(x=>sanitizeCard(x,true))),decks:(m.decks||[]).map(sanitizeDeck)};s.profile=profile;if(r){r.profiles[sid]=JSON.parse(JSON.stringify(profile));if(r.rule==='rental'&&r.ownerId===sid)broadcastRoom(r,'rental_decks',{decks:r.profiles[sid].decks});if(r.players.every(Boolean)&&r.players.every(x=>x.ready)&&r.selected[r.players[0].sessionId]&&r.selected[r.players[1].sessionId]&&r.rule!=='super_rental'&&r.rule!=='random_pot'){const ok=startBattle(r);if(ok)return;}}return;}
  if(type==='room_ready'){
-   const p=r.players.find(x=>x?.sessionId===sid);if(!p)return;
-   p.ready=!!m.ready;r.updatedAt=Date.now();
-   if(r.players.every(Boolean)&&r.players.every(x=>x.ready))r.status='preparing';
-   broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});
-   return;
+    const p=r.players.find(x=>x?.sessionId===sid);if(!p)return;
+    copySessionProfileToRoom(r,s);
+    p.ready=!!m.ready;
+    r.updatedAt=Date.now();
+    if(p.ready && m.selection) r.selected[sid]=m.selection;
+    if(!p.ready) delete r.selected[sid];
+    if(r.players.every(Boolean)&&r.players.every(x=>x.ready)) r.status='preparing';
+    else if(r.status==='preparing') r.status='waiting';
+    broadcastRoom(r,'room_update',{room:publicRoom(r),players:r.players.map(p=>p?{playerId:p.sessionId,name:p.name,ready:p.ready,online:p.online}:null)});
+    return;
  }
  if(type==='battle_select'){
    if(!r.players.some(p=>p?.sessionId===sid))return;
+   if(s.profile) r.profiles[sid]=JSON.parse(JSON.stringify(s.profile));
    r.selected[sid]=m.selection||{};r.updatedAt=Date.now();
    if(r.players.every(Boolean)&&r.players.every(p=>p.ready)&&r.selected[r.players[0].sessionId]&&r.selected[r.players[1].sessionId]){
      if((r.rule==='super_rental'||r.rule==='random_pot')&&!r.pools[r.players[0].sessionId]){
@@ -144,8 +156,8 @@ server.on('upgrade',(req,socket)=>{const key=req.headers['sec-websocket-key'];if
        if(!a||!b)return broadcastRoom(r,'error',{message:'カード情報の同期を待っています。もう一度準備完了を押してください。'});
        let source=r.rule==='super_rental'?a.cards:uniqueById([...a.cards,...b.cards]);
        const chars=source.filter(x=>x.cardType==='unit'),mags=source.filter(x=>x.cardType==='magic');
-       if(chars.length<10||mags.length<20)return broadcastRoom(r,'error',{message:'抽選に必要なカードが不足しています。'});
-       for(const p of r.players){r.pools[p.sessionId]={units:sample(chars,10),magics:sample(mags,20)};send(p.ws,'pool_ready',{units:r.pools[p.sessionId].units.map(x=>sanitizeCard(x,true)),magics:r.pools[p.sessionId].magics.map(x=>sanitizeCard(x,true))});}
+        if(chars.length<3)return broadcastRoom(r,'error',{message:'超レンタル／闇鍋はキャラクターカードが3枚以上必要です。マジックカードは0～10枚でも開始できます。'});
+        for(const p of r.players){r.pools[p.sessionId]={units:sample(chars,Math.min(10,chars.length)),magics:sample(mags,Math.min(20,mags.length))};send(p.ws,'pool_ready',{units:r.pools[p.sessionId].units.map(x=>sanitizeCard(x,true)),magics:r.pools[p.sessionId].magics.map(x=>sanitizeCard(x,true))});}
        return;
      }
      const ok=startBattle(r);
