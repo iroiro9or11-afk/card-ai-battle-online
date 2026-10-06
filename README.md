@@ -14,3 +14,9 @@
 - Build: `npm install`
 - Start: `node server.js`
 - Root Directory: 空欄
+
+
+## v3.1 修正
+- カード詳細表示時に `onlineMode is not defined` で処理が停止するスコープ不具合を修正。
+- オンライン状態変数をグローバル `var` として共有し、カード一覧側の `openCardDetail()` からも正しく参照可能に修正。
+- サーバーバージョンと package.json を 3.1.0 に更新。
