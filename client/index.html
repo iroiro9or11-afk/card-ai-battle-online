@@ -1654,10 +1654,18 @@
     }
 
     function openCardDetail(cardId) {
+      // 詳細表示はカード一覧・デッキ編成では編集/削除を表示し、
+      // 戦闘中だけ編集/削除を隠す。オンライン状態の変数はここで参照しない。
+      // （onlineMode はオンラインIIFE内の変数なので、ここから参照するとReferenceErrorになる。）
       const battleView = document.getElementById("view-battle");
-      const battleLocked = !!(onlineMode || (battleView && !battleView.classList.contains("hidden")));
-      if (!battleLocked) { document.getElementById("btn-edit-card")?.classList.remove("hidden"); document.getElementById("btn-delete-card")?.classList.remove("hidden"); }
-      else { document.getElementById("btn-edit-card")?.classList.add("hidden"); document.getElementById("btn-delete-card")?.classList.add("hidden"); }
+      const battleLocked = !!(battleView && !battleView.classList.contains("hidden"));
+      if (!battleLocked) {
+        document.getElementById("btn-edit-card")?.classList.remove("hidden");
+        document.getElementById("btn-delete-card")?.classList.remove("hidden");
+      } else {
+        document.getElementById("btn-edit-card")?.classList.add("hidden");
+        document.getElementById("btn-delete-card")?.classList.add("hidden");
+      }
       const card = allCards.find(c => c.id === cardId); if (!card) return;
       currentDetailCardId = card.id;
       document.getElementById("detail-card-title").innerText = card.name;
