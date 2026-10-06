@@ -22,6 +22,13 @@
       100% { transform: scale(1); opacity: 1; }
     }
     .card-element { line-height: 1.25; }
+    /* カード画像の長押しメニュー/画像ドラッグだけ抑止。カードのクリック判定はJS側で行う。 */
+    [data-card-id], [data-card-id] img {
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      -webkit-user-drag: none !important;
+    }
     #detail-card-body { font-size: 0.95rem; line-height: 1.65; }
     #detail-card-body .skill-detail-desc { font-size: 0.95rem; line-height: 1.7; white-space: pre-wrap; }
     .animate-pop { animation: pop-up 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
@@ -110,7 +117,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.3</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -756,97 +763,60 @@
     }
 
     // タッチ端末：通常タップはtouchend、長押しは450msで即時表示。
+    // カード操作：
+    // ・カード一覧/デッキ編成など通常のカードUIは「単押し」で詳細表示
+    // ・戦闘中のカードUIは「単押し」を行動選択に使用するため、
+    //   「長押し」だけ詳細表示する
+    // ・長押し成立後にブラウザが生成するclickだけを抑止する
+    // ・画像長押し時のコンテキストメニューはカード上だけ抑止する
     function initLongPressGlobalListener() {
-      document.addEventListener("touchstart", (e) => {
-        const cardEl = getAnyCardElement(e.target);
-        if (!cardEl || !e.touches || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        startCardLongPress(cardEl.getAttribute("data-card-id"), t.clientX, t.clientY);
-      }, { capture: true, passive: true });
-
-      document.addEventListener("touchmove", (e) => {
-        if (!cardTouchActive || !e.touches || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        moveCardLongPress(t.clientX, t.clientY);
-      }, { capture: true, passive: true });
-
-      document.addEventListener("touchend", (e) => {
-        if (!cardTouchActive) return;
-        const cardId = cardTouchId;
-        const wasLongPress = cardTouchTriggered;
-        const detailCard = getDetailCardElement(e.target);
-        clearCardTouchTimer();
-        if (wasLongPress) {
-          suppressCardClickUntil = Date.now() + 800;
-          if (e.cancelable) e.preventDefault();
-          e.stopPropagation();
-        } else if (cardId && detailCard) {
-          // 通常のカードタップもここで確実に詳細を開く。
-          suppressCardClickUntil = Date.now() + 800;
-          if (e.cancelable) e.preventDefault();
-          e.stopPropagation();
-          openCardDetail(cardId);
-        }
-        resetCardTouchState();
-      }, { capture: true, passive: false });
-
-      document.addEventListener("touchcancel", () => {
-        resetCardTouchState();
-      }, { capture: true, passive: true });
-
-      // ペン入力も同じ長押し判定を使う。マウスは通常clickに任せる。
       document.addEventListener("pointerdown", (e) => {
-        if (e.pointerType !== "pen") return;
-        const cardEl = getDetailCardElement(e.target);
+        const cardEl = e.target.closest("[data-card-id]");
         if (!cardEl) return;
-        startCardLongPress(cardEl.getAttribute("data-card-id"), e.clientX, e.clientY);
-      }, true);
+
+        const cardId = cardEl.getAttribute("data-card-id");
+        if (!cardId) return;
+
+        isLongPressTriggered = false;
+        if (longPressTimer) clearTimeout(longPressTimer);
+
+        longPressTimer = setTimeout(() => {
+          isLongPressTriggered = true;
+          openCardDetail(cardId);
+        }, 500);
+      });
+
+      const cancelTimer = () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      };
+
+      document.addEventListener("pointerup", cancelTimer);
+      document.addEventListener("pointercancel", cancelTimer);
 
       document.addEventListener("pointermove", (e) => {
-        if (e.pointerType !== "pen") return;
-        moveCardLongPress(e.clientX, e.clientY);
-      }, true);
-
-      document.addEventListener("pointerup", (e) => {
-        if (e.pointerType !== "pen" || !cardTouchActive) return;
-        const cardId = cardTouchId;
-        const wasLongPress = cardTouchTriggered;
-        const detailCard = getDetailCardElement(e.target);
-        clearCardTouchTimer();
-        if (wasLongPress) {
-          suppressCardClickUntil = Date.now() + 800;
-          if (e.cancelable) e.preventDefault();
-          e.stopPropagation();
-        } else if (cardId && detailCard) {
-          suppressCardClickUntil = Date.now() + 800;
-          if (e.cancelable) e.preventDefault();
-          e.stopPropagation();
-          openCardDetail(cardId);
+        if (Math.abs(Number(e.movementX) || 0) > 5 || Math.abs(Number(e.movementY) || 0) > 5) {
+          cancelTimer();
         }
-        resetCardTouchState();
-      }, true);
+      });
 
-      document.addEventListener("pointercancel", (e) => {
-        if (e.pointerType === "pen") resetCardTouchState();
-      }, true);
-
-      // 長押し後にブラウザが生成するclickを抑止。通常のPCクリックはここで詳細を開く。
+      // 長押し後にだけ発生する合成clickを抑止。
+      // 通常の単押しはここでは横取りせず、各画面の既存onclickへ渡す。
       document.addEventListener("click", (e) => {
-        const cardEl = getDetailCardElement(e.target);
-        if (!cardEl) return;
-        if (Date.now() < suppressCardClickUntil) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
+        if (!isLongPressTriggered) return;
+
         e.preventDefault();
         e.stopPropagation();
-        openCardDetail(cardEl.getAttribute("data-card-id"));
+        isLongPressTriggered = false;
+        cancelTimer();
       }, true);
 
-      // スマホ長押し時の画像保存/コンテキストメニューを抑止。
+      // スマホ/タブレットでカード画像を長押しした際のブラウザメニューだけ抑止。
+      // カード操作そのもののclick/pointerイベントは奪わない。
       document.addEventListener("contextmenu", (e) => {
-        if (getAnyCardElement(e.target)) e.preventDefault();
+        if (e.target.closest("[data-card-id]")) e.preventDefault();
       }, true);
     }
 
@@ -1674,7 +1644,11 @@
         const wrap = document.createElement("div");
         wrap.innerHTML = getCardHTML({ id: card.id, cardType: card.cardType, name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: card.stats?.hp || 0, atk: card.stats?.atk || 0, prio: card.stats?.priority ?? 999, img: getCardImage(card), desc: card.desc });
         const cardEl = wrap.querySelector(`[data-card-id="${card.id}"]`);
-        // カードのタップ・長押しはinitLongPressGlobalListener()の委譲処理で統一。
+        if (cardEl) cardEl.addEventListener("click", (e) => {
+          // 通常画面では単押しで詳細表示。
+          // 長押し後のclickはグローバル側で抑止される。
+          openCardDetail(card.id);
+        });
         list.appendChild(wrap);
       });
     }
