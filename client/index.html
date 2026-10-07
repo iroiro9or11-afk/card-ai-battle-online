@@ -117,7 +117,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.14.3</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.18.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -1175,6 +1175,16 @@
       for(const item of (Array.isArray(items)?items:[])){
         if(!item?.id || !(item.image || item.imageUrl))continue;
         registerOnlinePublicCard({id:String(item.id),image:item.image||item.imageUrl});
+      }
+      // 出撃設定カードはカード本体と画像アセットが別通信なので、
+      // アセット受信後に現在のdeployment_optionsへも画像を反映する。
+      if(onlineDeckOptions){
+        for(const list of [onlineDeckOptions.units||[],onlineDeckOptions.magics||[]]){
+          for(const card of list){
+            const remote=getOnlinePublicCard(card?.id);
+            if(remote?.image || remote?.imageUrl) Object.assign(card,{image:remote.image||remote.imageUrl});
+          }
+        }
       }
       // 画像を受け取った後は現在のカード表示も即時更新する。
       if(onlineMode && window.battleState && battleState.playerUnits){
@@ -3605,9 +3615,12 @@
   let onlineSpectating = false;
   let onlinePool = null;
   let onlineRentalDecks = [];
+  let onlineDeckList = [];
   let onlineDeckOptions = null;
   let onlineSelection = null;
   let onlineDeckRequestId = null;
+  let onlineDeckRequestTimer = null;
+  let onlineUiToken = 0;
   let onlineTimerHandle = null;
   let onlineDeadline = 0;
   let onlineSubmitted = false;
@@ -3615,7 +3628,7 @@
   let onlineLastState = null;
   let onlineEventQueue = [];
   let onlineEventProcessing = false;
-  let onlineDeferredDecisionState = null;
+  let onlineDeferredState = null;
   let onlineDeferredEnd = null;
 
   var onlineMode = false;
@@ -3878,7 +3891,9 @@
   }
 
   function resetOnlineRoomLocal(){
-    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastState=null;onlineEventQueue=[];onlineDeferredDecisionState=null;onlineDeferredEnd=null;
+    onlineUiToken++;
+    clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastState=null;onlineEventQueue=[];onlineDeferredState=null;onlineDeferredEnd=null;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
     onlineMode=false;$('online-controls')?.classList.add('hidden');
@@ -3898,6 +3913,19 @@
     $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
   }
 
+  function scheduleOnlineRoomRender(roomId){
+    const token=++onlineUiToken;
+    const render=async()=>{
+      if(token!==onlineUiToken || !onlineRoom || String(onlineRoom.roomId)!==String(roomId) || onlineSpectating)return;
+      if(!window.__cardBattleAppReady){
+        await waitForAppReady();
+        if(token!==onlineUiToken || !onlineRoom || String(onlineRoom.roomId)!==String(roomId) || onlineSpectating)return;
+      }
+      renderOnlineSelection();
+    };
+    render();
+  }
+
   function requestOnlineDeckOptions(){
     if(!onlineRoom || onlineSpectating) return;
     if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot') return;
@@ -3905,13 +3933,22 @@
     const deckId=String(onlineSelection?.deckId||'');
     if(!deckId) return;
     if(onlineDeckRequestId===deckId) return;
+    clearTimeout(onlineDeckRequestTimer);
     onlineDeckRequestId=deckId;
     setOnlineStatus('デッキのキャラクターカードを読み込んでいます…');
-    sendOnline('deck_select',{deckId});
+    const sent=sendOnline('deck_select',{deckId});
+    // 応答が何らかの理由で届かなかった場合、同じデッキを再選択しなくても再試行できるようにする。
+    onlineDeckRequestTimer=setTimeout(()=>{
+      if(onlineDeckRequestId!==deckId || onlineDeckOptions)return;
+      onlineDeckRequestId=null;
+      setOnlineStatus(sent ? 'デッキ情報の取得に時間がかかっています。再読み込みを試しています…' : '接続復帰後にデッキ情報の取得を再試行します。');
+      if(onlineRoom && !onlineSpectating) requestOnlineDeckOptions();
+    },12000);
   }
 
   function selectOnlineDeck(deckId){
     if(!onlineRoom||onlineSpectating)return;
+    clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
     onlineSelection=onlineSelection||{};
     onlineSelection.deckId=String(deckId||'');onlineSelection.deployConfirmed=false;onlineDeckOptions=null;onlineDeckRequestId=null;
     onlineReady=false;
@@ -3972,11 +4009,16 @@
 
   function renderOwnOnlineDeckSelector(){
     const area=$('online-selection-area');if(!area)return;
-    const decks=allDecks||[];
+    let decks=(onlineDeckList&&onlineDeckList.length)?onlineDeckList:(allDecks||[]);
+    // ページ更新直後のprofile_syncより先にroom_recoveredが届いても、
+    // サーバーが返したdeployment_optionsから一時的な選択肢を作って表示を止めない。
+    if(!decks.length&&onlineDeckOptions?.deckId){
+      decks=[{id:String(onlineDeckOptions.deckId),name:onlineDeckOptions.deckName||'復元中のデッキ',unitIds:(onlineDeckOptions.units||[]).map(c=>String(c.id)),magicIds:(onlineDeckOptions.magics||[]).map(c=>String(c.id))}];
+    }
     if(!decks.length){area.innerHTML='<div class="text-xs text-amber-300">使用できるデッキがありません。先に「デッキ編成」でデッキを作成してください。</div>';return;}
-    const current=onlineSelection?.deckId&&decks.some(d=>d.id===onlineSelection.deckId)?onlineSelection.deckId:decks[0].id;
+    const current=onlineSelection?.deckId&&decks.some(d=>String(d.id)===String(onlineSelection.deckId))?String(onlineSelection.deckId):String(decks[0].id);
     onlineSelection=onlineSelection||{};if(!onlineSelection.deckId)onlineSelection.deckId=current;
-    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">オンライン対戦で使用するデッキ</div><select id="online-own-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${decks.map(d=>`<option value="${esc(d.id)}" ${d.id===current?'selected':''}>${esc(d.name)}（キャラ${(d.unitIds||[]).length} / マジック${(d.magicIds||[]).length}）</option>`).join('')}</select><div class="text-[10px] text-slate-500">デッキ選択後、出撃3体と控え順を決定します。</div>`;
+    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">オンライン対戦で使用するデッキ</div><select id="online-own-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${decks.map(d=>`<option value="${esc(d.id)}" ${String(d.id)===String(current)?'selected':''}>${esc(d.name)}（キャラ${(d.unitIds||[]).length} / マジック${(d.magicIds||[]).length}）</option>`).join('')}</select><div class="text-[10px] text-slate-500">デッキ選択後、出撃3体と控え順を決定します。</div>`;
     if(onlineDeckOptions)renderDeploymentBuilder(area);
     else requestOnlineDeckOptions();
   }
@@ -4092,6 +4134,27 @@
     }
   }
 
+  function safeApplyOnlineState(st, allowRetry=true){
+    if(!st)return false;
+    try{
+      applyOnlineState(st);
+      return true;
+    }catch(e){
+      console.error('Online battle state render error:',e);
+      if(allowRetry){
+        setOnlineStatus('オンライン戦闘画面を再同期しています…');
+        setTimeout(()=>safeApplyOnlineState(st,false),100);
+      }else if(st.phase==='decision'&&!onlineSpectating){
+        // 描画例外で決定画面が閉じたままになるのを防ぐ。次の受信状態で正規描画へ戻す。
+        $('decision-command-panel')?.classList.remove('hidden');
+        $('online-controls')?.classList.remove('hidden');
+        renderOnlineControls();
+        setOnlineStatus('戦闘画面の再描画に失敗しました。現在の状態を再同期しています。');
+      }
+      return false;
+    }
+  }
+
   function renderOnlineBattleLog(events){
     const log=$('battle-log');if(!log)return;
     log.innerHTML='<div class="text-slate-500">--- オンライン戦闘ログ ---</div>';
@@ -4186,8 +4249,18 @@
     onlineEventProcessing=true;
     try{
       while(onlineEventQueue.length){const ev=onlineEventQueue.shift();await playOnlineEvent(ev);}
-      if(onlineDeferredEnd){const end=onlineDeferredEnd;onlineDeferredEnd=null;applyOnlineState(end.state);$('online-controls')?.classList.add('hidden');const st=end.state;alert((end.winner==='player1'&&st.yourSide==='player1')||(end.winner==='player2'&&st.yourSide==='player2')?'勝利！':end.winner==='draw'?'引き分け':'敗北…');}
-      else if(onlineDeferredDecisionState){const st=onlineDeferredDecisionState;onlineDeferredDecisionState=null;applyOnlineState(st);}
+      // ポップアップ中に届いた最新stateだけを最後に反映する。
+      // これにより、演出途中でコマンド画面が開閉して次ターン入力不能になる競合を避ける。
+      if(onlineDeferredEnd){
+        const end=onlineDeferredEnd;onlineDeferredEnd=null;onlineDeferredState=null;
+        safeApplyOnlineState(end.state);
+        $('online-controls')?.classList.add('hidden');
+        const st=end.state;
+        alert((end.winner==='player1'&&st.yourSide==='player1')||(end.winner==='player2'&&st.yourSide==='player2')?'勝利！':end.winner==='draw'?'引き分け':'敗北…');
+      }else if(onlineDeferredState){
+        const st=onlineDeferredState;onlineDeferredState=null;
+        safeApplyOnlineState(st);
+      }
     }finally{onlineEventProcessing=false;}
   }
 
@@ -4208,26 +4281,37 @@
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineRentalDecks=m.rentalDecks||[];renderRoomPanel();renderPlayerList([]);renderOnlineSelection();onlineCreateInFlight=false;setOnlineStatus('部屋に参加しました。カード画像を同期しています…');sendCardAssets();
-      // 通常ルールは最初のデッキ候補をサーバーへ同期して、出撃設定まで進められるようにする。
-      if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && onlineSelection?.deckId) sendOnline('deck_select',{deckId:String(onlineSelection.deckId)});
+      clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineDeckRequestId=null;onlineDeckList=Array.isArray(m.myDecks)?m.myDecks:[];onlineRentalDecks=Array.isArray(m.rentalDecks)?m.rentalDecks:[];
+      // 部屋参加時は必ずオンライン画面へ移動し、アプリ本体のIndexedDB読込完了後にデッキUIを描画する。
+      switchView('online');renderRoomPanel();renderPlayerList([]);
+      $('online-selection-area').innerHTML='<div class="text-xs text-slate-400">オンライン用カード・デッキ情報を読み込んでいます…</div>';
+      setOnlineStatus('部屋に参加しました。カード画像を同期しています…');
+      sendCardAssets();
+      scheduleOnlineRoomRender(onlineRoom.roomId);
       return;
     }
     if(m.type==='room_recovered'){
+      clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
       onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineAssetsReady=false;
       onlineSelection={...(m.selection||{})};
       // ページ更新時は「出撃設定(selection)」とは別に保存されている
-      // 「使用デッキ(deckSelection)」を必ず復元する。これをしないとUIだけ
-      // 先頭デッキへ戻り、サーバーが復元したカード群と表示デッキが食い違う。
+      // 「使用デッキ(deckSelection)」を必ず復元する。さらにサーバー上の
+      // 公開デッキ一覧も保持し、IndexedDBの読込完了前に先頭デッキへ戻らない。
       const recoveredDeckId=m.deckSelection?.id||m.deploymentOptions?.deckId||onlineSelection.deckId||'';
       if(recoveredDeckId) onlineSelection.deckId=String(recoveredDeckId);
-      onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;onlineDeckRequestId=null;
+      onlinePool=null;onlineRentalDecks=Array.isArray(m.rentalDecks)?m.rentalDecks:[];onlineDeckList=Array.isArray(m.myDecks)?m.myDecks:[];onlineDeckOptions=null;onlineDeckRequestId=null;
+      switchView('online');
       renderRoomPanel();renderPlayerList(m.players||[]);
       if(m.deploymentOptions){
         onlineDeckOptions=m.deploymentOptions;
         if(onlineDeckOptions.deckId) onlineSelection.deckId=String(onlineDeckOptions.deckId);
       }
-      renderOnlineSelection();sendCardAssets();setOnlineStatus('部屋・対戦状態を復元しました。');return;
+      // オフラインの対戦準備画面へ戻るレースを防ぐため、画面復元を遅延させるのは
+      // オンラインUIだけに限定し、戦闘snapshotは通常のbattle_state処理へ任せる。
+      scheduleOnlineRoomRender(onlineRoom.roomId);
+      sendCardAssets();
+      setOnlineStatus('部屋・デッキ・出撃設定を復元しています…');return;
     }
     if(m.type==='spectate_joined'){
       onlineRoom=m.room;onlineSpectating=true;onlineReady=false;renderRoomPanel();$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。プレイヤー操作はできません。</div>';setOnlineStatus('観戦中です。');return;
@@ -4240,8 +4324,9 @@
       // deployment_options はカード本体、deployment_assets は画像を別送する。
       // ここで存在しない旧関数名 registerPublicCard を呼ぶと受信処理全体が
       // 例外停止し、キャラクターカードが表示されないため、共通キャッシュ登録関数を使う。
+      clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
       (m.units||[]).forEach(registerOnlinePublicCard);(m.magics||[]).forEach(registerOnlinePublicCard);
-      onlineDeckOptions={units:m.units||[],magics:m.magics||[],deckId:m.deckId,deckName:m.deckName};
+      onlineDeckOptions={units:(m.units||[]).map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})),magics:(m.magics||[]).map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})),deckId:m.deckId,deckName:m.deckName};
       onlineDeckRequestId=String(m.deckId||onlineSelection?.deckId||'');
       onlineSelection=onlineSelection||{};onlineSelection.deckId=m.deckId;onlineSelection.unitIds=onlineDeckOptions.units.map(c=>String(c.id));onlineSelection.magicIds=onlineDeckOptions.magics.map(c=>String(c.id));onlineSelection.active=onlineSelection.active?.filter(id=>onlineSelection.unitIds.includes(id))||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));onlineSelection.reserve=(onlineSelection.reserve||[]).filter(id=>onlineSelection.unitIds.includes(id));onlineSelection.deployConfirmed=false;onlineReady=false;setOnlineStatus(`「${onlineDeckOptions.deckName||'選択したデッキ'}」のキャラクターカードを読み込みました。出撃3体を選択してください。`);renderOnlineSelection();return;
     }
@@ -4255,12 +4340,13 @@
       onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={unitIds:[],magicIds:[],deployConfirmed:false};onlineReady=true;renderOnlineSelection();setOnlineStatus('サーバー抽選候補が届きました。');return;
     }
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
-    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);if(m.state?.phase==='decision'&&m.state?.deadline)startOnlineTimer(m.state.deadline);else if(m.state?.phase==='execution')showOnlineExecutionTimer();applyOnlineState(m.state);return;}
+    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);if(m.state?.phase==='decision'&&m.state?.deadline)startOnlineTimer(m.state.deadline);else if(m.state?.phase==='execution')showOnlineExecutionTimer();safeApplyOnlineState(m.state);return;}
     if(m.type==='battle_event'){
-      // サーバーはイベントと同時に最新stateも送る。state描画側で万一例外が
-      // 出てもイベントキュー自体は失わず、ポップアップ演出と次ターン復帰を止めない。
-      onlineEventQueue.push(m.event);
-      try{applyOnlineState(m.state);}catch(e){console.error('Online battle state render error:',e);}
+      // イベント演出中は最新stateをUIへ即反映せず保留する。
+      // イベントごとにdecision UIを書き換えると、ポップアップ表示中に
+      // コマンド選択が消えたり次ターンへ進めなくなるため、最後に一度だけ描画する。
+      if(m.event) onlineEventQueue.push(m.event);
+      if(m.state) onlineDeferredState=m.state;
       processOnlineEventQueue();return;
     }
     if(m.type==='turn_start'||m.type==='battle_state'){
@@ -4269,8 +4355,8 @@
       if(st.phase==='decision'){if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();}
       else if(st.phase==='execution')showOnlineExecutionTimer();
       else if(st.phase==='paused')showOnlinePausedTimer();
-      if(onlineEventQueue.length||onlineEventProcessing){if(st.phase==='decision')onlineDeferredDecisionState=st;else applyOnlineState(st);return;}
-      applyOnlineState(st);return;
+      if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredState=st;return;}
+      safeApplyOnlineState(st);return;
     }
     if(m.type==='battle_paused'){showOnlinePausedTimer();setOnlineStatus(m.reason||'対戦相手の接続待ちです。');return;}
     if(m.type==='battle_resumed'){setOnlineStatus('接続が復帰しました。対戦を再開します。');return;}
@@ -4279,7 +4365,7 @@
     if(m.type==='player_disconnected'){showOnlinePausedTimer();setOnlineStatus('対戦プレイヤーの接続が切断されました。再接続を待っています。');return;}
     if(m.type==='battle_end'){
       if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredEnd={winner:m.winner,state:m.state};return;}
-      applyOnlineState(m.state);$('online-controls')?.classList.add('hidden');const st=m.state;alert((m.winner==='player1'&&st.yourSide==='player1')||(m.winner==='player2'&&st.yourSide==='player2')?'勝利！':m.winner==='draw'?'引き分け':'敗北…');return;
+      safeApplyOnlineState(m.state);$('online-controls')?.classList.add('hidden');const st=m.state;alert((m.winner==='player1'&&st.yourSide==='player1')||(m.winner==='player2'&&st.yourSide==='player2')?'勝利！':m.winner==='draw'?'引き分け':'敗北…');return;
     }
     if(m.type==='room_closed'){showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();return;}
     if(m.type==='left_room'){resetOnlineRoomLocal();setOnlineStatus('部屋から退出しました。');return;}
@@ -4287,6 +4373,9 @@
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
 
       if(m.code==='INVALID_ACTION')onlineSubmitted=false;
+      if(['INVALID_DECK','NO_DECK','NO_SOURCE','PROFILE_NOT_READY','OUTSIDE_DECK','NOT_IN_ROOM'].includes(m.code)){
+        clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;onlineDeckRequestId=null;
+      }
       showOnlineError(m.message||'オンライン処理でエラーが発生しました。');
       return;
     }
