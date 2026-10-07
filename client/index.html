@@ -3458,6 +3458,7 @@
   let onlineReconnectTimer = null;
   let onlineReconnectDelay = 1000;
   let onlineCreateInFlight = false;
+  let onlineCreateWatchdog = null;
   let onlineAssetsReady = false;
   let onlineAssetsSyncing = false;
   let onlineSessionId = localStorage.getItem('cardBattleOnlineSession') || null;
@@ -3563,7 +3564,7 @@
     return {name:playerName,cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[]};
   }
   function buildCardAssetBatches(){
-    const assets=[]; const MAX_BATCH_BYTES=700*1024;
+    const assets=[]; const MAX_BATCH_BYTES=256*1024;
     let batch=[]; let size=2;
     for(const c of (allCards||[])){
       const image=typeof c?.image==='string'?c.image:(typeof c?.img==='string'?c.img:(typeof c?.imageUrl==='string'?c.imageUrl:null));
@@ -3597,9 +3598,11 @@
     const ready = await waitForAppReady();
     if (!ready) { showOnlineError('カードデータの読み込みが完了していないため、オンライン同期を待っています。'); return; }
     if (onlineAuthenticated) {
-      onlineAssetsReady=false;
+      onlineAssetsReady=!onlineRoom;
       rawSend('profile_sync',{cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],name:playerName});
-      sendCardAssets();
+      // 画像は部屋作成/入室/復帰後にだけ同期する。
+      // ロビー接続時に全画像を先送りすると、部屋作成要求が画像通信の後ろで待たされるため。
+      if (onlineRoom) sendCardAssets();
     }
   }
 
@@ -3632,6 +3635,7 @@
     };
     onlineWS.onclose=()=>{
       onlineAuthenticated=false;
+      if(onlineCreateInFlight) clearTimeout(onlineCreateWatchdog);
       updateConnectionBadge('disconnected');
       if (onlineRoom && onlineSessionId) {
         setOnlineStatus('サーバーから切断されました。再接続を試みています。');
@@ -3675,8 +3679,17 @@
       }else{
         setOnlineStatus('部屋作成要求を送信しています…');
         const sent=sendOnline('room_create',payload);
-        if(sent) setOnlineStatus('部屋作成要求を送信しました。サーバーの応答を待っています…');
-        else setOnlineStatus('接続復帰後に部屋作成要求を送信します…');
+        if(sent) {
+          setOnlineStatus('部屋作成要求を送信しました。サーバーの応答を待っています…');
+          clearTimeout(onlineCreateWatchdog);
+          onlineCreateWatchdog=setTimeout(()=>{
+            if(!onlineCreateInFlight) return;
+            onlineCreateInFlight=false;
+            const b=$('online-create-room-btn'); if(b){b.disabled=false;b.innerText='部屋を作成';}
+            showOnlineError('部屋作成要求にサーバーから応答がありません。WebSocket通信を再接続します。');
+            try{ if(onlineWS && onlineWS.readyState===WebSocket.OPEN) onlineWS.close(); }catch{}
+          },15000);
+        } else setOnlineStatus('接続復帰後に部屋作成要求を送信します…');
       }
     }catch(e){
       console.error('createOnlineRoom error',e);
@@ -4009,7 +4022,7 @@
     }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
-      onlineCreateInFlight=false; const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
+      onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
       onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineRentalDecks=m.rentalDecks||[];renderRoomPanel();renderPlayerList([]);renderOnlineSelection();onlineCreateInFlight=false;setOnlineStatus('部屋に参加しました。カード画像を同期しています…');sendCardAssets();
       // 通常ルールは最初のデッキ候補をサーバーへ同期して、出撃設定まで進められるようにする。
       if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && onlineSelection?.deckId) sendOnline('deck_select',{deckId:String(onlineSelection.deckId)});
@@ -4060,7 +4073,7 @@
     if(m.type==='room_closed'){showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();return;}
     if(m.type==='left_room'){resetOnlineRoomLocal();setOnlineStatus('部屋から退出しました。');return;}
     if(m.type==='error'){
-      onlineCreateInFlight=false; const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
+      onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
 
       if(m.code==='INVALID_ACTION')onlineSubmitted=false;
       showOnlineError(m.message||'オンライン処理でエラーが発生しました。');
