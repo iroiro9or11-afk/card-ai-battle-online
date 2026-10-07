@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.24.0 - ストーリーモード強化版</title>
+  <title>カードAI対戦ゲーム v3.25.0 - 5戦ストーリーモード</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -105,14 +105,15 @@
   </div>
 
   <!-- 戦闘終了結果ポップアップ -->
-  <div id="battle-result-modal" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 backdrop-blur-md hidden px-3">
-    <div class="bg-slate-950 border-4 border-amber-500 rounded-3xl p-6 sm:p-8 w-[94%] max-w-xl text-center shadow-[0_0_80px_rgba(245,158,11,0.45)]">
-      <div id="battle-result-title" class="text-4xl sm:text-6xl font-black text-amber-300 leading-tight">勝利！</div>
-      <div id="battle-result-message" class="mt-3 text-base sm:text-xl font-bold text-slate-200">戦闘に勝利しました。</div>
-      <div id="battle-result-reward" class="hidden mt-5 bg-slate-900/90 border border-amber-700/70 rounded-2xl p-4 text-left"></div>
-      <div class="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <button type="button" id="battle-result-rematch" class="py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base shadow-lg">🔄 再戦</button>
-        <button type="button" id="battle-result-back" class="py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-black text-base">↩ 戻る</button>
+  <div id="battle-result-modal" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/90 backdrop-blur-md hidden px-2 sm:px-4 py-4 overflow-y-auto">
+    <div class="bg-slate-950 border-4 border-amber-500 rounded-3xl p-7 sm:p-10 w-[98%] max-w-6xl max-h-[94vh] overflow-y-auto text-center shadow-[0_0_100px_rgba(245,158,11,0.5)] my-auto">
+      <div class="text-xs sm:text-sm font-black tracking-[0.35em] text-slate-500 mb-3">BATTLE RESULT</div>
+      <div id="battle-result-title" class="text-5xl sm:text-7xl lg:text-8xl font-black text-amber-300 leading-tight">勝利！</div>
+      <div id="battle-result-message" class="mt-4 text-lg sm:text-2xl lg:text-3xl font-black text-slate-100 leading-relaxed">戦闘に勝利しました。</div>
+      <div id="battle-result-reward" class="hidden mt-7 bg-slate-900/95 border-2 border-amber-700/70 rounded-2xl p-5 sm:p-7 text-left"></div>
+      <div class="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <button type="button" id="battle-result-rematch" class="py-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-lg sm:text-xl shadow-lg">🔄 再戦</button>
+        <button type="button" id="battle-result-back" class="py-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-black text-lg sm:text-xl">↩ 戻る</button>
       </div>
     </div>
   </div>
@@ -164,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.24.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.25.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -465,8 +466,8 @@
       <div class="w-full max-w-5xl max-h-[92vh] overflow-y-auto bg-slate-950 border-2 border-amber-500/70 rounded-2xl shadow-2xl p-5 sm:p-7">
         <div class="text-center">
           <div class="text-xs font-black tracking-[0.3em] text-amber-300">STORY START REWARD</div>
-          <h3 class="text-2xl sm:text-3xl font-black text-white mt-2">🎴 トーナメント開始カード</h3>
-          <p class="text-xs sm:text-sm text-slate-300 mt-2">今回のトーナメントで最初に使用できるカードが決まりました。</p>
+          <h3 class="text-2xl sm:text-3xl font-black text-white mt-2">🎴 ストーリー開始カード</h3>
+          <p class="text-xs sm:text-sm text-slate-300 mt-2">今回の5戦ストーリーで最初に使用できるカードが決まりました。</p>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
           <div class="bg-slate-900 border border-cyan-700/50 rounded-xl p-3">
@@ -489,12 +490,12 @@
       <div class="bg-gradient-to-r from-rose-950/90 via-slate-900 to-amber-950/80 border-2 border-rose-500/50 rounded-2xl p-4 sm:p-5 shadow-2xl">
         <div class="flex flex-col lg:flex-row justify-between gap-4 items-start lg:items-center">
           <div>
-            <div class="text-xs font-black tracking-[0.25em] text-rose-300">STORY TOURNAMENT</div>
-            <h2 class="text-2xl sm:text-3xl font-black text-white mt-1">📖 ストーリートーナメント</h2>
-            <p class="text-xs sm:text-sm text-slate-300 mt-2">カード一覧から手に入れたカードだけで即席デッキを組み、32人トーナメントを勝ち抜きます。</p>
+            <div class="text-xs font-black tracking-[0.25em] text-rose-300">STORY MODE / 5 MATCHES</div>
+            <h2 class="text-2xl sm:text-3xl font-black text-white mt-1">📖 ストーリーモード</h2>
+            <p class="text-xs sm:text-sm text-slate-300 mt-2">最初にキャラ5枚＋マジック10枚を獲得。ライバル5人を倒し、勝利するたびにキャラ3枚＋マジック5枚を解放します。</p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <button type="button" onclick="prepareNewStoryMode()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs">🆕 新しいトーナメント</button>
+            <button type="button" onclick="prepareNewStoryMode()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs">🆕 新しい5戦を準備</button>
             <button type="button" onclick="switchView('battle-setup')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs">通常対戦へ</button>
           </div>
         </div>
@@ -503,104 +504,69 @@
       <div id="story-start-panel" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
         <div class="text-center">
           <div class="text-5xl mb-3">🏆</div>
-          <h3 class="text-xl font-black text-amber-300">トーナメントに挑戦</h3>
-          <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">開始時にキャラ5枚＋マジック10枚をランダム獲得。勝利するたびにキャラ3枚＋マジック5枚が追加解放されます。開始前に対戦表を自由に調整できます。</p>
+          <h3 class="text-xl font-black text-amber-300">5戦ストーリーを開始</h3>
+          <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">登録ライバルから5人をランダム選出。不足分はカード一覧から素人～凡人の即席ライバルを自動生成します。後半ほど強い相手が来るように調整されています。</p>
         </div>
         <div class="flex flex-wrap justify-center gap-2">
-          <button type="button" onclick="storyRandomizeDraftTournament()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl text-xs">🎲 トーナメントをランダム再生成</button>
-          <button type="button" onclick="startNewStoryMode()" class="px-8 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg text-sm">🎴 このトーナメントで開始</button>
+          <button type="button" onclick="storyRandomizeDraftOpponents()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl text-xs">🎲 ライバルを再抽選</button>
+          <button type="button" onclick="startNewStoryMode()" class="px-8 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg text-sm">🎴 5戦ストーリーを開始</button>
         </div>
         <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div>
-              <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">開始前トーナメント表</div>
-              <div class="text-[10px] text-slate-500 mt-1">各ライバル欄を変更できます。即席ライバルはカード一覧から自動生成されます。</div>
+              <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">5戦の対戦予定</div>
+              <div class="text-[10px] text-slate-500 mt-1">各戦の相手とAI難易度を開始前に確認・変更できます。</div>
             </div>
-            <div class="text-[10px] text-slate-500">32枠 / 5回戦</div>
+            <div class="text-[10px] text-slate-500">第1戦 → 第5戦</div>
           </div>
-          <div id="story-start-bracket" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-2"></div>
+          <div id="story-start-opponents" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div>
+        </div>
+
+        <div class="bg-slate-950 border border-cyan-700/60 rounded-2xl p-4 space-y-4">
+          <div class="flex flex-wrap justify-between items-center gap-2">
+            <div>
+              <div class="text-xs font-black text-cyan-300 border-l-2 border-cyan-400 pl-2">開始前ストーリー用デッキ編成</div>
+              <div class="text-[10px] text-slate-500 mt-1">最初に受け取る5枚＋10枚をここで確認し、使うキャラ3～5枚・マジック最大10枚を決めます。</div>
+            </div>
+            <div id="story-start-deck-validation" class="text-[10px] font-black text-emerald-300"></div>
+          </div>
+          <div class="bg-slate-900 border border-amber-700/60 rounded-xl p-3">
+            <div class="text-xs font-black text-amber-300 mb-3">✅ 確定した初期出撃・控え</div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div class="bg-cyan-950/20 border border-cyan-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-cyan-300 mb-2">🔵 初期出撃 3体</div><div id="story-start-confirmed-active" class="grid grid-cols-3 gap-2"></div></div>
+              <div class="bg-amber-950/20 border border-amber-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-amber-300 mb-2">🟡 控え 最大2体</div><div id="story-start-confirmed-reserve" class="grid grid-cols-2 gap-2"></div></div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-amber-300">キャラクター</span><span id="story-start-unit-selection-label" class="text-[10px] text-slate-400">5 / 5</span></div><div id="story-start-unit-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[430px] overflow-y-auto pr-1"></div></div>
+            <div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-purple-300">マジック</span><span id="story-start-magic-selection-label" class="text-[10px] text-slate-400">10 / 10</span></div><div id="story-start-magic-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[430px] overflow-y-auto pr-1"></div></div>
+          </div>
         </div>
       </div>
 
       <div id="story-main-panel" class="hidden space-y-4">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">現在のラウンド</div><div id="story-round-label" class="text-lg font-black text-amber-300 mt-1">第1回戦</div></div>
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">現在の対戦</div><div id="story-round-label" class="text-lg font-black text-amber-300 mt-1">第1戦 / 全5戦</div></div>
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">勝利数</div><div id="story-win-label" class="text-lg font-black text-emerald-300 mt-1">0 / 5</div></div>
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">使用可能キャラ</div><div id="story-unit-count" class="text-lg font-black text-cyan-300 mt-1">0</div></div>
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">使用可能マジック</div><div id="story-magic-count" class="text-lg font-black text-purple-300 mt-1">0</div></div>
         </div>
-
-        <div class="bg-slate-900 border border-amber-700/50 rounded-2xl p-4">
-          <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
-            <div>
-              <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">トーナメント表</div>
-              <div id="story-bracket-status" class="text-[10px] text-slate-500 mt-1">全32枠・敵同士の対戦は自動処理</div>
-            </div>
-            <div class="text-[10px] font-black text-cyan-300">現在地を表示中</div>
-          </div>
-          <div id="story-bracket-top" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2"></div>
-        </div>
-
+        <div class="bg-slate-900 border border-amber-700/50 rounded-2xl p-4"><div class="flex flex-wrap justify-between items-center mb-3 gap-2"><div><div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">5戦の進行</div><div class="text-[10px] text-slate-500 mt-1">現在の対戦と勝利済みの対戦を表示します。</div></div><div class="text-[10px] font-black text-cyan-300">次の相手のデッキも確認可能</div></div><div id="story-opponent-sequence" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div></div>
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
-          <div class="xl:col-span-4 bg-slate-900 border border-rose-700/50 rounded-2xl p-4 space-y-3">
-            <div class="text-xs font-black text-rose-300 border-l-2 border-rose-400 pl-2">次のライバル</div>
+          <div class="xl:col-span-5 bg-slate-900 border border-rose-700/50 rounded-2xl p-4 space-y-4">
+            <div class="text-xs font-black text-rose-300 border-l-2 border-rose-400 pl-2">次の対戦相手とデッキ</div>
             <div id="story-opponent-card" class="bg-slate-950 rounded-xl border border-slate-800 p-4"></div>
-            <div class="text-[10px] text-slate-500 leading-relaxed">自分以外の試合は裏で自動進行し、次の対戦相手が決まります。</div>
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-3"><div class="text-[10px] font-black text-cyan-300 mb-2">キャラクター</div><div id="story-opponent-unit-deck" class="grid grid-cols-3 gap-2"></div></div>
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-3"><div class="text-[10px] font-black text-purple-300 mb-2">マジック</div><div id="story-opponent-magic-deck" class="grid grid-cols-5 gap-2"></div></div>
           </div>
-
-          <div class="xl:col-span-8 bg-slate-900 border border-cyan-700/50 rounded-2xl p-4">
-            <div class="flex flex-col sm:flex-row justify-between gap-2 items-start sm:items-center mb-3">
-              <div>
-                <div class="text-xs font-black text-cyan-300 border-l-2 border-cyan-400 pl-2">ストーリー用デッキ編成</div>
-                <div class="text-[10px] text-slate-500 mt-1">キャラ3～5枚、マジック最大10枚。カードは勝利するほど増えます。</div>
-              </div>
-              <button type="button" onclick="storyResetDeckToSafeDefault()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-[10px] font-bold text-slate-300">初期構成に戻す</button>
-            </div>
-            <div class="bg-slate-950 border border-amber-700/60 rounded-xl p-3 mb-4">
-              <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
-                <div>
-                  <div class="text-xs font-black text-amber-300">✅ 確定したストーリー用デッキ</div>
-                  <div class="text-[10px] text-slate-500 mt-1">出撃3体と控え最大2体をここで指定します。控えは設定した順番で登場します。</div>
-                </div>
-                <div id="story-deployment-validation" class="text-[10px] text-slate-400"></div>
-              </div>
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div class="bg-cyan-950/20 border border-cyan-900/60 rounded-xl p-2">
-                  <div class="text-[10px] font-black text-cyan-300 mb-2">🔵 初期出撃 3体</div>
-                  <div id="story-confirmed-active" class="grid grid-cols-3 gap-2"></div>
-                </div>
-                <div class="bg-amber-950/20 border border-amber-900/60 rounded-xl p-2">
-                  <div class="text-[10px] font-black text-amber-300 mb-2">🟡 控え（登場順）最大2体</div>
-                  <div id="story-confirmed-reserve" class="grid grid-cols-2 gap-2"></div>
-                </div>
-              </div>
-            </div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-amber-300">キャラクター</span><span id="story-unit-selection-label" class="text-[10px] text-slate-400">0 / 5</span></div>
-                <div id="story-unit-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[480px] overflow-y-auto pr-1"></div>
-              </div>
-              <div>
-                <div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-purple-300">マジック</span><span id="story-magic-selection-label" class="text-[10px] text-slate-400">0 / 10</span></div>
-                <div id="story-magic-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[480px] overflow-y-auto pr-1"></div>
-              </div>
-            </div>
-            <div class="mt-4 border-t border-slate-800 pt-3 flex flex-col sm:flex-row justify-between gap-3 items-center">
-              <div id="story-deck-validation" class="text-xs text-slate-300"></div>
-              <button type="button" onclick="startStoryBattle()" class="w-full sm:w-auto px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl shadow-lg">⚔️ 対戦相手を確認して開始</button>
-            </div>
+          <div class="xl:col-span-7 bg-slate-900 border border-cyan-700/50 rounded-2xl p-4">
+            <div class="flex flex-col sm:flex-row justify-between gap-2 items-start sm:items-center mb-3"><div><div class="text-xs font-black text-cyan-300 border-l-2 border-cyan-400 pl-2">ストーリー用デッキ編成</div><div class="text-[10px] text-slate-500 mt-1">キャラ3～5枚、マジック最大10枚。初期出撃3体＋控え最大2体を設定します。</div></div><button type="button" onclick="storyResetDeckToSafeDefault()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-[10px] font-bold text-slate-300">初期構成に戻す</button></div>
+            <div class="bg-slate-950 border border-amber-700/60 rounded-xl p-3 mb-4"><div class="flex flex-wrap justify-between items-center gap-2 mb-3"><div><div class="text-xs font-black text-amber-300">✅ 確定したストーリー用デッキ</div><div class="text-[10px] text-slate-500 mt-1">この編成が戦闘へ引き継がれます。</div></div><div id="story-deployment-validation" class="text-[10px] text-slate-400"></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-3"><div class="bg-cyan-950/20 border border-cyan-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-cyan-300 mb-2">🔵 初期出撃 3体</div><div id="story-confirmed-active" class="grid grid-cols-3 gap-2"></div></div><div class="bg-amber-950/20 border border-amber-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-amber-300 mb-2">🟡 控え（登場順）最大2体</div><div id="story-confirmed-reserve" class="grid grid-cols-2 gap-2"></div></div></div></div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4"><div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-amber-300">キャラクター</span><span id="story-unit-selection-label" class="text-[10px] text-slate-400">0 / 5</span></div><div id="story-unit-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[480px] overflow-y-auto pr-1"></div></div><div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-purple-300">マジック</span><span id="story-magic-selection-label" class="text-[10px] text-slate-400">0 / 10</span></div><div id="story-magic-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[480px] overflow-y-auto pr-1"></div></div></div>
+            <div class="mt-4 border-t border-slate-800 pt-3 flex flex-col sm:flex-row justify-between gap-3 items-center"><div id="story-deck-validation" class="text-xs text-slate-300"></div><button type="button" onclick="startStoryBattle()" class="w-full sm:w-auto px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl shadow-lg">⚔️ 対戦相手を確認して開始</button></div>
           </div>
         </div>
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div class="flex justify-between items-center mb-3"><div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">トーナメント進行</div><div class="text-[10px] text-slate-500">全32枠・敵同士の対戦は自動処理</div></div>
-          <div id="story-bracket" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2"></div>
-        </div>
-
-        <div id="story-reward-history" class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2 mb-2">獲得カード履歴</div>
-          <div id="story-reward-history-list" class="space-y-2 text-[10px] text-slate-400"></div>
-        </div>
+        <div id="story-reward-history" class="bg-slate-900 border border-slate-800 rounded-2xl p-4"><div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2 mb-2">獲得カード履歴</div><div id="story-reward-history-list" class="space-y-2 text-[10px] text-slate-400"></div></div>
       </div>
     </section>
 
@@ -2516,487 +2482,129 @@
 
 
     // ===== ストーリーモード =====
-    // ストーリーの進行はIndexedDBのsettingsに保存し、ページ更新後も途中から再開できるようにする。
-    function storyShuffle(arr){
-      const a=[...(arr||[])];
-      for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
-      return a;
-    }
-    async function saveStoryModeState(){
-      if(!storyModeState){await deleteFromStore('settings','story_mode_state');return;}
-      await saveToStore('settings',{key:'story_mode_state',value:storyModeState});
-    }
-    async function saveStoryModeDraft(){
-      if(!storyModeDraft){await deleteFromStore('settings','story_mode_draft');return;}
-      await saveToStore('settings',{key:'story_mode_draft',value:storyModeDraft});
-    }
+    // 5戦の順番制ストーリーモード。旧32人トーナメント状態も安全に移行する。
+    function storyShuffle(arr){const a=[...(arr||[])];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+    async function saveStoryModeState(){if(!storyModeState){await deleteFromStore('settings','story_mode_state');return;}await saveToStore('settings',{key:'story_mode_state',value:storyModeState});}
+    async function saveStoryModeDraft(){if(!storyModeDraft){await deleteFromStore('settings','story_mode_draft');return;}await saveToStore('settings',{key:'story_mode_draft',value:storyModeDraft});}
     function storyCardById(id){return allCards.find(c=>String(c.id)===String(id));}
     function storyUnitIds(){return (storyModeState?.availableUnitIds||[]).filter(id=>storyCardById(id)?.cardType==='unit');}
     function storyMagicIds(){return (storyModeState?.availableMagicIds||[]).filter(id=>storyCardById(id)?.cardType==='magic');}
-    function storySelectedUnits(){return (storyModeState?.playerDeck?.unitIds||[]).filter(id=>storyUnitIds().includes(id));}
-    function storySelectedMagics(){return (storyModeState?.playerDeck?.magicIds||[]).filter(id=>storyMagicIds().includes(id));}
+    function storySelectedUnits(){return (storyModeState?.playerDeck?.unitIds||[]).filter(id=>storyUnitIds().some(x=>String(x)===String(id)));}
+    function storySelectedMagics(){return (storyModeState?.playerDeck?.magicIds||[]).filter(id=>storyMagicIds().some(x=>String(x)===String(id)));}
+    function storyAiName(level){return ({novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[level]||'凡人');}
+    function storyAiRank(level){return ({novice:0,normal:1,expert:2,master:3}[level]??1);}
+    function storyGeneratedAi(index){return index<2?'novice':'normal';}
+    function storyCloneParticipant(p){return p?JSON.parse(JSON.stringify(p)):null;}
 
-    function storyMakeInstantRival(serial){
-      const units=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,Math.min(5,allCards.filter(c=>c.cardType==='unit').length));
-      const magics=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,Math.min(10,allCards.filter(c=>c.cardType==='magic').length));
-      return {id:`story_instant_${Date.now()}_${serial}_${Math.random().toString(36).slice(2,7)}`,type:'instant',name:`即席ライバル ${String(serial).padStart(2,'0')}`,iconImage:null,intelligence:Math.random()<0.5?'novice':'normal',unitIds:units.map(c=>c.id),magicIds:magics.map(c=>c.id)};
+    function storyMakeInstantRival(serial,intelligence='normal'){
+      const unitPool=allCards.filter(c=>c.cardType==='unit'),magicPool=allCards.filter(c=>c.cardType==='magic');
+      const units=storyShuffle(unitPool).slice(0,Math.min(5,unitPool.length));const magics=storyShuffle(magicPool).slice(0,Math.min(10,magicPool.length));
+      return {id:`story_instant_${Date.now()}_${serial}_${Math.random().toString(36).slice(2,7)}`,type:'instant',name:`即席ライバル ${String(serial).padStart(2,'0')}`,iconImage:null,intelligence,unitIds:units.map(c=>c.id),magicIds:magics.map(c=>c.id)};
     }
-
-    function storyBuildFixedParticipant(rival, serial){
-      const deck=allDecks.find(d=>d.id===rival.deckId);
-      if(!deck || (deck.unitIds||[]).length<3) return storyMakeInstantRival(serial);
+    function storyBuildFixedParticipant(rival,serial){
+      const deck=allDecks.find(d=>d.id===rival.deckId);if(!deck||(deck.unitIds||[]).length<3)return storyMakeInstantRival(serial,'normal');
       return {id:`story_rival_${rival.id}`,type:'rival',rivalId:rival.id,name:rival.name||`ライバル${serial}`,iconImage:rival.iconImage||null,intelligence:rival.intelligence||'normal',deckId:deck.id,unitIds:[...(deck.unitIds||[])].slice(0,5),magicIds:[...(deck.magicIds||[])].slice(0,10)};
     }
 
-    function storyCloneParticipant(p){return p ? JSON.parse(JSON.stringify(p)) : null;}
+    function storyCreateOpponentDraft(){
+      const fixed=storyShuffle(allRivals||[]).slice(0,Math.min(5,(allRivals||[]).length));const entries=fixed.map(r=>({type:'rival',rivalId:r.id}));
+      while(entries.length<5)entries.push({type:'instant',intelligence:storyGeneratedAi(entries.length)});
+      const byRank=new Map();entries.forEach((e,i)=>{let rank=e.type==='rival'?(storyAiRank(allRivals.find(r=>r.id===e.rivalId)?.intelligence||'normal')):storyAiRank(e.intelligence||storyGeneratedAi(i));if(!byRank.has(rank))byRank.set(rank,[]);byRank.get(rank).push(e);});
+      return [...byRank.keys()].sort((a,b)=>a-b).flatMap(k=>storyShuffle(byRank.get(k))).slice(0,5);
+    }
+    function storyEnsureDraft(){
+      if(!storyModeDraft||storyModeDraft.version<5||!Array.isArray(storyModeDraft.opponents)||storyModeDraft.opponents.length!==5){storyModeDraft={version:5,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};storyPrepareDraftCards();saveStoryModeDraft();}
+      if(!storyModeDraft.initialUnitIds?.length||!storyModeDraft.initialMagicIds?.length)storyPrepareDraftCards();
+      return storyModeDraft;
+    }
+    function storyPrepareDraftCards(){
+      if(!storyModeDraft)return;const uc=allCards.filter(c=>c.cardType==='unit').length,mc=allCards.filter(c=>c.cardType==='magic').length; if(uc<5||mc<10)return;
+      if(!Array.isArray(storyModeDraft.initialUnitIds)||storyModeDraft.initialUnitIds.length!==5)storyModeDraft.initialUnitIds=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,5).map(c=>c.id);
+      if(!Array.isArray(storyModeDraft.initialMagicIds)||storyModeDraft.initialMagicIds.length!==10)storyModeDraft.initialMagicIds=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,10).map(c=>c.id);
+      const validU=new Set(storyModeDraft.initialUnitIds.map(String)),validM=new Set(storyModeDraft.initialMagicIds.map(String));const oldU=(storyModeDraft.playerDeck?.unitIds||[]).map(String).filter(id=>validU.has(id)).slice(0,5);const oldM=(storyModeDraft.playerDeck?.magicIds||[]).map(String).filter(id=>validM.has(id)).slice(0,10);
+      const units=oldU.length?oldU:storyModeDraft.initialUnitIds.slice(0,5);const magics=oldM.length?oldM:storyModeDraft.initialMagicIds.slice(0,10);storyModeDraft.playerDeck={unitIds:[...units],magicIds:[...magics]};
+      if(!storyModeDraft.playerDeployment)storyModeDraft.playerDeployment={active:units.slice(0,3),reserve:units.slice(3,5)};storyDraftNormalizeDeployment();
+    }
+    function storyDraftNormalizeDeployment(){
+      if(!storyModeDraft)return;const selected=[...(storyModeDraft.playerDeck?.unitIds||[])].map(String);const set=new Set(selected);let active=[...(storyModeDraft.playerDeployment?.active||[])].map(String).filter(id=>set.has(id));let reserve=[...(storyModeDraft.playerDeployment?.reserve||[])].map(String).filter(id=>set.has(id)&&!active.includes(id));
+      selected.forEach(id=>{if(active.length<3&&!active.includes(id)&&!reserve.includes(id))active.push(id);});selected.forEach(id=>{if(active.length>=3&&!active.includes(id)&&!reserve.includes(id)&&reserve.length<2)reserve.push(id);});storyModeDraft.playerDeployment={active:active.slice(0,3),reserve:reserve.slice(0,2)};
+    }
+    function storyDraftValidate(){storyEnsureDraft();storyDraftNormalizeDeployment();const u=storyModeDraft.playerDeck.unitIds,m=storyModeDraft.playerDeck.magicIds,d=storyModeDraft.playerDeployment;const ok=u.length>=3&&u.length<=5&&m.length<=10&&d.active.length===3&&d.active.length+d.reserve.length===u.length;return {ok,message:ok?`出撃3体 / 控え${d.reserve.length}体 / マジック${m.length}枚`:'キャラ3～5枚・出撃3体・控えを設定してください。'};}
+    function toggleStoryDraftUnit(id){storyEnsureDraft();const deck=storyModeDraft.playerDeck,i=deck.unitIds.findIndex(x=>String(x)===String(id));if(i>=0){if(deck.unitIds.length<=3){alert('キャラクターは最低3枚必要です。');return;}deck.unitIds.splice(i,1);}else{if(deck.unitIds.length>=5){alert('キャラクターは最大5枚です。');return;}deck.unitIds.push(id);}storyDraftNormalizeDeployment();saveStoryModeDraft();renderStoryMode();}
+    function toggleStoryDraftMagic(id){storyEnsureDraft();const deck=storyModeDraft.playerDeck,i=deck.magicIds.findIndex(x=>String(x)===String(id));if(i>=0)deck.magicIds.splice(i,1);else{if(deck.magicIds.length>=10){alert('マジックは最大10枚です。');return;}deck.magicIds.push(id);}saveStoryModeDraft();renderStoryMode();}
+    function storySetDraftDeploymentSlot(id,slot){storyEnsureDraft();storyDraftNormalizeDeployment();const d=storyModeDraft.playerDeployment;d.active=d.active.filter(x=>String(x)!==String(id));d.reserve=d.reserve.filter(x=>String(x)!==String(id));const n=Math.max(1,Math.min(3,parseInt(String(slot).replace(/\D/g,''),10)||1));if(String(slot).startsWith('active'))d.active.splice(n-1,0,id);else d.reserve.splice(Math.min(1,parseInt(String(slot).replace(/\D/g,''),10)-1),0,id);storyDraftNormalizeDeployment();saveStoryModeDraft();renderStoryMode();}
+    function storyResetDraftDeck(){storyEnsureDraft();storyModeDraft.playerDeck={unitIds:[...storyModeDraft.initialUnitIds],magicIds:[...storyModeDraft.initialMagicIds]};storyModeDraft.playerDeployment={active:storyModeDraft.initialUnitIds.slice(0,3),reserve:storyModeDraft.initialUnitIds.slice(3,5)};saveStoryModeDraft();renderStoryMode();}
 
-    function storyCreateDraftEntries(){
-      const rivals=storyShuffle(allRivals).slice(0,31);
-      return [{type:'player'}, ...rivals.map(r=>({type:'rival',rivalId:r.id})), ...Array.from({length:Math.max(0,31-rivals.length)},()=>({type:'instant'}))].slice(0,32);
-    }
-    function storyEnsureDraftTournament(){
-      if(!storyModeDraft?.entries || storyModeDraft.entries.length!==32 || storyModeDraft.entries[0]?.type!=='player'){
-        storyModeDraft={version:2,entries:storyCreateDraftEntries()};
-        if (typeof saveStoryModeDraft === 'function') saveStoryModeDraft();
-      }
-      return storyModeDraft.entries;
-    }
-    function storyDraftToParticipants(){
-      const entries=storyEnsureDraftTournament();
-      let instantSerial=1;
-      return entries.map((e,i)=>{
-        if(i===0)return {id:'story_player',type:'player',name:playerName,iconImage:playerIcon||null,intelligence:'master',unitIds:[],magicIds:[]};
-        if(e?.type==='rival'){
-          const r=allRivals.find(x=>x.id===e.rivalId);
-          if(r)return storyBuildFixedParticipant(r,i);
-        }
-        return storyMakeInstantRival(instantSerial++);
-      });
-    }
-    function storyCreateInitialTournament(){ return storyDraftToParticipants(); }
-    function storyDraftLabel(e){
-      if(e?.type==='rival'){ const r=allRivals.find(x=>x.id===e.rivalId); return r?.name || '登録ライバル'; }
-      return '🎲 即席ライバル';
-    }
-    function storyRandomizeDraftTournament(){
-      storyModeDraft={version:2,entries:storyCreateDraftEntries()};
-      if (typeof saveStoryModeDraft === 'function') saveStoryModeDraft();
-      renderStoryMode();
-    }
-    function storySetDraftSlot(index,value){
-      const entries=storyEnsureDraftTournament();
-      if(index<=0)return;
-      const next=value==='instant'?{type:'instant'}:{type:'rival',rivalId:value.replace(/^rival:/,'')};
-      const duplicateIndex=next.type==='rival' ? entries.findIndex((e,i)=>i!==index&&e.type==='rival'&&e.rivalId===next.rivalId) : -1;
-      if(duplicateIndex>0){ const old=entries[index]; entries[index]=entries[duplicateIndex]; entries[duplicateIndex]=old; }
-      else entries[index]=next;
-      saveStoryModeDraft();renderStoryMode();
-    }
+    function storyRenderCompactCard(c,type='unit'){const img=getCardImage(c);const label=type==='unit'?'キャラ':'マジック';return `<div class="rounded-lg border border-slate-700 bg-slate-900 p-1 text-center"><div class="h-14 sm:h-16 overflow-hidden rounded-md bg-slate-950">${img?`<img src="${img}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:''}</div><div class="text-[8px] sm:text-[9px] font-black text-slate-200 mt-1 truncate">${esc(c.name||label)}</div></div>`;}
+    function storyRenderStartOpponents(){const box=document.getElementById('story-start-opponents');if(!box)return;box.innerHTML='';const d=storyEnsureDraft();d.opponents.forEach((e,i)=>{const r=e.type==='rival'?allRivals.find(x=>x.id===e.rivalId):null;const p=r?storyBuildFixedParticipant(r,i+1):storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));const opts=allRivals.map(x=>`<option value="rival:${x.id}" ${e.type==='rival'&&e.rivalId===x.id?'selected':''}>${esc(x.name)}</option>`).join('')+`<option value="instant" ${e.type==='instant'?'selected':''}>🎲 即席ライバル</option>`;const card=document.createElement('div');card.className='rounded-xl border border-slate-800 bg-slate-950 p-3';card.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center mb-2">第${i+1}戦</div><div class="w-12 h-12 mx-auto rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${p.iconImage?`<img src="${p.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center">🤖</div>'}</div><div class="text-sm font-black text-white text-center mt-2">${esc(p.name)}</div><div class="text-[10px] font-bold text-rose-300 text-center">AI：${storyAiName(p.intelligence)}</div><select class="w-full mt-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[9px] font-bold" onchange="storySetDraftOpponent(${i},this.value)">${opts}</select>`;box.appendChild(card);});}
+    function storySetDraftOpponent(index,value){storyEnsureDraft();const next=value==='instant'?{type:'instant',intelligence:storyGeneratedAi(index)}:{type:'rival',rivalId:value.replace(/^rival:/,'')};if(next.type==='rival'){const dup=storyModeDraft.opponents.findIndex((e,i)=>i!==index&&e.type==='rival'&&e.rivalId===next.rivalId);if(dup>=0){const old=storyModeDraft.opponents[index];storyModeDraft.opponents[index]=storyModeDraft.opponents[dup];storyModeDraft.opponents[dup]=old;}else storyModeDraft.opponents[index]=next;}else storyModeDraft.opponents[index]=next;storyModeDraft.opponents=storyModeDraft.opponents.map((e,i)=>e.type==='instant'?{...e,intelligence:storyGeneratedAi(i)}:e);const ranked=storyModeDraft.opponents.map((e,i)=>({e,i,rank:e.type==='rival'?storyAiRank(allRivals.find(r=>r.id===e.rivalId)?.intelligence||'normal'):storyAiRank(e.intelligence||storyGeneratedAi(i))}));storyModeDraft.opponents=ranked.sort((a,b)=>a.rank-b.rank||a.i-b.i).map(x=>x.e);saveStoryModeDraft();renderStoryMode();}
+    function storyRenderStartConfirmed(){const a=document.getElementById('story-start-confirmed-active'),r=document.getElementById('story-start-confirmed-reserve');if(!a||!r)return;storyEnsureDraft();storyDraftNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDraftDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeDraft.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeDraft.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
+    function storyRenderStartDeckEditor(){storyEnsureDraft();const ul=document.getElementById('story-start-unit-pool'),ml=document.getElementById('story-start-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storyModeDraft.playerDeck.unitIds.map(String)),sm=new Set(storyModeDraft.playerDeck.magicIds.map(String));storyModeDraft.initialUnitIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftUnit(id);ul.appendChild(d);});storyModeDraft.initialMagicIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftMagic(id);ml.appendChild(d);});document.getElementById('story-start-unit-selection-label').innerText=`${su.size} / 5`;document.getElementById('story-start-magic-selection-label').innerText=`${sm.size} / 10`;const v=storyDraftValidate();const vb=document.getElementById('story-start-deck-validation');vb.innerText=v.ok?'設定OK':v.message;vb.className=`text-[10px] font-black ${v.ok?'text-emerald-300':'text-amber-300'}`;storyRenderStartConfirmed();}
 
-    function storySimUnit(card,side,active=true){
-      return {instanceId:generateUniqueId('storysim'),cardId:card.id,name:card.name,mainAttr:card.mainAttr,subAttrs:card.subAttrs||[],maxHp:Number(card.stats?.hp)||1,currentHp:Number(card.stats?.hp)||1,atk:Number(card.stats?.atk)||0,priority:Number(card.stats?.priority)||0,skills:JSON.parse(JSON.stringify(card.skills||[])),buffs:[],debuffs:[],statuses:[],side,isActive:active};
-    }
-    function storySimState(a,b){
-      const au=(a.unitIds||[]).map(id=>storyCardById(id)).filter(Boolean).slice(0,5), bu=(b.unitIds||[]).map(id=>storyCardById(id)).filter(Boolean).slice(0,5);
-      return {turn:1,side:'player',playerAp:0,enemyAp:0,units:[...au.map((c,i)=>storySimUnit(c,'player',i<3)),...bu.map((c,i)=>storySimUnit(c,'enemy',i<3))],hands:{player:(a.magicIds||[]).map(id=>storyCardById(id)).filter(Boolean),enemy:(b.magicIds||[]).map(id=>storyCardById(id)).filter(Boolean)}};
-    }
-    function storySimTargetScore(target,skill,actor){
-      if(!target||target.currentHp<=0)return -99999;
-      const eff=skill.mainEffect||{}; let score=Math.random()*2;
-      if(eff.type==='dmg_fixed'||eff.type==='dmg_atk_ratio'){const raw=eff.type==='dmg_fixed'?Number(eff.val)||0:Math.round(actor.atk*(Number(eff.val)||0)/100); score+=Math.min(target.currentHp,raw)*0.8; if(raw>=target.currentHp)score+=900; if(target.currentHp/target.maxHp<0.35)score+=180;}
-      if(eff.type==='heal_fixed'||eff.type==='heal_max_hp_ratio')score+=(1-target.currentHp/target.maxHp)*300;
-      if(eff.type==='skill_block'||eff.type==='heal_block')score+=target.side!==actor.side?180:0;
-      if(eff.type==='mod_speed'||eff.type==='mod_atk_ratio'||eff.type==='mod_atk_val')score+=target.side===actor.side?120:60;
-      if(eff.type==='damage_cut_ratio')score+=target.side===actor.side?180:0;
-      return score;
-    }
-    function storySimChooseAction(state,side,intelligence){
-      const actors=state.units.filter(u=>u.side===side&&u.isActive&&u.currentHp>0);
-      let ap=side==='player'?state.playerAp:state.enemyAp;
-      const enemies=state.units.filter(u=>u.side!==side&&u.isActive&&u.currentHp>0);
-      const plan=[];
-      const ordered=[...actors].sort((a,b)=>b.priority-a.priority);
-      for(const actor of ordered){
-        let best={type:'attack',actor,target:enemies.slice().sort((x,y)=>{const sy=storySimTargetScore(y,{mainEffect:{type:'dmg_atk_ratio',val:100}},actor),sx=storySimTargetScore(x,{mainEffect:{type:'dmg_atk_ratio',val:100}},actor);return sy-sx;})[0]||null,score:-1};
-        for(const sk of (actor.skills||[])){if(sk.type!=='active')continue; const cost=Math.max(0,Number(sk.cost)||0); if(cost>ap)continue; const e=sk.targetType?.includes('ally')||sk.mainEffect?.type?.startsWith('heal')?state.units.filter(u=>u.side===side&&u.isActive&&u.currentHp>0):enemies; const pool=e.filter(t=>!sk.targetCond||sk.targetCond.type==='none'||aiPlannerTargetCondition(t,sk.targetCond)); for(const t of pool){const sc=storySimTargetScore(t,sk,actor)-cost*1.5+(intelligence==='normal'?Math.random()*12:Math.random()*30); if(sc>best.score)best={type:'skill',actor,skill:sk,target:t,score:sc};}}
-        plan.push(best); if(best.type==='skill')ap-=Math.max(0,Number(best.skill.cost)||0);
-        if(ap<=0)break;
-      }
-      return {plan,remainingAp:Math.max(0,ap)};
-    }
-    function storySimApplyAction(state,action){
-      const actor=action.actor;if(!actor||actor.currentHp<=0)return;
-      if(action.type==='attack'){const enemy=action.target;if(!enemy||enemy.currentHp<=0)return;const raw=aiPlannerEffectiveAtk(actor),actual=aiPlannerDamageAfterCut(enemy,raw);enemy.currentHp=Math.max(0,enemy.currentHp-actual);return;}
-      const sk=action.skill;if(!sk)return;const cost=Math.max(0,Number(sk.cost)||0);const key=actor.side==='player'?'playerAp':'enemyAp'; if(state[key]<cost)return;state[key]-=cost;
-      const effects=[sk.mainEffect].filter(Boolean);if(sk.hasSubEffect&&sk.subEffect)effects.push(sk.subEffect);
-      for(const eff0 of effects){const eff={...eff0,targetType:eff0.targetType||sk.targetType,targetCond:eff0.targetCond||sk.targetCond};let targets=[];
-        if(eff.targetType==='self')targets=[actor];
-        else if(eff.targetType==='all_enemy')targets=state.units.filter(u=>u.side!==actor.side&&u.isActive&&u.currentHp>0);
-        else if(eff.targetType==='all_ally')targets=state.units.filter(u=>u.side===actor.side&&u.isActive&&u.currentHp>0);
-        else if(eff.targetType==='player_self'||eff.targetType==='player_opp'){
-          const targetSide=eff.targetType==='player_self'?actor.side:(actor.side==='player'?'enemy':'player'); state[targetSide==='player'?'playerAp':'enemyAp']=clamp(state[targetSide==='player'?'playerAp':'enemyAp']+(Number(eff.val)||0),0,100); continue;
-        } else targets=[action.target].filter(t=>t&&t.currentHp>0);
-        targets.forEach(t=>{if(!t)return;const r=aiPlannerApplyEffect(state,eff,t,actor,false);});
-      }
-    }
-    function storySimulateAiMatch(a,b){
-      const state=storySimState(a,b);
-      for(let turn=1;turn<=20;turn++){
-        state.turn=turn;state.playerAp=Math.min(100,state.playerAp+20);state.enemyAp=Math.min(100,state.enemyAp+20);
-        const p=storySimChooseAction(state,'player',a.intelligence); const e=storySimChooseAction(state,'enemy',b.intelligence);
-        state.playerAp=p.remainingAp; state.enemyAp=e.remainingAp;
-        const actions=[...p.plan.map(x=>({...x,speed:x.actor.priority,side:'player'})),...e.plan.map(x=>({...x,speed:x.actor.priority,side:'enemy'}))].sort((x,y)=>y.speed-x.speed);
-        for(const act of actions){storySimApplyAction(state,act); if(!state.units.some(u=>u.side==='player'&&u.currentHp>0)||!state.units.some(u=>u.side==='enemy'&&u.currentHp>0))break;}
-        const pa=state.units.filter(u=>u.side==='player'&&u.currentHp>0).length, ea=state.units.filter(u=>u.side==='enemy'&&u.currentHp>0).length;
-        if(pa===0||ea===0)return pa>0?a:b;
-        state.units.filter(u=>u.currentHp<=0&&u.isActive).forEach(u=>u.isActive=false);
-        ['player','enemy'].forEach(side=>{const q=state.units.filter(u=>u.side===side&&!u.isActive&&u.currentHp>0); if(q.length){const reserve=state.units.filter(u=>u.side===side&&!u.isActive&&u.currentHp>0);reserve.slice(0,Math.max(0,3-state.units.filter(x=>x.side===side&&x.isActive&&x.currentHp>0).length)).forEach(u=>u.isActive=true);}});
-      }
-      const ps=state.units.filter(u=>u.side==='player'&&u.currentHp>0).reduce((n,u)=>n+u.currentHp,0); const es=state.units.filter(u=>u.side==='enemy'&&u.currentHp>0).reduce((n,u)=>n+u.currentHp,0); return ps>=es?a:b;
-    }
+    function storyNormalizeDeployment(){if(!storyModeState)return;const selected=storySelectedUnits().map(String),set=new Set(selected);let active=[...(storyModeState.playerDeployment?.active||[])].map(String).filter(id=>set.has(id));let reserve=[...(storyModeState.playerDeployment?.reserve||[])].map(String).filter(id=>set.has(id)&&!active.includes(id));selected.forEach(id=>{if(active.length<3&&!active.includes(id)&&!reserve.includes(id))active.push(id);});selected.forEach(id=>{if(active.length>=3&&!active.includes(id)&&!reserve.includes(id)&&reserve.length<2)reserve.push(id);});storyModeState.playerDeployment={active:active.slice(0,3),reserve:reserve.slice(0,2)};}
+    function storySetDeploymentSlot(id,slot){if(!storyModeState||!storySelectedUnits().map(String).includes(String(id)))return;storyNormalizeDeployment();const d=storyModeState.playerDeployment;d.active=d.active.filter(x=>String(x)!==String(id));d.reserve=d.reserve.filter(x=>String(x)!==String(id));const n=Math.max(1,Math.min(3,parseInt(String(slot).replace(/\D/g,''),10)||1));if(String(slot).startsWith('active'))d.active.splice(n-1,0,id);else d.reserve.splice(Math.min(1,parseInt(String(slot).replace(/\D/g,''),10)-1),0,id);storyNormalizeDeployment();saveStoryModeState();renderStoryMode();}
+    function toggleStoryUnit(id){if(!storyModeState)return;const deck=storyModeState.playerDeck,i=deck.unitIds.findIndex(x=>String(x)===String(id));if(i>=0){if(deck.unitIds.length<=3){alert('キャラクターは最低3枚必要です。');return;}deck.unitIds.splice(i,1);storyModeState.playerDeployment.active=storyModeState.playerDeployment.active.filter(x=>String(x)!==String(id));storyModeState.playerDeployment.reserve=storyModeState.playerDeployment.reserve.filter(x=>String(x)!==String(id));}else{if(deck.unitIds.length>=5){alert('キャラクターは最大5枚です。');return;}deck.unitIds.push(id);}storyNormalizeDeployment();storyModeState.participants[0].unitIds=[...deck.unitIds];saveStoryModeState();renderStoryMode();}
+    function toggleStoryMagic(id){if(!storyModeState)return;const deck=storyModeState.playerDeck,i=deck.magicIds.findIndex(x=>String(x)===String(id));if(i>=0)deck.magicIds.splice(i,1);else{if(deck.magicIds.length>=10){alert('マジックは最大10枚です。');return;}deck.magicIds.push(id);}storyModeState.participants[0].magicIds=[...deck.magicIds];saveStoryModeState();renderStoryMode();}
+    function storyResetDeckToSafeDefault(){if(!storyModeState)return;const units=storyUnitIds().slice(0,5),magics=storyMagicIds().slice(0,10);storyModeState.playerDeck={unitIds:[...units],magicIds:[...magics]};storyModeState.playerDeployment={active:units.slice(0,3),reserve:units.slice(3,5)};storyModeState.participants[0].unitIds=[...units];storyModeState.participants[0].magicIds=[...magics];saveStoryModeState();renderStoryMode();}
+    function storyValidateDeck(){if(!storyModeState)return {ok:false,message:'ストーリーモードを開始してください。'};storyNormalizeDeployment();const u=storySelectedUnits(),m=storySelectedMagics(),d=storyModeState.playerDeployment;if(u.length<3||u.length>5)return {ok:false,message:'キャラクターを3～5枚選択してください。'};if(d.active.length!==3)return {ok:false,message:'初期出撃3体を設定してください。'};if(d.active.length+d.reserve.length!==u.length)return {ok:false,message:'選択した全キャラを出撃3体＋控えに設定してください。'};return {ok:true,message:`出撃3体 / 控え${d.reserve.length}体 / マジック${m.length}枚`};}
 
+    function storyBuildFiveOpponents(){return storyEnsureDraft().opponents.map((e,i)=>{if(e.type==='rival'){const r=allRivals.find(x=>x.id===e.rivalId);if(r)return storyBuildFixedParticipant(r,i+1);}return storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));});}
+    function storyRenderOpponentSequence(){const box=document.getElementById('story-opponent-sequence');if(!box)return;box.innerHTML='';(storyModeState?.opponents||[]).forEach((o,i)=>{const active=i===storyModeState.currentMatchIndex&&!storyModeState.completed&&!storyModeState.defeated;const done=i<(storyModeState.currentMatchIndex||0);const d=document.createElement('div');d.className=`rounded-xl border p-3 ${active?'border-amber-500 bg-amber-950/30':'border-slate-800 bg-slate-950'} ${done?'opacity-65':''}`;d.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center">第${i+1}戦 ${done?'✓':''} ${active?'◀ 次':''}</div><div class="w-10 h-10 mx-auto mt-2 rounded-full bg-slate-900 border border-rose-500 flex items-center justify-center overflow-hidden">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'🤖'}</div><div class="text-xs font-black text-white text-center mt-2 truncate">${esc(o.name)}</div><div class="text-[9px] text-rose-300 font-bold text-center">AI：${storyAiName(o.intelligence)}</div>`;box.appendChild(d);});}
+    function storyRenderOpponentDetail(){const o=storyModeState?.currentOpponent,box=document.getElementById('story-opponent-card'),ub=document.getElementById('story-opponent-unit-deck'),mb=document.getElementById('story-opponent-magic-deck');if(!box)return;if(!o){box.innerHTML='<div class="text-sm text-slate-500">次の対戦相手はありません。</div>';if(ub)ub.innerHTML='';if(mb)mb.innerHTML='';return;}box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${esc(o.name)}</div><div class="text-xs font-bold text-rose-300 mt-1">AI：${storyAiName(o.intelligence)}</div><div class="text-[10px] text-slate-500 mt-1">第${(storyModeState.currentMatchIndex||0)+1}戦</div></div></div>`;const units=(o.unitIds||[]).map(storyCardById).filter(Boolean),magics=(o.magicIds||[]).map(storyCardById).filter(Boolean);if(ub){ub.innerHTML='';units.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'unit');ub.appendChild(d);});}if(mb){mb.innerHTML='';magics.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'magic');mb.appendChild(d);});}}
+    function storyRenderConfirmed(){const a=document.getElementById('story-confirmed-active'),r=document.getElementById('story-confirmed-reserve');if(!a||!r)return;storyNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeState.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeState.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
 
-    function storyResolveRoundAiMatches(round){
-      if(!round)return;
-      for(let i=1;i<round.length;i++){
-        const m=round[i]; if(m.winner||!m.p1||!m.p2)continue;
-        const winner=storySimulateAiMatch(m.p1,m.p2);m.winner=storyCloneParticipant(winner);m.loser=storyCloneParticipant(winner.id===m.p1.id?m.p2:m.p1);m.status='finished';
-      }
-    }
-
-    function storyBuildRoundFromSources(roundIndex,sources){
-      const matches=[];for(let i=0;i<sources.length;i+=2){matches.push({index:i/2,p1:sources[i]||null,p2:sources[i+1]||null,winner:null,loser:null,status:'waiting',isPlayerMatch:i===0});}
-      if(matches[0])matches[0].isPlayerMatch=true;
-      storyResolveRoundAiMatches(matches);return matches;
-    }
-
-    function storyPrepareCurrentRound(){
-      if(!storyModeState||storyModeState.completed)return;
-      const r=storyModeState.roundIndex||0;let sources;
-      if(r===0)sources=storyModeState.participants.map(storyCloneParticipant);
-      else{const prev=storyModeState.rounds[r-1]||[];sources=prev.map(m=>m.winner).filter(Boolean);}
-      storyModeState.rounds[r]=storyBuildRoundFromSources(r,sources);
-      storyModeState.currentOpponent=storyModeState.rounds[r]?.[0]?.p2||null;
-    }
-
-    function storyGrantVictoryReward(){
-      const remainingUnits=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().includes(c.id));
-      const remainingMagics=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().includes(c.id));
-      const unitRewards=storyShuffle(remainingUnits).slice(0,3).map(c=>c.id);
-      const magicRewards=storyShuffle(remainingMagics).slice(0,5).map(c=>c.id);
-      storyModeState.availableUnitIds.push(...unitRewards);storyModeState.availableMagicIds.push(...magicRewards);
-      return {units:unitRewards.map(storyCardById).filter(Boolean),magics:magicRewards.map(storyCardById).filter(Boolean)};
-    }
-
-    function storyRecordReward(reward){
-      const names=[...(reward.units||[]).map(c=>`キャラ：${c.name}`),...(reward.magics||[]).map(c=>`マジック：${c.name}`)];
-      storyModeState.rewardHistory=storyModeState.rewardHistory||[];storyModeState.rewardHistory.unshift({win:storyModeState.wins,names,at:Date.now()});
-      storyModeState.rewardHistory=storyModeState.rewardHistory.slice(0,10);
-    }
-
-    function storyNormalizeDeployment(){
-      if(!storyModeState)return;
-      const selected=storySelectedUnits();
-      const current=storyModeState.playerDeployment||{active:[],reserve:[]};
-      let active=(current.active||[]).filter(id=>selected.includes(id));
-      let reserve=(current.reserve||[]).filter(id=>selected.includes(id)&&!active.includes(id));
-      selected.forEach(id=>{if(!active.includes(id)&&!reserve.includes(id)){if(active.length<3)active.push(id);else if(reserve.length<2)reserve.push(id);}});
-      storyModeState.playerDeployment={active:active.slice(0,3),reserve:reserve.slice(0,2)};
-    }
-    function storySetDeploymentSlot(id,slot){
-      if(!storyModeState || !storySelectedUnits().includes(id))return;
-      storyNormalizeDeployment();
-      const dep=storyModeState.playerDeployment;
-      let oldSlot=null, oldIndex=-1;
-      if(dep.active.includes(id)){oldSlot='active';oldIndex=dep.active.indexOf(id);} else if(dep.reserve.includes(id)){oldSlot='reserve';oldIndex=dep.reserve.indexOf(id);}
-      const match=/^(active|reserve)([12]|3)?$/.exec(slot); if(!match)return;
-      const type=match[1], idx=Math.max(0,(Number(match[2]||1)-1));
-      const list=dep[type]; if(idx>=list.length && type==='reserve' && idx>1)return; if(type==='active'&&idx>2)return;
-      const occupant=list[idx];
-      if(occupant===id)return;
-      if(oldSlot){dep[oldSlot].splice(oldIndex,1);}
-      // Reinsert arrays by fixed slot. Fill missing slot if needed.
-      if(occupant){
-        if(oldSlot){dep[oldSlot].splice(oldIndex,0,occupant);}
-        else if(type==='active') dep.active.splice(Math.min(idx,dep.active.length),0,occupant); else dep.reserve.splice(Math.min(idx,dep.reserve.length),0,occupant);
-      }
-      if(occupant && oldSlot){
-        if(type==='active'){dep.active[idx]=id;} else {dep.reserve[idx]=id;}
-      } else {
-        if(type==='active') dep.active.splice(Math.min(idx,dep.active.length),0,id); else dep.reserve.splice(Math.min(idx,dep.reserve.length),0,id);
-      }
-      dep.active=dep.active.filter((x,i,a)=>x&&a.indexOf(x)===i).slice(0,3);
-      dep.reserve=dep.reserve.filter((x,i,a)=>x&&!dep.active.includes(x)&&a.indexOf(x)===i).slice(0,2);
-      storyModeState.playerDeployment=dep; storyModeState.participants?.[0]&&(storyModeState.participants[0].unitIds=[...storySelectedUnits()]);
-      saveStoryModeState();renderStoryMode();
-    }
-    function storyResetDeckToSafeDefault(){
-      if(!storyModeState)return;
-      const units=storyUnitIds();
-      const selected=units.slice(0,Math.min(5,units.length));
-      storyModeState.playerDeck.unitIds=selected;
-      storyModeState.playerDeck.magicIds=storyMagicIds().slice(0,Math.min(10,storyMagicIds().length));
-      storyModeState.playerDeployment={active:selected.slice(0,3),reserve:selected.slice(3,5)};
-      storyModeState.participants[0].unitIds=[...selected];storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
-      saveStoryModeState();renderStoryMode();
-    }
-    function toggleStoryUnit(id){
-      if(!storyModeState)return;
-      const deck=storyModeState.playerDeck; const i=deck.unitIds.indexOf(id);
-      if(i>=0){
-        if(deck.unitIds.length<=3){alert('キャラクターは最低3枚必要です。');return;}
-        deck.unitIds.splice(i,1);
-        storyModeState.playerDeployment.active=storyModeState.playerDeployment.active.filter(x=>x!==id);
-        storyModeState.playerDeployment.reserve=storyModeState.playerDeployment.reserve.filter(x=>x!==id);
-        storyNormalizeDeployment();
-      }else{
-        if(deck.unitIds.length>=5){alert('キャラクターは最大5枚までです。');return;}
-        deck.unitIds.push(id);storyNormalizeDeployment();
-      }
-      storyModeState.participants[0].unitIds=[...deck.unitIds];saveStoryModeState();renderStoryMode();
-    }
-    function toggleStoryMagic(id){
-      if(!storyModeState)return;const deck=storyModeState.playerDeck;const i=deck.magicIds.indexOf(id);
-      if(i>=0)deck.magicIds.splice(i,1);else{if(deck.magicIds.length>=10){alert('マジックは最大10枚までです。');return;}deck.magicIds.push(id);}storyModeState.participants[0].magicIds=[...deck.magicIds];saveStoryModeState();renderStoryMode();
-    }
-    function storyValidateDeck(){
-      if(!storyModeState)return {ok:false,message:'ストーリーモードを開始してください。'};
-      storyNormalizeDeployment();
-      const u=storySelectedUnits(),m=storySelectedMagics(),dep=storyModeState.playerDeployment||{active:[],reserve:[]};
-      const assigned=new Set([...(dep.active||[]),...(dep.reserve||[])]);
-      if(u.length<3||u.length>5)return {ok:false,message:`キャラクターを3～5枚選択してください（現在${u.length}枚）。`};
-      if(dep.active.length!==3)return {ok:false,message:`初期出撃を3体設定してください（現在${dep.active.length}体）。`};
-      if(dep.reserve.length!==Math.max(0,u.length-3))return {ok:false,message:`控えを${Math.max(0,u.length-3)}体設定してください（現在${dep.reserve.length}体）。`};
-      if(assigned.size!==u.length)return {ok:false,message:'選択したキャラクター全員を出撃または控えに割り当ててください。'};
-      if(m.length>10)return {ok:false,message:'マジックは最大10枚です.'};
-      return {ok:true,message:`出撃3体：${dep.active.map(id=>storyCardById(id)?.name||'').join(' / ')} ｜ 控え${dep.reserve.length}体 ｜ マジック${m.length}枚`};
-    }
-
-    async function openStoryMode(){
-      switchView('story');
-      if(!storyModeState){storyEnsureDraftTournament();}
-      else if(storyRepairLoadedState()){await saveStoryModeState();}
-      if(storyModeState && (!storyModeState.rounds?.length) && storyModeState.active){storyPrepareCurrentRound();await saveStoryModeState();}
-      renderStoryMode();
-    }
-    function storyDrawUniqueIds(cardType,count,excludeIds=[]){
-      const excluded=new Set((excludeIds||[]).map(String));
-      const pool=allCards.filter(c=>c.cardType===cardType&&!excluded.has(String(c.id)));
-      return storyShuffle(pool).slice(0,count).map(c=>c.id);
-    }
-
-    function storyRenderInitialRewardModal(){
-      const modal=document.getElementById('story-initial-reward-modal');
-      const ub=document.getElementById('story-initial-unit-reward');
-      const mb=document.getElementById('story-initial-magic-reward');
-      if(!modal||!ub||!mb||!storyModeState)return;
-      ub.innerHTML='';mb.innerHTML='';
-      (storyModeState.initialUnitIds||storyModeState.availableUnitIds||[]).slice(0,5).forEach(id=>{
-        const c=storyCardById(id); if(!c)return;
-        const d=document.createElement('div'); d.className='bg-slate-950 border border-cyan-900/60 rounded-lg p-1.5';
-        d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});
-        d.onclick=()=>openCardDetail(c.id); ub.appendChild(d);
-      });
-      (storyModeState.initialMagicIds||storyModeState.availableMagicIds||[]).slice(0,10).forEach(id=>{
-        const c=storyCardById(id); if(!c)return;
-        const d=document.createElement('div'); d.className='bg-slate-950 border border-purple-900/60 rounded-lg p-1.5';
-        d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});
-        d.onclick=()=>openCardDetail(c.id); mb.appendChild(d);
-      });
-      modal.classList.remove('hidden');
-    }
-    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');}
+    function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
 
     function storyRepairLoadedState(){
       if(!storyModeState)return false;
-      let changed=false;
-      const validUnits=new Set(allCards.filter(c=>c.cardType==='unit').map(c=>String(c.id)));
-      const validMagics=new Set(allCards.filter(c=>c.cardType==='magic').map(c=>String(c.id)));
-      storyModeState.availableUnitIds=[...new Set((storyModeState.availableUnitIds||[]).map(String).filter(id=>validUnits.has(id)))];
-      storyModeState.availableMagicIds=[...new Set((storyModeState.availableMagicIds||[]).map(String).filter(id=>validMagics.has(id)))];
-      const expectedUnits=Math.min(validUnits.size,5+((storyModeState.wins||0)*3));
-      const expectedMagics=Math.min(validMagics.size,10+((storyModeState.wins||0)*5));
-      const addUnits=storyDrawUniqueIds('unit',Math.max(0,expectedUnits-storyModeState.availableUnitIds.length),storyModeState.availableUnitIds);
-      const addMagics=storyDrawUniqueIds('magic',Math.max(0,expectedMagics-storyModeState.availableMagicIds.length),storyModeState.availableMagicIds);
-      if(addUnits.length){storyModeState.availableUnitIds.push(...addUnits);changed=true;}
-      if(addMagics.length){storyModeState.availableMagicIds.push(...addMagics);changed=true;}
-      if((storyModeState.wins||0)===0){
-        const initialUnits=(storyModeState.initialUnitIds||[]).filter(id=>storyCardById(id)?.cardType==='unit');
-        const initialMagics=(storyModeState.initialMagicIds||[]).filter(id=>storyCardById(id)?.cardType==='magic');
-        if(initialUnits.length!==Math.min(5,validUnits.size)){storyModeState.initialUnitIds=storyModeState.availableUnitIds.slice(0,Math.min(5,storyModeState.availableUnitIds.length));changed=true;}
-        if(initialMagics.length!==Math.min(10,validMagics.size)){storyModeState.initialMagicIds=storyModeState.availableMagicIds.slice(0,Math.min(10,storyModeState.availableMagicIds.length));changed=true;}
-      }
-      const legacyEmptyDeck=!storyModeState.playerDeck || !Array.isArray(storyModeState.playerDeck.unitIds) || !Array.isArray(storyModeState.playerDeck.magicIds) || ((storyModeState.wins||0)===0 && storyModeState.playerDeck.unitIds.length===0 && storyModeState.playerDeck.magicIds.length===0);
-      if(legacyEmptyDeck){storyModeState.playerDeck={unitIds:storyModeState.availableUnitIds.slice(0,5),magicIds:storyModeState.availableMagicIds.slice(0,10)};changed=true;}
-      else {
-        const validAvailableUnits=new Set(storyModeState.availableUnitIds.map(String));
-        const validAvailableMagics=new Set(storyModeState.availableMagicIds.map(String));
-        const nextUnits=[...new Set(storyModeState.playerDeck.unitIds.map(String))].filter(id=>validAvailableUnits.has(id)).slice(0,5);
-        const nextMagics=[...new Set(storyModeState.playerDeck.magicIds.map(String))].filter(id=>validAvailableMagics.has(id)).slice(0,10);
-        if((storyModeState.wins||0)===0 && nextUnits.length<3){
-          const fill=storyModeState.availableUnitIds.filter(id=>!nextUnits.includes(String(id))).slice(0,3-nextUnits.length);
-          nextUnits.push(...fill);
-        }
-        if(JSON.stringify(nextUnits)!==JSON.stringify(storyModeState.playerDeck.unitIds)||JSON.stringify(nextMagics)!==JSON.stringify(storyModeState.playerDeck.magicIds)){storyModeState.playerDeck={unitIds:nextUnits,magicIds:nextMagics};changed=true;}
-      }
-      if(!storyModeState.playerDeployment || !Array.isArray(storyModeState.playerDeployment.active) || !Array.isArray(storyModeState.playerDeployment.reserve)){storyModeState.playerDeployment={active:(storyModeState.playerDeck.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck.unitIds||[]).slice(3,5)};changed=true;}
-      if(!Array.isArray(storyModeState.participants) || storyModeState.participants.length!==32){
-        storyModeState.participants=storyDraftToParticipants();
-        storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];
-        storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
-        changed=true;
-      } else {
-        const playerParticipant=storyModeState.participants[0];
-        if(!playerParticipant || playerParticipant.type!=='player'){
-          storyModeState.participants=storyDraftToParticipants();
-          changed=true;
-        }
-        if(storyModeState.participants[0]){
-          storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];
-          storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
-        }
-      }
-      return changed;
+      if(storyModeState.mode==='five_match'&&Number(storyModeState.version)>=5)return false;
+      const old=storyModeState;const existingUnits=[...new Set((old.availableUnitIds||[]).map(String).filter(id=>storyCardById(id)?.cardType==='unit'))];const existingMagics=[...new Set((old.availableMagicIds||[]).map(String).filter(id=>storyCardById(id)?.cardType==='magic'))];
+      while(existingUnits.length<5)existingUnits.push(...storyShuffle(allCards.filter(c=>c.cardType==='unit'&&!existingUnits.includes(String(c.id)))).slice(0,5-existingUnits.length).map(c=>c.id));
+      while(existingMagics.length<10)existingMagics.push(...storyShuffle(allCards.filter(c=>c.cardType==='magic'&&!existingMagics.includes(String(c.id)))).slice(0,10-existingMagics.length).map(c=>c.id));
+      let opponents=[];if(Array.isArray(old.opponents)&&old.opponents.length)opponents=old.opponents.slice(0,5);else if(old.currentOpponent)opponents=[old.currentOpponent];const draft=storyCreateOpponentDraft();for(const e of draft){if(opponents.length>=5)break;const p=e.type==='rival'?(()=>{const r=allRivals.find(x=>x.id===e.rivalId);return r?storyBuildFixedParticipant(r,opponents.length+1):null})():storyMakeInstantRival(opponents.length+1,e.intelligence||storyGeneratedAi(opponents.length));if(p)opponents.push(p);}while(opponents.length<5)opponents.push(storyMakeInstantRival(opponents.length+1,storyGeneratedAi(opponents.length)));
+      const units=[...new Set((old.playerDeck?.unitIds||existingUnits.slice(0,5)).map(String))].filter(id=>existingUnits.includes(id)).slice(0,5);const finalUnits=units.length>=3?units:existingUnits.slice(0,5);const magics=[...new Set((old.playerDeck?.magicIds||existingMagics.slice(0,10)).map(String))].filter(id=>existingMagics.includes(id)).slice(0,10);
+      const wins=Math.min(5,Number(old.wins)||0);storyModeState={version:5,mode:'five_match',active:old.active!==false&&!old.completed&&!old.defeated,completed:!!old.completed,defeated:!!old.defeated,currentMatchIndex:Math.min(4,wins),wins,availableUnitIds:existingUnits,availableMagicIds:existingMagics,initialUnitIds:existingUnits.slice(0,5),initialMagicIds:existingMagics.slice(0,10),playerDeck:{unitIds:finalUnits,magicIds:magics},playerDeployment:old.playerDeployment||{active:finalUnits.slice(0,3),reserve:finalUnits.slice(3,5)},participants:[{id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:finalUnits,magicIds:magics}],opponents,currentOpponent:opponents[Math.min(4,wins)]||opponents[0],rewardHistory:old.rewardHistory||[]};storyNormalizeDeployment();saveStoryModeState();return true;
     }
 
-    async function prepareNewStoryMode(){
-      storyModeState=null; storyPendingBattle=null; storyBattleOverride=null; closeStoryInitialReward(); closeStoryMatchIntro(); hideBattleResultModal();
-      storyModeDraft={version:3,entries:storyCreateDraftEntries()};
-      await saveStoryModeDraft(); await saveStoryModeState();
-      switchView('story'); renderStoryMode();
-    }
-
+    async function openStoryMode(){switchView('story');if(!storyModeState){if(!storyModeDraft)storyModeDraft={version:5,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};storyPrepareDraftCards();await saveStoryModeDraft();}else if(storyRepairLoadedState())await saveStoryModeState();renderStoryMode();}
+    async function prepareNewStoryMode(){storyModeState=null;storyPendingBattle=null;storyBattleOverride=null;closeStoryInitialReward();closeStoryMatchIntro();hideBattleResultModal();storyModeDraft={version:5,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};storyPrepareDraftCards();await saveStoryModeDraft();await saveStoryModeState();switchView('story');renderStoryMode();}
+    function storyRandomizeDraftOpponents(){storyEnsureDraft();storyModeDraft.opponents=storyCreateOpponentDraft();saveStoryModeDraft();renderStoryMode();}
     async function startNewStoryMode(){
       if(!Array.isArray(allCards)||allCards.length===0){alert('カード一覧を読み込み中です。少し待ってからもう一度開始してください。');return;}
-      const unitCount=allCards.filter(c=>c.cardType==='unit').length;
-      const magicCount=allCards.filter(c=>c.cardType==='magic').length;
-      if(unitCount<5||magicCount<10){alert(`ストーリーモード開始にはキャラ5枚以上・マジック10枚以上が必要です。現在：キャラ${unitCount}枚 / マジック${magicCount}枚`);return;}
-      const units=storyDrawUniqueIds('unit',5);
-      const magics=storyDrawUniqueIds('magic',10,units);
-      storyModeDraft=storyEnsureDraftTournament();
-      storyModeState={version:3,active:true,completed:false,defeated:false,roundIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:storyDraftToParticipants(),rounds:[],currentOpponent:null,rewardHistory:[]};
-      storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
-      storyPrepareCurrentRound();
-      await saveStoryModeState();
-      await saveStoryModeDraft();
-      hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();
-      storyRenderInitialRewardModal();
+      storyEnsureDraft();storyDraftNormalizeDeployment();const valid=storyDraftValidate();if(!valid.ok){alert(valid.message);return;}
+      const units=[...storyModeDraft.initialUnitIds],magics=[...storyModeDraft.initialMagicIds];const opponents=storyModeDraft.opponents.map((e,i)=>{if(e.type==='rival'){const r=allRivals.find(x=>x.id===e.rivalId);if(r)return storyBuildFixedParticipant(r,i+1);}return storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));});
+      const participant={id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:[...storyModeDraft.playerDeck.unitIds],magicIds:[...storyModeDraft.playerDeck.magicIds]};
+      storyModeState={version:5,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...storyModeDraft.playerDeck.unitIds],magicIds:[...storyModeDraft.playerDeck.magicIds]},playerDeployment:{active:[...storyModeDraft.playerDeployment.active],reserve:[...storyModeDraft.playerDeployment.reserve]},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};await saveStoryModeState();await saveStoryModeDraft();hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();storyRenderInitialRewardModal();
     }
-    
-    function storyRenderOpponent(){
-      const box=document.getElementById('story-opponent-card');if(!box)return;const o=storyModeState?.currentOpponent;if(!o){box.innerHTML='<div class="text-sm text-slate-500">対戦相手を準備中…</div>';return;}
-      const aiName={novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[o.intelligence]||'凡人';
-      box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900 flex-shrink-0">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${esc(o.name)}</div><div class="text-xs text-rose-300 font-bold mt-1">AI：${aiName}</div><div class="text-[10px] text-slate-500 mt-1">${o.type==='instant'?'カード一覧から生成された即席ライバル':'登録ライバル'}</div></div></div>`;
-    }
-    function storyRenderConfirmedDeck(){
-      const activeBox=document.getElementById('story-confirmed-active'),reserveBox=document.getElementById('story-confirmed-reserve'); if(!activeBox||!reserveBox)return;
-      storyNormalizeDeployment(); const dep=storyModeState.playerDeployment||{active:[],reserve:[]}; activeBox.innerHTML=''; reserveBox.innerHTML='';
-      const renderCard=(id,type,idx)=>{const c=storyCardById(id); if(!c)return; const wrap=document.createElement('div');wrap.className='bg-slate-900 rounded-lg border border-slate-700 p-2 space-y-1';
-        wrap.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)})+`<div class="text-center text-[9px] font-black ${type==='active'?'text-cyan-300':'text-amber-300'}">${type==='active'?`出撃${idx+1}`:`控え${idx+1}`}</div>`;
-        const select=document.createElement('select');select.className='w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[9px] font-bold';select.innerHTML=`<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>`;select.value=`${type}${idx+1}`;select.onchange=()=>storySetDeploymentSlot(id,select.value);wrap.appendChild(select);return wrap;};
-      dep.active.forEach((id,i)=>{const el=renderCard(id,'active',i);if(el)activeBox.appendChild(el);});
-      for(let i=dep.active.length;i<3;i++){const d=document.createElement('div');d.className='min-h-[150px] rounded-lg border border-dashed border-cyan-900/70 flex items-center justify-center text-[10px] text-slate-600';d.innerText=`出撃${i+1}`;activeBox.appendChild(d);}
-      dep.reserve.forEach((id,i)=>{const el=renderCard(id,'reserve',i);if(el)reserveBox.appendChild(el);});
-      for(let i=dep.reserve.length;i<2;i++){const d=document.createElement('div');d.className='min-h-[150px] rounded-lg border border-dashed border-amber-900/70 flex items-center justify-center text-[10px] text-slate-600';d.innerText=`控え${i+1}`;reserveBox.appendChild(d);}
-      const v=document.getElementById('story-deployment-validation'); const valid=storyValidateDeck(); if(v){v.innerText=valid.ok?'設定OK':'設定未完了';v.className=`text-[10px] font-black ${valid.ok?'text-emerald-300':'text-amber-300'}`;}
-    }
-    function storyRenderStartBracket(){
-      const box=document.getElementById('story-start-bracket'); if(!box)return; box.innerHTML=''; const entries=storyEnsureDraftTournament();
-      const rivalOptions=(selected)=>`${allRivals.map(r=>`<option value="rival:${r.id}" ${selected===`rival:${r.id}`?'selected':''}>${esc(r.name)}</option>`).join('')}<option value="instant" ${selected==='instant'?'selected':''}>🎲 即席ライバル</option>`;
-      const slotSelect=(slotIndex,entry)=>{const value=entry?.type==='rival'?`rival:${entry.rivalId}`:'instant';return `<select class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[9px] font-bold" onchange="storySetDraftSlot(${slotIndex}, this.value)">${rivalOptions(value)}</select>`;};
-      for(let i=0;i<16;i++){
-        const m=document.createElement('div');m.className='bg-slate-900 border border-slate-800 rounded-xl p-2 space-y-2';
-        const p1=entries[i*2],p2=entries[i*2+1];
-        let topLine='';
-        if(i===0) topLine=`<div class="text-[10px] font-black text-cyan-300 bg-cyan-950/30 rounded px-2 py-1">👤 ${esc(playerName)}</div>`;
-        else topLine=slotSelect(i*2,p1);
-        const bottomLine=slotSelect(i*2+1,p2);
-        m.innerHTML=`<div class="text-[9px] font-black text-amber-300">第1回戦 ${i+1}</div>${topLine}<div class="text-[9px] text-slate-600 text-center">vs</div>${bottomLine}<div class="text-[8px] text-slate-600">${i===0?'あなたの初戦':'組み合わせを自由に編集可能'}</div>`;
-        box.appendChild(m);
-      }
-    }
-    function storyRenderFullBracketInto(targetId='story-bracket'){
-      const box=document.getElementById(targetId); if(!box)return; box.innerHTML='';
-      const labels=['1回戦','2回戦','準々決勝','準決勝','決勝'];
-      for(let ri=0;ri<5;ri++){
-        const col=document.createElement('div');col.className=`bg-slate-950 rounded-xl border ${ri===(storyModeState.roundIndex||0)?'border-amber-500/80':'border-slate-800'} p-2 space-y-1 overflow-y-auto max-h-[520px]`;
-        col.innerHTML=`<div class="text-[10px] font-black ${ri===(storyModeState.roundIndex||0)?'text-amber-300':'text-slate-500'} mb-2 sticky top-0 bg-slate-950">${labels[ri]} ${ri===(storyModeState.roundIndex||0)?'◀ 現在':''}</div>`;
-        const round=storyModeState.rounds?.[ri];
-        const count=16>>ri;
-        for(let mi=0;mi<count;mi++){
-          const match=round?.[mi]; const div=document.createElement('div');div.className='rounded border border-slate-800 bg-slate-900/80 p-1.5 text-[9px]';
-          if(match){
-            const p1=match.p1?.name||'待機';const p2=match.p2?.name||'待機';const winner=match.winner?.name||null;
-            div.innerHTML=`<div class="${match.p1?.type==='player'?'text-cyan-300 font-black':''}">${esc(p1)}</div><div class="text-slate-600 text-center">vs</div><div class="${match.p2?.type==='player'?'text-cyan-300 font-black':''}">${esc(p2)}</div>${winner?`<div class="mt-1 text-emerald-300 font-black text-center">✓ ${esc(winner)}</div>`:''}`;
-            if(match.isPlayerMatch&&!match.winner)div.classList.add('border-amber-500','bg-amber-950/20');
-          }else{
-            div.innerHTML=`<div class="text-slate-600 text-center">${ri===0?'待機':'前ラウンド勝者待ち'}</div>`;
-          }
-          col.appendChild(div);
-        }
-        box.appendChild(col);
-      }
-    }
+    function storyRenderInitialRewardModal(){const modal=document.getElementById('story-initial-reward-modal'),ub=document.getElementById('story-initial-unit-reward'),mb=document.getElementById('story-initial-magic-reward');if(!modal||!ub||!mb||!storyModeState)return;ub.innerHTML='';mb.innerHTML='';(storyModeState.initialUnitIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});ub.appendChild(d);});(storyModeState.initialMagicIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});mb.appendChild(d);});modal.classList.remove('hidden');}
+    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');}
 
-    function storyRenderFullBracket(){storyRenderFullBracketInto('story-bracket');}
+    function storyGrantVictoryReward(){const remU=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().some(id=>String(id)===String(c.id)));const remM=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().some(id=>String(id)===String(c.id)));const us=storyShuffle(remU).slice(0,3),ms=storyShuffle(remM).slice(0,5);storyModeState.availableUnitIds.push(...us.map(c=>c.id));storyModeState.availableMagicIds.push(...ms.map(c=>c.id));return {units:us,magics:ms};}
+    function storyRecordReward(reward){storyModeState.rewardHistory=storyModeState.rewardHistory||[];storyModeState.rewardHistory.unshift({win:storyModeState.wins,names:[...(reward.units||[]),...(reward.magics||[])].map(c=>c?.name).filter(Boolean),at:Date.now()});storyModeState.rewardHistory=storyModeState.rewardHistory.slice(0,10);}
 
     function renderStoryMode(){
       const start=document.getElementById('story-start-panel'),main=document.getElementById('story-main-panel');if(!start||!main)return;
-      if(storyModeState) storyRepairLoadedState();
-      if(!storyModeState||(!storyModeState.active&&!storyModeState.completed)){
-        start.classList.remove('hidden');main.classList.add('hidden');storyEnsureDraftTournament();storyRenderStartBracket();return;
+      if(storyModeState&&storyRepairLoadedState()){};
+      if(!storyModeState||(!storyModeState.active&&!storyModeState.completed&&!storyModeState.defeated)){
+        start.classList.remove('hidden');main.classList.add('hidden');storyEnsureDraft();storyRenderStartOpponents();storyRenderStartDeckEditor();return;
       }
-      start.classList.add('hidden');main.classList.remove('hidden');
-      if(!storyModeState.playerDeployment)storyModeState.playerDeployment={active:(storyModeState.playerDeck?.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck?.unitIds||[]).slice(3,5)};
-      storyNormalizeDeployment();
-      document.getElementById('story-round-label').innerText=storyModeState.completed?'🏆 優勝！':`第${(storyModeState.roundIndex||0)+1}回戦 / 全5回戦`;
-      document.getElementById('story-win-label').innerText=`${storyModeState.wins||0} / 5`;
-      document.getElementById('story-unit-count').innerText=storyUnitIds().length;document.getElementById('story-magic-count').innerText=storyMagicIds().length;
-      storyRenderOpponent();storyRenderConfirmedDeck();
-      const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');ul.innerHTML='';ml.innerHTML='';
-      storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const selected=storySelectedUnits().includes(id);const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer select-none ${selected?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-70'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});
-      storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const selected=storySelectedMagics().includes(id);const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer select-none ${selected?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-70'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});
-      document.getElementById('story-unit-selection-label').innerText=`${storySelectedUnits().length} / 5`;document.getElementById('story-magic-selection-label').innerText=`${storySelectedMagics().length} / 10`;
-      const valid=storyValidateDeck();const val=document.getElementById('story-deck-validation');val.innerHTML=valid.ok?`<span class="text-emerald-300">✓ ${valid.message}</span>`:`<span class="text-amber-300">⚠ ${valid.message}</span>`;
-      const btn=document.querySelector('#view-story button[onclick="startStoryBattle()"]');if(btn)btn.classList.toggle('hidden',!!storyModeState.completed);
-      storyRenderFullBracket();
-      storyRenderFullBracketInto('story-bracket-top');
-      const hist=document.getElementById('story-reward-history-list');hist.innerHTML='';(storyModeState.rewardHistory||[]).forEach(h=>{const d=document.createElement('div');d.className='bg-slate-950 rounded-lg border border-slate-800 p-2';d.innerText=`第${h.win}勝利：${h.names.length?h.names.join('、'):'追加カードなし'}`;hist.appendChild(d);});
-      if(storyModeState.completed)document.getElementById('story-deck-validation').innerHTML='<span class="text-emerald-300 font-black">🏆 トーナメント優勝済みです。新しい挑戦を始められます。</span>';
+      start.classList.add('hidden');main.classList.remove('hidden');if(!storyModeState.playerDeployment)storyModeState.playerDeployment={active:(storyModeState.playerDeck?.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck?.unitIds||[]).slice(3,5)};storyNormalizeDeployment();
+      const idx=Math.min(4,Math.max(0,Number(storyModeState.currentMatchIndex)||0));storyModeState.currentMatchIndex=idx;document.getElementById('story-round-label').innerText=storyModeState.completed?'🏆 5戦クリア':`第${idx+1}戦 / 全5戦`;document.getElementById('story-win-label').innerText=`${storyModeState.wins||0} / 5`;document.getElementById('story-unit-count').innerText=storyUnitIds().length;document.getElementById('story-magic-count').innerText=storyMagicIds().length;
+      storyRenderOpponentSequence();storyRenderOpponentDetail();storyRenderConfirmed();storyRenderCurrentDeck();const valid=storyValidateDeck();const vb=document.getElementById('story-deck-validation');vb.innerHTML=valid.ok?`<span class="text-emerald-300">✓ ${valid.message}</span>`:`<span class="text-amber-300">⚠ ${valid.message}</span>`;const hist=document.getElementById('story-reward-history-list');if(hist){hist.innerHTML='';(storyModeState.rewardHistory||[]).forEach(h=>{const d=document.createElement('div');d.className='bg-slate-950 rounded-lg border border-slate-800 p-2';d.innerText=`第${h.win}戦勝利：${h.names.length?h.names.join('、'):'追加カードなし'}`;hist.appendChild(d);});}
+      const btn=document.querySelector('#view-story button[onclick="startStoryBattle()"]');if(btn)btn.classList.toggle('hidden',storyModeState.completed||storyModeState.defeated);if(storyModeState.completed)vb.innerHTML='<span class="text-emerald-300 font-black">🏆 5戦すべてに勝利しました。ストーリーモードクリア！</span>';if(storyModeState.defeated)vb.innerHTML='<span class="text-rose-300 font-black">💀 今回の5戦ストーリーは終了しました。新しい5戦を開始できます。</span>';
     }
-
-    function showStoryMatchIntro(){
-      const modal=document.getElementById('story-match-intro-modal'); if(!modal||!storyPendingBattle)return;
-      const o=storyPendingBattle.opponent;const aiName={novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[o.intelligence]||'凡人';
-      document.getElementById('story-intro-round').innerText=`第${(storyModeState.roundIndex||0)+1}回戦`;
-      document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${aiName}`;
-      const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph'); if(playerIcon){pi.src=playerIcon;pi.classList.remove('hidden');pp.classList.add('hidden');}else{pi.classList.add('hidden');pp.classList.remove('hidden');}
-      const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');if(o.iconImage){oi.src=o.iconImage;oi.classList.remove('hidden');op.classList.add('hidden');}else{oi.classList.add('hidden');op.classList.remove('hidden');}
-      modal.classList.remove('hidden');
-    }
+    function storyRenderConfirmedDeck(){storyRenderConfirmed();}
+    function storyRenderOpponent(){storyRenderOpponentDetail();}
+    function showStoryMatchIntro(){const modal=document.getElementById('story-match-intro-modal');if(!modal||!storyPendingBattle)return;const o=storyPendingBattle.opponent;document.getElementById('story-intro-round').innerText=`第${(storyModeState.currentMatchIndex||0)+1}戦 / 全5戦`;document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${storyAiName(o.intelligence)}`;const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph');if(playerIcon){pi.src=playerIcon;pi.classList.remove('hidden');pp.classList.add('hidden');}else{pi.classList.add('hidden');pp.classList.remove('hidden');}const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');if(o.iconImage){oi.src=o.iconImage;oi.classList.remove('hidden');op.classList.add('hidden');}else{oi.classList.add('hidden');op.classList.remove('hidden');}modal.classList.remove('hidden');}
     function closeStoryMatchIntro(){document.getElementById('story-match-intro-modal')?.classList.add('hidden');storyPendingBattle=null;}
-    async function confirmStoryBattleStart(){
-      if(!storyPendingBattle)return;const pending=storyPendingBattle;document.getElementById('story-match-intro-modal')?.classList.add('hidden');storyPendingBattle=null;
-      const opponent=pending.opponent;const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();
-      const enemyDeck={id:`story_enemy_deck_${Date.now()}`,name:`${opponent.name}のデッキ`,unitIds:[...opponent.unitIds],magicIds:[...opponent.magicIds]};const playerDeck={id:`story_player_deck_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]};
-      storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();
-      storyBattleOverride={playerDeck,enemyDeck,enemyIntelligence:opponent.intelligence||'normal',enemyName:opponent.name,enemyIconUrl:opponent.iconImage||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};
-      switchView('battle');startBattle();
-    }
-    async function startStoryBattle(){
-      if(!storyModeState||storyModeState.completed)return;const valid=storyValidateDeck();if(!valid.ok){alert(valid.message);return;}const opponent=storyModeState.currentOpponent;if(!opponent){alert('次の対戦相手が決まっていません。');return;}
-      storyPendingBattle={opponent:storyCloneParticipant(opponent)};showStoryMatchIntro();
-    }
+    async function confirmStoryBattleStart(){if(!storyPendingBattle)return;const o=storyPendingBattle.opponent;storyPendingBattle=null;document.getElementById('story-match-intro-modal')?.classList.add('hidden');const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();storyBattleOverride={playerDeck:{id:`story_p_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]},enemyDeck:{id:`story_e_${Date.now()}`,name:`${o.name}のデッキ`,unitIds:[...o.unitIds],magicIds:[...o.magicIds]},enemyIntelligence:o.intelligence||'normal',enemyName:o.name,enemyIconUrl:o.iconImage||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};switchView('battle');startBattle();}
+    async function startStoryBattle(){if(!storyModeState||storyModeState.completed||storyModeState.defeated)return;const valid=storyValidateDeck();if(!valid.ok){alert(valid.message);return;}if(!storyModeState.currentOpponent){alert('次の対戦相手がいません。');return;}storyPendingBattle={opponent:storyCloneParticipant(storyModeState.currentOpponent)};showStoryMatchIntro();}
+    async function handleStoryBattleEnd(winner){if(!storyModeState||!battleState.storyMode)return null;const idx=storyModeState.currentMatchIndex||0;if(winner!=='player'){storyModeState.active=false;storyModeState.defeated=true;await saveStoryModeState();return {defeat:true,champion:false,reward:null,matchIndex:idx};}storyModeState.wins=Math.min(5,(storyModeState.wins||0)+1);const reward=storyGrantVictoryReward();storyRecordReward(reward);if(storyModeState.wins>=5){storyModeState.active=false;storyModeState.completed=true;storyModeState.currentOpponent=null;await saveStoryModeState();return {defeat:false,champion:true,reward,matchIndex:idx};}storyModeState.currentMatchIndex=idx+1;storyModeState.currentOpponent=storyModeState.opponents[storyModeState.currentMatchIndex]||null;await saveStoryModeState();return {defeat:false,champion:false,reward,matchIndex:idx};}
+    async function storyRestartFromScratch(){hideBattleResultModal();battleExecutionRunning=false;storyBattleOverride=null;storyPendingBattle=null;await prepareNewStoryMode();}
 
-    async function handleStoryBattleEnd(winner){
-      if(!storyModeState||!battleState.storyMode)return null;const round=storyModeState.roundIndex||0;const match=storyModeState.rounds?.[round]?.[0];if(!match)return null;
-      if(winner!=='player') {storyModeState.active=false;storyModeState.defeated=true;await saveStoryModeState();return {defeat:true,reward:null};}
-      match.winner=storyCloneParticipant(storyModeState.participants[0]);match.loser=match.p2?storyCloneParticipant(match.p2):null;match.status='finished';storyModeState.wins=(storyModeState.wins||0)+1;const reward=storyGrantVictoryReward();storyRecordReward(reward);
-      if(storyModeState.wins>=5){storyModeState.active=false;storyModeState.completed=true;storyModeState.currentOpponent=null;await saveStoryModeState();return {defeat:false,champion:true,reward};}
-      storyModeState.roundIndex=round+1;storyPrepareCurrentRound();await saveStoryModeState();return {defeat:false,champion:false,reward};
-    }
-
-    async function storyRestartFromScratch(){hideBattleResultModal();storyBattleOverride=null;storyPendingBattle=null;await startNewStoryMode();}
+    // 旧コードからの参照に備えた互換関数。
+    function storyCreateInitialTournament(){return storyBuildFiveOpponents();}
+    function storyPrepareCurrentRound(){if(storyModeState)storyModeState.currentOpponent=storyModeState.opponents?.[storyModeState.currentMatchIndex||0]||null;}
 
     // ===== ストーリーモードここまで =====
 
@@ -4714,20 +4322,20 @@
       if (winner === 'player') {
         title.innerText = isStory && storyResult?.champion ? '🏆 優勝！' : '🎉 勝利！';
         title.className = 'text-4xl sm:text-6xl font-black text-emerald-300 leading-tight';
-        message.innerText = isStory ? (storyResult?.champion ? '32人トーナメントを制覇しました！' : `第${(storyModeState?.wins||0)}回戦突破！次のライバルが待っています。`) : 'おめでとうございます！あなたの勝利です。';
+        message.innerText = isStory ? (storyResult?.champion ? '5戦ストーリーを制覇しました！' : `第${(storyModeState?.wins||0)}戦突破！編成画面に戻って次の対戦を準備できます。`) : 'おめでとうございます！あなたの勝利です。';
       } else if (winner === 'enemy') {
-        title.innerText = isStory ? '💀 トーナメント敗退' : '💀 敗北';
+        title.innerText = isStory ? '💀 5戦ストーリー敗退' : '💀 敗北';
         title.className = 'text-4xl sm:text-6xl font-black text-rose-300 leading-tight';
-        message.innerText = isStory ? 'このトーナメントは終了です。最初から再挑戦できます。' : '今回は敗北しました。';
+        message.innerText = isStory ? '今回の5戦ストーリーは終了です。新しい5戦を最初からやり直せます。' : '今回は敗北しました。';
       } else {
-        title.innerText = isStory ? '🤝 トーナメント敗退' : '🤝 引き分け';
+        title.innerText = isStory ? '🤝 5戦ストーリー敗退' : '🤝 引き分け';
         title.className = 'text-4xl sm:text-6xl font-black text-amber-300 leading-tight';
-        message.innerText = isStory ? '引き分けはトーナメント敗退扱いです。' : '両者とも勝利条件を満たさなかったため引き分けです。';
+        message.innerText = isStory ? '引き分けは5戦ストーリー敗退扱いです。' : '両者とも勝利条件を満たさなかったため引き分けです。';
       }
       if (isStory && storyResult?.reward && rewardBox) {
         const u=(storyResult.reward.units||[]),m=(storyResult.reward.magics||[]);
         rewardBox.classList.remove('hidden');
-        rewardBox.innerHTML=`<div class="text-sm font-black text-amber-300 mb-2">🎴 勝利報酬：新しく使用可能になったカード</div><div class="text-xs text-slate-300 mb-3">キャラクター ${u.length}枚 / マジック ${m.length}枚</div><div class="grid grid-cols-3 sm:grid-cols-5 gap-2">${[...u.map(c=>`<div class="min-w-0"><div class="text-[9px] text-cyan-300 font-black mb-1">キャラ</div>${getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)})}</div>`),...m.map(c=>`<div class="min-w-0"><div class="text-[9px] text-purple-300 font-black mb-1">マジック</div>${getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)})}</div>`)].join('')||'<div class="text-slate-500 col-span-full">新規解放できるカードはありませんでした。</div>'}</div>`;
+        rewardBox.innerHTML=`<div class="text-xl sm:text-2xl font-black text-amber-300 mb-2">🎴 勝利報酬：新しく使用可能になったカード</div><div class="text-sm sm:text-base text-slate-200 mb-4 font-bold">キャラクター ${u.length}枚 / マジック ${m.length}枚</div><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">${[...u.map(c=>`<div class="min-w-0"><div class="text-[10px] sm:text-xs text-cyan-300 font-black mb-1">キャラ</div>${getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)})}</div>`),...m.map(c=>`<div class="min-w-0"><div class="text-[10px] sm:text-xs text-purple-300 font-black mb-1">マジック</div>${getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)})}</div>`)].join('')||'<div class="text-slate-500 col-span-full">新規解放できるカードはありませんでした。</div>'}</div>`;
       }
 
       if (rematch) {
