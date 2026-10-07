@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.25.0 - 5戦ストーリーモード</title>
+  <title>カードAI対戦ゲーム v3.26.0 - 5戦ストーリーモード</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.25.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.26.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -505,7 +505,7 @@
         <div class="text-center">
           <div class="text-5xl mb-3">🏆</div>
           <h3 class="text-xl font-black text-amber-300">5戦ストーリーを開始</h3>
-          <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">登録ライバルから5人をランダム選出。不足分はカード一覧から素人～凡人の即席ライバルを自動生成します。後半ほど強い相手が来るように調整されています。</p>
+          <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">ここでは先に対戦予定の5人を確認・変更できます。カードはまだ配布しません。「5戦ストーリーを開始」を押した瞬間に、キャラ5枚＋マジック10枚を新しく抽選してから編成画面へ進みます。</p>
         </div>
         <div class="flex flex-wrap justify-center gap-2">
           <button type="button" onclick="storyRandomizeDraftOpponents()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl text-xs">🎲 ライバルを再抽選</button>
@@ -522,24 +522,10 @@
           <div id="story-start-opponents" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div>
         </div>
 
-        <div class="bg-slate-950 border border-cyan-700/60 rounded-2xl p-4 space-y-4">
-          <div class="flex flex-wrap justify-between items-center gap-2">
-            <div>
-              <div class="text-xs font-black text-cyan-300 border-l-2 border-cyan-400 pl-2">開始前ストーリー用デッキ編成</div>
-              <div class="text-[10px] text-slate-500 mt-1">最初に受け取る5枚＋10枚をここで確認し、使うキャラ3～5枚・マジック最大10枚を決めます。</div>
-            </div>
-            <div id="story-start-deck-validation" class="text-[10px] font-black text-emerald-300"></div>
-          </div>
-          <div class="bg-slate-900 border border-amber-700/60 rounded-xl p-3">
-            <div class="text-xs font-black text-amber-300 mb-3">✅ 確定した初期出撃・控え</div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              <div class="bg-cyan-950/20 border border-cyan-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-cyan-300 mb-2">🔵 初期出撃 3体</div><div id="story-start-confirmed-active" class="grid grid-cols-3 gap-2"></div></div>
-              <div class="bg-amber-950/20 border border-amber-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-amber-300 mb-2">🟡 控え 最大2体</div><div id="story-start-confirmed-reserve" class="grid grid-cols-2 gap-2"></div></div>
-            </div>
-          </div>
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-amber-300">キャラクター</span><span id="story-start-unit-selection-label" class="text-[10px] text-slate-400">5 / 5</span></div><div id="story-start-unit-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[430px] overflow-y-auto pr-1"></div></div>
-            <div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-purple-300">マジック</span><span id="story-start-magic-selection-label" class="text-[10px] text-slate-400">10 / 10</span></div><div id="story-start-magic-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[430px] overflow-y-auto pr-1"></div></div>
+        <div class="bg-slate-950 border border-cyan-700/60 rounded-2xl p-5">
+          <div class="text-center">
+            <div class="text-sm font-black text-cyan-300">📝 対戦前の編成は、ストーリー開始後に行います</div>
+            <p class="text-[11px] text-slate-400 mt-2 leading-relaxed">「5戦ストーリーを開始」を押すと、その場でキャラクター5枚＋マジック10枚を新しく抽選します。獲得カードをポップアップで確認したあと、対戦開始前メニューでデッキと初期出撃3体・控え最大2体を編成できます。</p>
           </div>
         </div>
       </div>
@@ -2512,18 +2498,17 @@
       const byRank=new Map();entries.forEach((e,i)=>{let rank=e.type==='rival'?(storyAiRank(allRivals.find(r=>r.id===e.rivalId)?.intelligence||'normal')):storyAiRank(e.intelligence||storyGeneratedAi(i));if(!byRank.has(rank))byRank.set(rank,[]);byRank.get(rank).push(e);});
       return [...byRank.keys()].sort((a,b)=>a-b).flatMap(k=>storyShuffle(byRank.get(k))).slice(0,5);
     }
+    function storyCreateEmptyDraft(){return {version:6,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};}
     function storyEnsureDraft(){
-      if(!storyModeDraft||storyModeDraft.version<5||!Array.isArray(storyModeDraft.opponents)||storyModeDraft.opponents.length!==5){storyModeDraft={version:5,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};storyPrepareDraftCards();saveStoryModeDraft();}
-      if(!storyModeDraft.initialUnitIds?.length||!storyModeDraft.initialMagicIds?.length)storyPrepareDraftCards();
+      const valid=storyModeDraft && Number(storyModeDraft.version)>=6 && Array.isArray(storyModeDraft.opponents) && storyModeDraft.opponents.length===5;
+      if(!valid){storyModeDraft=storyCreateEmptyDraft();saveStoryModeDraft();}
+      // 「準備」段階ではカードをまだ抽選しない。抽選は「5戦ストーリーを開始」でのみ行う。
       return storyModeDraft;
     }
     function storyPrepareDraftCards(){
-      if(!storyModeDraft)return;const uc=allCards.filter(c=>c.cardType==='unit').length,mc=allCards.filter(c=>c.cardType==='magic').length; if(uc<5||mc<10)return;
-      if(!Array.isArray(storyModeDraft.initialUnitIds)||storyModeDraft.initialUnitIds.length!==5)storyModeDraft.initialUnitIds=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,5).map(c=>c.id);
-      if(!Array.isArray(storyModeDraft.initialMagicIds)||storyModeDraft.initialMagicIds.length!==10)storyModeDraft.initialMagicIds=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,10).map(c=>c.id);
-      const validU=new Set(storyModeDraft.initialUnitIds.map(String)),validM=new Set(storyModeDraft.initialMagicIds.map(String));const oldU=(storyModeDraft.playerDeck?.unitIds||[]).map(String).filter(id=>validU.has(id)).slice(0,5);const oldM=(storyModeDraft.playerDeck?.magicIds||[]).map(String).filter(id=>validM.has(id)).slice(0,10);
-      const units=oldU.length?oldU:storyModeDraft.initialUnitIds.slice(0,5);const magics=oldM.length?oldM:storyModeDraft.initialMagicIds.slice(0,10);storyModeDraft.playerDeck={unitIds:[...units],magicIds:[...magics]};
-      if(!storyModeDraft.playerDeployment)storyModeDraft.playerDeployment={active:units.slice(0,3),reserve:units.slice(3,5)};storyDraftNormalizeDeployment();
+      // V3.26: 初期カードは開始ボタンを押した瞬間に startNewStoryMode() で抽選する。
+      // 旧コードから呼ばれてもここではカードを生成しない。
+      return storyEnsureDraft();
     }
     function storyDraftNormalizeDeployment(){
       if(!storyModeDraft)return;const selected=[...(storyModeDraft.playerDeck?.unitIds||[])].map(String);const set=new Set(selected);let active=[...(storyModeDraft.playerDeployment?.active||[])].map(String).filter(id=>set.has(id));let reserve=[...(storyModeDraft.playerDeployment?.reserve||[])].map(String).filter(id=>set.has(id)&&!active.includes(id));
@@ -2557,41 +2542,120 @@
 
     function storyRepairLoadedState(){
       if(!storyModeState)return false;
-      if(storyModeState.mode==='five_match'&&Number(storyModeState.version)>=5)return false;
-      const old=storyModeState;const existingUnits=[...new Set((old.availableUnitIds||[]).map(String).filter(id=>storyCardById(id)?.cardType==='unit'))];const existingMagics=[...new Set((old.availableMagicIds||[]).map(String).filter(id=>storyCardById(id)?.cardType==='magic'))];
-      while(existingUnits.length<5)existingUnits.push(...storyShuffle(allCards.filter(c=>c.cardType==='unit'&&!existingUnits.includes(String(c.id)))).slice(0,5-existingUnits.length).map(c=>c.id));
-      while(existingMagics.length<10)existingMagics.push(...storyShuffle(allCards.filter(c=>c.cardType==='magic'&&!existingMagics.includes(String(c.id)))).slice(0,10-existingMagics.length).map(c=>c.id));
-      let opponents=[];if(Array.isArray(old.opponents)&&old.opponents.length)opponents=old.opponents.slice(0,5);else if(old.currentOpponent)opponents=[old.currentOpponent];const draft=storyCreateOpponentDraft();for(const e of draft){if(opponents.length>=5)break;const p=e.type==='rival'?(()=>{const r=allRivals.find(x=>x.id===e.rivalId);return r?storyBuildFixedParticipant(r,opponents.length+1):null})():storyMakeInstantRival(opponents.length+1,e.intelligence||storyGeneratedAi(opponents.length));if(p)opponents.push(p);}while(opponents.length<5)opponents.push(storyMakeInstantRival(opponents.length+1,storyGeneratedAi(opponents.length)));
-      const units=[...new Set((old.playerDeck?.unitIds||existingUnits.slice(0,5)).map(String))].filter(id=>existingUnits.includes(id)).slice(0,5);const finalUnits=units.length>=3?units:existingUnits.slice(0,5);const magics=[...new Set((old.playerDeck?.magicIds||existingMagics.slice(0,10)).map(String))].filter(id=>existingMagics.includes(id)).slice(0,10);
-      const wins=Math.min(5,Number(old.wins)||0);storyModeState={version:5,mode:'five_match',active:old.active!==false&&!old.completed&&!old.defeated,completed:!!old.completed,defeated:!!old.defeated,currentMatchIndex:Math.min(4,wins),wins,availableUnitIds:existingUnits,availableMagicIds:existingMagics,initialUnitIds:existingUnits.slice(0,5),initialMagicIds:existingMagics.slice(0,10),playerDeck:{unitIds:finalUnits,magicIds:magics},playerDeployment:old.playerDeployment||{active:finalUnits.slice(0,3),reserve:finalUnits.slice(3,5)},participants:[{id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:finalUnits,magicIds:magics}],opponents,currentOpponent:opponents[Math.min(4,wins)]||opponents[0],rewardHistory:old.rewardHistory||[]};storyNormalizeDeployment();saveStoryModeState();return true;
+      const validMode=storyModeState.mode==='five_match' && Number(storyModeState.version)>=6 && Array.isArray(storyModeState.opponents) && storyModeState.opponents.length===5;
+      if(validMode && storyModeState.currentOpponent && storyModeState.playerDeck && Array.isArray(storyModeState.availableUnitIds) && Array.isArray(storyModeState.availableMagicIds))return false;
+
+      const old=storyModeState||{};
+      const allUnitIds=new Set(allCards.filter(c=>c.cardType==='unit').map(c=>String(c.id)));
+      const allMagicIds=new Set(allCards.filter(c=>c.cardType==='magic').map(c=>String(c.id)));
+      const existingUnits=[...new Set((old.availableUnitIds||[]).map(String).filter(id=>allUnitIds.has(id)))];
+      const existingMagics=[...new Set((old.availableMagicIds||[]).map(String).filter(id=>allMagicIds.has(id)))];
+      const fillUnique=(arr,type,want)=>{
+        const pool=allCards.filter(c=>c.cardType===type&&!arr.includes(String(c.id)));
+        arr.push(...storyShuffle(pool).slice(0,Math.max(0,want-arr.length)).map(c=>String(c.id)));
+      };
+      fillUnique(existingUnits,'unit',Math.min(allUnitIds.size,5+Math.min(4,Number(old.wins)||0)*3));
+      fillUnique(existingMagics,'magic',Math.min(allMagicIds.size,10+Math.min(4,Number(old.wins)||0)*5));
+
+      let opponents=Array.isArray(old.opponents)?old.opponents.slice(0,5):[];
+      const draft=storyCreateOpponentDraft();
+      for(const entry of draft){
+        if(opponents.length>=5)break;
+        let p=null;
+        if(entry.type==='rival'){const r=allRivals.find(x=>x.id===entry.rivalId);if(r)p=storyBuildFixedParticipant(r,opponents.length+1);}
+        else p=storyMakeInstantRival(opponents.length+1,entry.intelligence||storyGeneratedAi(opponents.length));
+        if(p)opponents.push(p);
+      }
+      while(opponents.length<5)opponents.push(storyMakeInstantRival(opponents.length+1,storyGeneratedAi(opponents.length)));
+
+      const wins=Math.min(5,Math.max(0,Number(old.wins)||0));
+      const rawDeckUnits=[...(old.playerDeck?.unitIds||[])].map(String).filter(id=>existingUnits.includes(id)).slice(0,5);
+      const rawDeckMagics=[...(old.playerDeck?.magicIds||[])].map(String).filter(id=>existingMagics.includes(id)).slice(0,10);
+      const units=rawDeckUnits.length>=3?rawDeckUnits:existingUnits.slice(0,5);
+      const magics=rawDeckMagics.length?rawDeckMagics:existingMagics.slice(0,10);
+      const rawActive=[...(old.playerDeployment?.active||[])].map(String).filter(id=>units.includes(id));
+      const rawReserve=[...(old.playerDeployment?.reserve||[])].map(String).filter(id=>units.includes(id)&&!rawActive.includes(id));
+      const deployment={active:rawActive.length===3?rawActive.slice(0,3):units.slice(0,3),reserve:rawReserve.length===Math.max(0,units.length-3)?rawReserve.slice(0,2):units.slice(3,5)};
+
+      storyModeState={
+        version:6,mode:'five_match',active:old.active!==false&&!old.completed&&!old.defeated,completed:!!old.completed,defeated:!!old.defeated,
+        currentMatchIndex:Math.min(4,wins),wins,
+        availableUnitIds:[...existingUnits],availableMagicIds:[...existingMagics],
+        initialUnitIds:(old.initialUnitIds||[]).filter(id=>allUnitIds.has(String(id))).slice(0,5).map(String),
+        initialMagicIds:(old.initialMagicIds||[]).filter(id=>allMagicIds.has(String(id))).slice(0,10).map(String),
+        playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:deployment,
+        participants:[{id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:[...units],magicIds:[...magics]}],
+        opponents,currentOpponent:opponents[Math.min(4,wins)]||null,rewardHistory:old.rewardHistory||[]
+      };
+      if(storyModeState.initialUnitIds.length!==5)storyModeState.initialUnitIds=existingUnits.slice(0,5);
+      if(storyModeState.initialMagicIds.length!==10)storyModeState.initialMagicIds=existingMagics.slice(0,10);
+      storyNormalizeDeployment();
+      return true;
     }
 
-    async function openStoryMode(){switchView('story');if(!storyModeState){if(!storyModeDraft)storyModeDraft={version:5,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};storyPrepareDraftCards();await saveStoryModeDraft();}else if(storyRepairLoadedState())await saveStoryModeState();renderStoryMode();}
-    async function prepareNewStoryMode(){storyModeState=null;storyPendingBattle=null;storyBattleOverride=null;closeStoryInitialReward();closeStoryMatchIntro();hideBattleResultModal();storyModeDraft={version:5,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};storyPrepareDraftCards();await saveStoryModeDraft();await saveStoryModeState();switchView('story');renderStoryMode();}
-    function storyRandomizeDraftOpponents(){storyEnsureDraft();storyModeDraft.opponents=storyCreateOpponentDraft();saveStoryModeDraft();renderStoryMode();}
+    async function openStoryMode(){
+      switchView('story');
+      if(storyModeState){
+        if(storyRepairLoadedState())await saveStoryModeState();
+      }else{
+        storyEnsureDraft();
+        await saveStoryModeDraft();
+      }
+      renderStoryMode();
+    }
+    async function prepareNewStoryMode(){
+      storyModeState=null;storyPendingBattle=null;storyBattleOverride=null;closeStoryInitialReward();closeStoryMatchIntro();hideBattleResultModal();
+      storyModeDraft=storyCreateEmptyDraft();
+      await saveStoryModeDraft();await saveStoryModeState();
+      switchView('story');renderStoryMode();
+    }
+    function storyRandomizeDraftOpponents(){
+      storyModeDraft=storyModeDraft&&Number(storyModeDraft.version)>=6?storyModeDraft:storyCreateEmptyDraft();
+      storyModeDraft.opponents=storyCreateOpponentDraft();saveStoryModeDraft();renderStoryMode();
+    }
     async function startNewStoryMode(){
       if(!Array.isArray(allCards)||allCards.length===0){alert('カード一覧を読み込み中です。少し待ってからもう一度開始してください。');return;}
-      storyEnsureDraft();storyDraftNormalizeDeployment();const valid=storyDraftValidate();if(!valid.ok){alert(valid.message);return;}
-      const units=[...storyModeDraft.initialUnitIds],magics=[...storyModeDraft.initialMagicIds];const opponents=storyModeDraft.opponents.map((e,i)=>{if(e.type==='rival'){const r=allRivals.find(x=>x.id===e.rivalId);if(r)return storyBuildFixedParticipant(r,i+1);}return storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));});
-      const participant={id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:[...storyModeDraft.playerDeck.unitIds],magicIds:[...storyModeDraft.playerDeck.magicIds]};
-      storyModeState={version:5,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...storyModeDraft.playerDeck.unitIds],magicIds:[...storyModeDraft.playerDeck.magicIds]},playerDeployment:{active:[...storyModeDraft.playerDeployment.active],reserve:[...storyModeDraft.playerDeployment.reserve]},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};await saveStoryModeState();await saveStoryModeDraft();hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();storyRenderInitialRewardModal();
+      const unitCount=allCards.filter(c=>c.cardType==='unit').length,magicCount=allCards.filter(c=>c.cardType==='magic').length;
+      if(unitCount<5||magicCount<10){alert(`ストーリーモード開始にはキャラ5枚以上・マジック10枚以上が必要です。現在：キャラ${unitCount}枚 / マジック${magicCount}枚`);return;}
+      storyEnsureDraft();
+      // ★開始ボタンを押した瞬間にだけ初期カードを抽選する
+      const units=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,5).map(c=>c.id);
+      const magics=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,10).map(c=>c.id);
+      const opponents=storyBuildFiveOpponents();
+      const participant={id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:[...units],magicIds:[...magics]};
+      storyModeState={version:6,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};
+      await saveStoryModeState();await saveStoryModeDraft();hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();storyRenderInitialRewardModal();
     }
     function storyRenderInitialRewardModal(){const modal=document.getElementById('story-initial-reward-modal'),ub=document.getElementById('story-initial-unit-reward'),mb=document.getElementById('story-initial-magic-reward');if(!modal||!ub||!mb||!storyModeState)return;ub.innerHTML='';mb.innerHTML='';(storyModeState.initialUnitIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});ub.appendChild(d);});(storyModeState.initialMagicIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});mb.appendChild(d);});modal.classList.remove('hidden');}
-    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');}
+    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');switchView('story');renderStoryMode();}
 
     function storyGrantVictoryReward(){const remU=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().some(id=>String(id)===String(c.id)));const remM=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().some(id=>String(id)===String(c.id)));const us=storyShuffle(remU).slice(0,3),ms=storyShuffle(remM).slice(0,5);storyModeState.availableUnitIds.push(...us.map(c=>c.id));storyModeState.availableMagicIds.push(...ms.map(c=>c.id));return {units:us,magics:ms};}
     function storyRecordReward(reward){storyModeState.rewardHistory=storyModeState.rewardHistory||[];storyModeState.rewardHistory.unshift({win:storyModeState.wins,names:[...(reward.units||[]),...(reward.magics||[])].map(c=>c?.name).filter(Boolean),at:Date.now()});storyModeState.rewardHistory=storyModeState.rewardHistory.slice(0,10);}
 
     function renderStoryMode(){
       const start=document.getElementById('story-start-panel'),main=document.getElementById('story-main-panel');if(!start||!main)return;
-      if(storyModeState&&storyRepairLoadedState()){};
+      if(storyModeState&&storyRepairLoadedState()){saveStoryModeState();}
       if(!storyModeState||(!storyModeState.active&&!storyModeState.completed&&!storyModeState.defeated)){
-        start.classList.remove('hidden');main.classList.add('hidden');storyEnsureDraft();storyRenderStartOpponents();storyRenderStartDeckEditor();return;
+        start.classList.remove('hidden');main.classList.add('hidden');
+        storyEnsureDraft();storyRenderStartOpponents();
+        return;
       }
-      start.classList.add('hidden');main.classList.remove('hidden');if(!storyModeState.playerDeployment)storyModeState.playerDeployment={active:(storyModeState.playerDeck?.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck?.unitIds||[]).slice(3,5)};storyNormalizeDeployment();
-      const idx=Math.min(4,Math.max(0,Number(storyModeState.currentMatchIndex)||0));storyModeState.currentMatchIndex=idx;document.getElementById('story-round-label').innerText=storyModeState.completed?'🏆 5戦クリア':`第${idx+1}戦 / 全5戦`;document.getElementById('story-win-label').innerText=`${storyModeState.wins||0} / 5`;document.getElementById('story-unit-count').innerText=storyUnitIds().length;document.getElementById('story-magic-count').innerText=storyMagicIds().length;
-      storyRenderOpponentSequence();storyRenderOpponentDetail();storyRenderConfirmed();storyRenderCurrentDeck();const valid=storyValidateDeck();const vb=document.getElementById('story-deck-validation');vb.innerHTML=valid.ok?`<span class="text-emerald-300">✓ ${valid.message}</span>`:`<span class="text-amber-300">⚠ ${valid.message}</span>`;const hist=document.getElementById('story-reward-history-list');if(hist){hist.innerHTML='';(storyModeState.rewardHistory||[]).forEach(h=>{const d=document.createElement('div');d.className='bg-slate-950 rounded-lg border border-slate-800 p-2';d.innerText=`第${h.win}戦勝利：${h.names.length?h.names.join('、'):'追加カードなし'}`;hist.appendChild(d);});}
-      const btn=document.querySelector('#view-story button[onclick="startStoryBattle()"]');if(btn)btn.classList.toggle('hidden',storyModeState.completed||storyModeState.defeated);if(storyModeState.completed)vb.innerHTML='<span class="text-emerald-300 font-black">🏆 5戦すべてに勝利しました。ストーリーモードクリア！</span>';if(storyModeState.defeated)vb.innerHTML='<span class="text-rose-300 font-black">💀 今回の5戦ストーリーは終了しました。新しい5戦を開始できます。</span>';
+      start.classList.add('hidden');main.classList.remove('hidden');
+      if(!storyModeState.playerDeployment)storyModeState.playerDeployment={active:(storyModeState.playerDeck?.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck?.unitIds||[]).slice(3,5)};
+      storyNormalizeDeployment();
+      const idx=Math.min(4,Math.max(0,Number(storyModeState.currentMatchIndex)||0));storyModeState.currentMatchIndex=idx;
+      const round=document.getElementById('story-round-label'),wins=document.getElementById('story-win-label'),uc=document.getElementById('story-unit-count'),mc=document.getElementById('story-magic-count');
+      if(round)round.innerText=storyModeState.completed?'🏆 5戦クリア':`第${idx+1}戦 / 全5戦`;
+      if(wins)wins.innerText=`${storyModeState.wins||0} / 5`;
+      if(uc)uc.innerText=storyUnitIds().length;
+      if(mc)mc.innerText=storyMagicIds().length;
+      storyRenderOpponentSequence();storyRenderOpponentDetail();storyRenderConfirmed();storyRenderCurrentDeck();
+      const valid=storyValidateDeck(),vb=document.getElementById('story-deck-validation');
+      if(vb)vb.innerHTML=valid.ok?`<span class="text-emerald-300">✓ ${valid.message}</span>`:`<span class="text-amber-300">⚠ ${valid.message}</span>`;
+      const hist=document.getElementById('story-reward-history-list');if(hist){hist.innerHTML='';(storyModeState.rewardHistory||[]).forEach(h=>{const d=document.createElement('div');d.className='bg-slate-950 rounded-lg border border-slate-800 p-2';d.innerText=`第${h.win}戦勝利：${h.names.length?h.names.join('、'):'追加カードなし'}`;hist.appendChild(d);});}
+      const btn=document.querySelector('#view-story button[onclick="startStoryBattle()"]');if(btn)btn.classList.toggle('hidden',storyModeState.completed||storyModeState.defeated);
+      if(storyModeState.completed&&vb)vb.innerHTML='<span class="text-emerald-300 font-black">🏆 5戦すべてに勝利しました。ストーリーモードクリア！</span>';
+      if(storyModeState.defeated&&vb)vb.innerHTML='<span class="text-rose-300 font-black">💀 今回の5戦ストーリーは終了しました。新しい5戦を開始できます。</span>';
     }
     function storyRenderConfirmedDeck(){storyRenderConfirmed();}
     function storyRenderOpponent(){storyRenderOpponentDetail();}
