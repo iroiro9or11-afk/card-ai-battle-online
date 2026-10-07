@@ -117,7 +117,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.3</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.14.3</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -1117,13 +1117,50 @@
     // カード画像の互換取得
     // 旧データ(img) / 現行データ(image) / 将来のimageUrl / IndexedDBのBlob・Fileに対応
     const cardImageObjectUrlCache = new WeakMap();
+    // オンラインで受信した相手側カードをローカルカードとは別に保持する。
+    // 同じカード画像を対戦前・戦闘中・ポップアップで共通利用する。
+    window.__onlineBattleCards = window.__onlineBattleCards || {};
+
+    function getOnlinePublicCard(cardId){
+      if(cardId==null)return null;
+      return window.__onlineBattleCards[String(cardId)] || null;
+    }
+    function registerOnlinePublicCard(card){
+      if(!card || !card.id)return;
+      const id=String(card.id);
+      const prev=window.__onlineBattleCards[id] || {};
+      window.__onlineBattleCards[id]={...prev,...card,id};
+      if(card.image || card.imageUrl){
+        window.__onlineBattleCards[id].image=card.image||card.imageUrl;
+        window.__onlineBattleCards[id].imageUrl=card.imageUrl||null;
+      }
+    }
+    function mergeOnlinePublicAssets(items){
+      for(const item of (Array.isArray(items)?items:[])){
+        if(!item?.id || !(item.image || item.imageUrl))continue;
+        registerOnlinePublicCard({id:String(item.id),image:item.image||item.imageUrl});
+      }
+      // 画像を受け取った後は現在のカード表示も即時更新する。
+      if(onlineMode && window.battleState && battleState.playerUnits){
+        for(const u of [...(battleState.playerUnits||[]),...(battleState.enemyUnits||[])]){
+          const c=getOnlinePublicCard(u.cardId);
+          if(c?.image)u.image=c.image;
+        }
+        if(Array.isArray(battleState.magicHand)) battleState.magicHand=battleState.magicHand.map(c=>({...c,...(getOnlinePublicCard(c.id)||{})}));
+        if(Array.isArray(battleState.enemyMagicHand)) battleState.enemyMagicHand=battleState.enemyMagicHand.map(c=>({...c,...(getOnlinePublicCard(c.id)||{})}));
+        try{renderBattleState();}catch(e){console.error('online asset rerender error',e);}
+      }
+    }
 
     function getCardImage(card) {
       if (!card) return null;
       const value = card.image ?? card.img ?? card.imageUrl ?? null;
-      if (!value) return null;
+      if (typeof value === "string" && value) return value;
 
-      if (typeof value === "string") return value;
+      // オンライン公開カードのキャッシュをローカル画像より下位のフォールバックとして利用。
+      const remote = card.id!=null ? getOnlinePublicCard(card.id) : null;
+      const remoteValue = remote?.image ?? remote?.imageUrl ?? null;
+      if (typeof remoteValue === "string" && remoteValue) return remoteValue;
 
       // IndexedDBにBlob/Fileとして保存されている画像にも対応
       if (value instanceof Blob) {
@@ -3941,10 +3978,7 @@
     const me=isSpectator?st.p1:(mySide==='player1'?st.p1:st.p2);
     const opp=isSpectator?st.p2:(mySide==='player1'?st.p2:st.p1);
     const localCards=new Map((allCards||[]).map(c=>[String(c.id),c]));
-    const registerPublicCard=(card)=>{
-      if(!card||!card.id)return;
-      window.__onlineBattleCards[String(card.id)]={...card,id:String(card.id)};
-    };
+    const registerPublicCard=(card)=>registerOnlinePublicCard(card);
     (st.p1?.magicCards||[]).forEach(registerPublicCard);
     (st.p2?.magicCards||[]).forEach(registerPublicCard);
     (st.p1?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],image:u.image||null}));
@@ -3952,16 +3986,16 @@
     const mapU=(u,side)=>({
       ...u,
       side:(side===mySide&&!isSpectator)?'player':'enemy',
-      image:getCardImage(localCards.get(String(u.cardId)))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
+      image:getCardImage(localCards.get(String(u.cardId)))||getCardImage(getOnlinePublicCard(u.cardId))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
       skills:Array.isArray(u.skills)?u.skills:[],
       reservedAction:{type:'attack',targetInstanceId:null}
     });
     const myUnits=(me?.units||[]).map(u=>mapU(u,mySide));
     const oppUnits=(opp?.units||[]).map(u=>mapU(u,mySide==='player1'?'player2':'player1'));
-    const magicCards=(me?.magicCards||[]).length?me.magicCards.map(c=>({...c})):((me?.magicIds||[]).map(id=>localCards.get(id)).filter(Boolean));
+    const magicCards=(me?.magicCards||[]).length?me.magicCards.map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})):((me?.magicIds||[]).map(id=>localCards.get(id)||getOnlinePublicCard(id)).filter(Boolean));
     battleState={
       battleId:st.battleId,phase:st.phase,turn:st.turn,playerAp:me?.ap??0,enemyAp:opp?.ap??0,
-      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,enemyMagicHand:(opp?.magicCards||[]).map(c=>({...c})),usedMagicCardIds:new Set(me?.usedMagicIds||[]),enemyUsedMagicCardIds:new Set(opp?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
+      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,enemyMagicHand:(opp?.magicCards||[]).map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})),usedMagicCardIds:new Set(me?.usedMagicIds||[]),enemyUsedMagicCardIds:new Set(opp?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
       selectedPlayerInstanceId:onlineSelectedUnitId||(myUnits.find(u=>u.isActive&&u.currentHp>0)?.instanceId||null),
       playerName:me?.name||'プレイヤー',enemyName:opp?.name||'ライバル',playerIconUrl:playerIcon,enemyIconUrl:null,
       playerReserveQueue:[...(me?.reserveQueue||[])].map(String),enemyReserveQueue:[...(opp?.reserveQueue||[])].map(String),yourSide:st.yourSide
@@ -4065,9 +4099,11 @@
       logBattle(`${ev.actor?.name||'プレイヤー'}：${ev.actionName||ev.type||'行動'}${ev.result?` → ${ev.result}`:''}`);
       const mySide=battleState.yourSide||'player1';
       const mapSide=s=>s===(mySide==='player1'?'player1':'player2')?'player':'enemy';
-      const target=ev.target?{...ev.target,side:mapSide(ev.target.side),image:ev.target.image||null}:null;
-      let actor=ev.actor?.side?{...ev.actor,side:mapSide(ev.actor.side),image:ev.actor.image||null}:ev.actor;
-      const card=ev.card||((allCards||[]).find(c=>c.id===ev.cardId)||null);
+      const targetCard=ev.target?.cardId?getOnlinePublicCard(ev.target.cardId):null;
+      const actorCard=ev.actor?.cardId?getOnlinePublicCard(ev.actor.cardId):null;
+      const target=ev.target?{...ev.target,side:mapSide(ev.target.side),image:ev.target.image||targetCard?.image||targetCard?.imageUrl||null}:null;
+      let actor=ev.actor?.side?{...ev.actor,side:mapSide(ev.actor.side),image:ev.actor.image||actorCard?.image||actorCard?.imageUrl||null}:ev.actor;
+      const card=ev.card||getOnlinePublicCard(ev.cardId)||((allCards||[]).find(c=>c.id===ev.cardId)||null);
       let cardData;
       if(ev.type==='MAGIC_USE'){
         cardData=card||{cardType:'magic',name:ev.actionName,image:ev.actor?.image||null,desc:ev.description||''};
@@ -4095,6 +4131,11 @@
       else if(window.__cardBattleAssetNext) window.__cardBattleAssetNext();
       return;
     }
+    if(m.type==='deployment_assets'){ mergeOnlinePublicAssets(m.items||[]); if(onlineDeckOptions)renderOnlineSelection(); return; }
+    if(m.type==='deployment_assets_end'){ if(onlineDeckOptions)renderOnlineSelection(); return; }
+    if(m.type==='battle_cards'){ (m.cards||[]).forEach(registerOnlinePublicCard); return; }
+    if(m.type==='battle_assets'){ mergeOnlinePublicAssets(m.items||[]); return; }
+    if(m.type==='battle_assets_end'){ mergeOnlinePublicAssets([]); return; }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
@@ -4114,6 +4155,7 @@
     }
     if(m.type==='rental_decks'){onlineRentalDecks=m.decks||[];if(onlineRoom?.rule==='rental')renderOnlineSelection();return;}
     if(m.type==='deployment_options'){
+      (m.units||[]).forEach(registerPublicCard);(m.magics||[]).forEach(registerPublicCard);
       onlineDeckOptions={units:m.units||[],magics:m.magics||[],deckId:m.deckId,deckName:m.deckName};
       onlineSelection=onlineSelection||{};onlineSelection.deckId=m.deckId;onlineSelection.unitIds=onlineDeckOptions.units.map(c=>String(c.id));onlineSelection.magicIds=onlineDeckOptions.magics.map(c=>String(c.id));onlineSelection.active=onlineSelection.active?.filter(id=>onlineSelection.unitIds.includes(id))||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));onlineSelection.reserve=(onlineSelection.reserve||[]).filter(id=>onlineSelection.unitIds.includes(id));onlineSelection.deployConfirmed=false;onlineReady=false;renderOnlineSelection();return;
     }
