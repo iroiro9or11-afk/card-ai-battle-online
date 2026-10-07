@@ -349,7 +349,7 @@
           </select>
           <label class="flex items-center gap-2 text-xs"><input id="online-allow-spectators" type="checkbox" checked> 観戦を許可</label>
           <input id="online-max-spectators" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs" type="number" min="0" max="50" value="10" placeholder="最大観戦人数">
-          <button onclick="createOnlineRoom()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-black">部屋を作成</button>
+          <button id="online-create-room-btn" type="button" onclick="createOnlineRoom()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-black">部屋を作成</button><div id="online-lobby-status" class="text-xs text-slate-400 min-h-[1.25rem]"></div>
         </div>
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div class="flex justify-between items-center mb-3"><h3 class="font-black text-amber-300">部屋一覧</h3><button onclick="requestRoomList()" class="px-2 py-1 bg-slate-800 rounded text-[10px]">更新</button></div>
@@ -3496,7 +3496,7 @@
       'bg-slate-800 text-slate-400'
     );
   }
-  function setOnlineStatus(text){ if ($('online-status')) $('online-status').innerText = text || ''; }
+  function setOnlineStatus(text){ const msg=text||''; if ($('online-status')) $('online-status').innerText=msg; if ($('online-lobby-status')) $('online-lobby-status').innerText=msg; }
   function ensureOnlineSession(){
     if (!onlineSessionId) {
       onlineSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).slice(2);
@@ -3606,21 +3606,37 @@
   }
 
   async function createOnlineRoom(){
-    if(onlineCreateInFlight)return;
-    ensureOnlineSession();
-    onlineCreateInFlight=true;
-    const profile=await onlineProfileAndReady();
-    if(!profile){onlineCreateInFlight=false;return;}
-    const payload={
-      roomName:$('online-room-name')?.value.trim()||'カード勝負',
-      password:$('online-room-password')?.value||'',
-      rule:$('online-room-rule')?.value||'unlimited',
-      allowSpectators:!!$('online-allow-spectators')?.checked,
-      maxSpectators:Number($('online-max-spectators')?.value)||10,
-      profile
-    };
-    setOnlineStatus('部屋作成要求を送信しています…');
-    sendOnline('room_create',payload);
+    if(onlineCreateInFlight){ setOnlineStatus('すでに部屋作成要求を処理中です。'); return; }
+    try{
+      ensureOnlineSession();
+      onlineCreateInFlight=true;
+      const btn=$('online-create-room-btn'); if(btn){btn.disabled=true;btn.innerText='部屋を作成中…';}
+      setOnlineStatus('カードデータを確認しています…');
+      const profile=await onlineProfileAndReady();
+      if(!profile){ onlineCreateInFlight=false; if(btn){btn.disabled=false;btn.innerText='部屋を作成';} return; }
+      const payload={
+        roomName:$('online-room-name')?.value.trim()||'カード勝負',
+        password:$('online-room-password')?.value||'',
+        rule:$('online-room-rule')?.value||'unlimited',
+        allowSpectators:!!$('online-allow-spectators')?.checked,
+        maxSpectators:Math.max(0,Math.min(50,Number($('online-max-spectators')?.value)||10)),
+        profile
+      };
+      if(!onlineWS || onlineWS.readyState!==WebSocket.OPEN || !onlineAuthenticated){
+        setOnlineStatus('サーバー認証を待っています…');
+        sendOnline('room_create',payload);
+      }else{
+        setOnlineStatus('部屋作成要求を送信しています…');
+        const sent=sendOnline('room_create',payload);
+        if(sent) setOnlineStatus('部屋作成要求を送信しました。サーバーの応答を待っています…');
+        else setOnlineStatus('接続復帰後に部屋作成要求を送信します…');
+      }
+    }catch(e){
+      console.error('createOnlineRoom error',e);
+      onlineCreateInFlight=false;
+      const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
+      showOnlineError('部屋作成処理でエラーが発生しました。ページを再読み込みして再試行してください。');
+    }
   }
   window.createOnlineRoom=createOnlineRoom;
 
@@ -3940,6 +3956,7 @@
     }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
+      onlineCreateInFlight=false; const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
       onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineRentalDecks=m.rentalDecks||[];renderRoomPanel();renderPlayerList([]);renderOnlineSelection();onlineCreateInFlight=false;setOnlineStatus('部屋に参加しました。');
       // 通常ルールは最初のデッキ候補をサーバーへ同期して、出撃設定まで進められるようにする。
       if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && onlineSelection?.deckId) sendOnline('deck_select',{deckId:String(onlineSelection.deckId)});
@@ -3990,7 +4007,8 @@
     if(m.type==='room_closed'){showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();return;}
     if(m.type==='left_room'){resetOnlineRoomLocal();setOnlineStatus('部屋から退出しました。');return;}
     if(m.type==='error'){
-      onlineCreateInFlight=false;
+      onlineCreateInFlight=false; const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
+
       if(m.code==='INVALID_ACTION')onlineSubmitted=false;
       showOnlineError(m.message||'オンライン処理でエラーが発生しました。');
       return;
