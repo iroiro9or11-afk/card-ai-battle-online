@@ -3454,120 +3454,107 @@
     async function showActionPopupNow(actor, actionName, cardData, info = {}) {
       const modal = document.getElementById("action-popup-modal");
       if (!modal) return;
+      const startedAt = Date.now();
 
-      // 先に最低限の表示を出してから詳細UIを埋める。
-      // 詳細UIの一部で例外が出ても、ポップアップ自体が消えたり
-      // confirmPlayerActions() がrejectしてターン進行が止まったりしないようにする。
+      // ポップアップはオンライン戦闘のイベント処理をブロックする重要な演出。
+      // 詳細UIの一部で例外が起きても「演出なし→即次ターン」にならないよう、
+      // 最低3秒は必ず表示する。
       modal.classList.remove("hidden");
       const actionTitle = document.getElementById("popup-action-name");
       if (actionTitle) actionTitle.innerText = actionName || "行動";
 
       try {
-              const actorIsPlayer = actor?.side === 'player' || !actor?.side;
-              const target = info.targetEntity || null;
-              const targetIsPlayer = target?.side === 'player' || target?.__playerTarget === 'self';
+        const actorIsPlayer = actor?.side === 'player' || !actor?.side;
+        const target = info.targetEntity || null;
+        const targetIsPlayer = target?.side === 'player' || target?.__playerTarget === 'self';
 
-              const actorPanel = document.getElementById("popup-actor-panel");
-              const actorSide = document.getElementById("popup-actor-side");
-              const targetPanel = document.getElementById("popup-target-panel");
-              const targetSide = document.getElementById("popup-target-side");
-              actorPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${actorIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
-              actorSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${actorIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
-              actorSide.innerText = actorIsPlayer ? '味方' : '敵';
-              targetPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${targetIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
-              targetSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${targetIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
-              targetSide.innerText = target ? (targetIsPlayer ? '味方' : '敵') : '対象';
+        const actorPanel = document.getElementById("popup-actor-panel");
+        const actorSide = document.getElementById("popup-actor-side");
+        const targetPanel = document.getElementById("popup-target-panel");
+        const targetSide = document.getElementById("popup-target-side");
+        if(actorPanel){
+          actorPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${actorIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
+        }
+        if(actorSide){
+          actorSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${actorIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
+          actorSide.innerText = actorIsPlayer ? '味方' : '敵';
+        }
+        if(targetPanel){
+          targetPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${targetIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
+        }
+        if(targetSide){
+          targetSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${targetIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
+          targetSide.innerText = target ? (targetIsPlayer ? '味方' : '敵') : '対象';
+        }
 
-              document.getElementById("popup-actor-name").innerText = actor?.name || "プレイヤー";
-              const popupActorImg = document.getElementById("popup-actor-img");
-              const actorDead = (info.actorHpAfter?.current ?? actor?.currentHp ?? 1) <= 0;
-              popupActorImg.classList.toggle('popup-dead-image', actorDead);
-              popupActorImg.onerror = () => { popupActorImg.onerror = null; popupActorImg.src = createDummyCardImage("👤", actorIsPlayer ? "#075985" : "#9f1239"); };
-              popupActorImg.src = actor?.image || actor?.iconImage || createDummyCardImage(actorIsPlayer ? "👤" : "👹", actorIsPlayer ? "#075985" : "#9f1239");
+        const actorName=document.getElementById("popup-actor-name"); if(actorName)actorName.innerText=actor?.name||"プレイヤー";
+        const popupActorImg=document.getElementById("popup-actor-img");
+        if(popupActorImg){
+          const actorDead=(info.actorHpAfter?.current??actor?.currentHp??1)<=0;
+          popupActorImg.classList.toggle('popup-dead-image',actorDead);
+          popupActorImg.onerror=()=>{popupActorImg.onerror=null;popupActorImg.src=createDummyCardImage("👤",actorIsPlayer?"#075985":"#9f1239");};
+          popupActorImg.src=actor?.image||actor?.iconImage||getCardImage(cardData)||createDummyCardImage(actorIsPlayer?"👤":"👹",actorIsPlayer?"#075985":"#9f1239");
+        }
+        if(actionTitle)actionTitle.innerText=actionName||"行動";
+        const descriptionEl=document.getElementById("popup-action-description");
+        if(descriptionEl){
+          if(info.description){descriptionEl.innerText=info.description;descriptionEl.classList.remove('hidden');}
+          else{descriptionEl.innerText='';descriptionEl.classList.add('hidden');}
+        }
+        const targetText=document.getElementById("popup-target");if(targetText)targetText.innerText=info.target||(target?.name||'対象なし');
+        const effectEl=document.getElementById("popup-effect");if(effectEl)effectEl.innerText=info.effect||'効果なし';
+        const resultEl=document.getElementById("popup-result");if(resultEl)resultEl.innerText=info.result||'変化なし';
 
-              document.getElementById("popup-action-name").innerText = actionName;
-              const descriptionEl = document.getElementById("popup-action-description");
-              if (info.description) {
-                descriptionEl.innerText = info.description;
-                descriptionEl.classList.remove('hidden');
-              } else {
-                descriptionEl.innerText = '';
-                descriptionEl.classList.add('hidden');
-              }
-              document.getElementById("popup-target").innerText = info.target || (target?.name || '対象なし');
-              document.getElementById("popup-effect").innerText = info.effect || '効果なし';
-              document.getElementById("popup-result").innerText = info.result || '変化なし';
+        const setHp=(prefix,before,after,fallbackEntity)=>{
+          const wrap=document.getElementById(`popup-${prefix}-hp-wrap`),text=document.getElementById(`popup-${prefix}-hp-text`),fill=document.getElementById(`popup-${prefix}-hp-fill`);
+          if(!wrap||!text||!fill)return;
+          const rawBefore=before||(fallbackEntity?{current:fallbackEntity.currentHp,max:fallbackEntity.maxHp}:null);
+          const rawAfter=after||(fallbackEntity?{current:fallbackEntity.currentHp,max:fallbackEntity.maxHp}:null);
+          const normalize=(snap,fallback)=>{
+            const maxRaw=Number(snap?.max),fallbackMax=Number(fallback?.maxHp),max=Number.isFinite(maxRaw)&&maxRaw>0?maxRaw:(Number.isFinite(fallbackMax)&&fallbackMax>0?fallbackMax:null);
+            if(!max)return null;
+            const curRaw=Number(snap?.current),fallbackCur=Number(fallback?.currentHp),cur=Number.isFinite(curRaw)?curRaw:(Number.isFinite(fallbackCur)?fallbackCur:max);
+            return {current:Math.max(0,Math.min(max,cur)),max};
+          };
+          const snapBefore=normalize(rawBefore,fallbackEntity),snapAfter=normalize(rawAfter,fallbackEntity);
+          if(!snapAfter){wrap.classList.add('hidden');return;}
+          wrap.classList.remove('hidden');
+          text.innerText=`${snapBefore?`${snapBefore.current}/${snapBefore.max} → `:''}${snapAfter.current}/${snapAfter.max}`;
+          fill.style.width=`${Math.max(0,Math.min(100,snapAfter.current/snapAfter.max*100))}%`;
+          fill.classList.toggle('hp-dead',snapAfter.current<=0);fill.classList.toggle('hp-alive',snapAfter.current>0);
+        };
+        setHp('actor',info.actorHpBefore,info.actorHpAfter,actor);
 
-              const setHp = (prefix, before, after, fallbackEntity) => {
-                const wrap = document.getElementById(`popup-${prefix}-hp-wrap`);
-                const text = document.getElementById(`popup-${prefix}-hp-text`);
-                const fill = document.getElementById(`popup-${prefix}-hp-fill`);
-                const rawBefore = before || (fallbackEntity ? { current:fallbackEntity.currentHp, max:fallbackEntity.maxHp } : null);
-                const rawAfter = after || (fallbackEntity ? { current:fallbackEntity.currentHp, max:fallbackEntity.maxHp } : null);
-                const normalizeSnap=(snap,fallback)=>{
-                  const maxRaw=Number(snap?.max);
-                  const fallbackMax=Number(fallback?.maxHp);
-                  const max=Number.isFinite(maxRaw)&&maxRaw>0?maxRaw:(Number.isFinite(fallbackMax)&&fallbackMax>0?fallbackMax:null);
-                  if(!max)return null;
-                  const curRaw=Number(snap?.current);
-                  const fallbackCur=Number(fallback?.currentHp);
-                  const cur=Number.isFinite(curRaw)?curRaw:(Number.isFinite(fallbackCur)?fallbackCur:max);
-                  return {current:Math.max(0,Math.min(max,cur)),max};
-                };
-                const snapBefore = normalizeSnap(rawBefore,fallbackEntity);
-                const snapAfter = normalizeSnap(rawAfter,fallbackEntity);
-                if (!snapAfter) {
-                  wrap.classList.add('hidden');
-                  return;
-                }
-                wrap.classList.remove('hidden');
-                const max = snapAfter.max;
-                const current = snapAfter.current;
-                const beforeText = snapBefore ? `${snapBefore.current}/${snapBefore.max}` : '';
-                text.innerText = `${beforeText ? beforeText + ' → ' : ''}${current}/${max}`;
-                fill.style.width = `${Math.max(0, Math.min(100, current / max * 100))}%`;
-                fill.classList.toggle('hp-dead', current <= 0);
-                fill.classList.toggle('hp-alive', current > 0);
-              };
-              setHp('actor', info.actorHpBefore, info.actorHpAfter, actor);
-
-              const targetImg = document.getElementById("popup-target-img");
-              const targetPlaceholder = document.getElementById("popup-target-placeholder");
-              if (target) {
-                targetPlaceholder.classList.add('hidden');
-                targetPlaceholder.classList.remove('flex');
-                targetImg.classList.remove('hidden');
-                const targetDead = (info.targetHpAfter?.current ?? target.currentHp ?? 1) <= 0;
-                targetImg.classList.toggle('popup-dead-image', targetDead);
-                targetImg.onerror = () => { targetImg.onerror = null; targetImg.classList.add('hidden'); targetPlaceholder.classList.remove('hidden'); targetPlaceholder.classList.add('flex'); };
-                targetImg.src = target.image || target.iconImage || getCardImage(target) || createDummyCardImage(targetIsPlayer ? "👤" : "👹", targetIsPlayer ? "#075985" : "#9f1239");
-                document.getElementById("popup-target-name").innerText = target.name || (targetIsPlayer ? 'プレイヤー' : '対象');
-                setHp('target', info.targetHpBefore, info.targetHpAfter, target);
-              } else {
-                targetImg.classList.add('hidden');
-                targetPlaceholder.classList.remove('hidden');
-                targetPlaceholder.classList.add('flex');
-                document.getElementById("popup-target-name").innerText = info.target || '対象なし';
-                document.getElementById('popup-target-hp-wrap').classList.add('hidden');
-              }
-
-              const cardContainer = document.getElementById("popup-card-container");
-              if (cardContainer) cardContainer.innerHTML = '';
-
-              await sleep(3000);
-              modal.classList.add("hidden");
-      } catch (popupError) {
-        console.error('Action popup error:', popupError);
-        try {
-          if (actionTitle) actionTitle.innerText = actionName || "行動";
-          const effectEl = document.getElementById("popup-effect");
-          const resultEl = document.getElementById("popup-result");
-          if (effectEl) effectEl.innerText = info.effect || "効果なし";
-          if (resultEl) resultEl.innerText = info.result || "変化なし";
-        } catch (_) {}
-        await sleep(1200);
-        modal.classList.add("hidden");
+        const targetImg=document.getElementById("popup-target-img"),targetPlaceholder=document.getElementById("popup-target-placeholder");
+        if(target){
+          if(targetPlaceholder){targetPlaceholder.classList.add('hidden');targetPlaceholder.classList.remove('flex');}
+          if(targetImg){
+            targetImg.classList.remove('hidden');
+            const targetDead=(info.targetHpAfter?.current??target.currentHp??1)<=0;
+            targetImg.classList.toggle('popup-dead-image',targetDead);
+            targetImg.onerror=()=>{targetImg.onerror=null;targetImg.classList.add('hidden');if(targetPlaceholder){targetPlaceholder.classList.remove('hidden');targetPlaceholder.classList.add('flex');}};
+            targetImg.src=target.image||target.iconImage||getCardImage(target)||createDummyCardImage(targetIsPlayer?"👤":"👹",targetIsPlayer?"#075985":"#9f1239");
+          }
+          const targetName=document.getElementById("popup-target-name");if(targetName)targetName.innerText=target.name||(targetIsPlayer?'プレイヤー':'対象');
+          setHp('target',info.targetHpBefore,info.targetHpAfter,target);
+        }else{
+          if(targetImg)targetImg.classList.add('hidden');
+          if(targetPlaceholder){targetPlaceholder.classList.remove('hidden');targetPlaceholder.classList.add('flex');}
+          const targetName=document.getElementById("popup-target-name");if(targetName)targetName.innerText=info.target||'対象なし';
+          document.getElementById('popup-target-hp-wrap')?.classList.add('hidden');
+        }
+      }catch(popupError){
+        console.error('Action popup detail error:',popupError);
+        if(actionTitle)actionTitle.innerText=actionName||'行動';
+        const effectEl=document.getElementById("popup-effect"),resultEl=document.getElementById("popup-result");
+        if(effectEl)effectEl.innerText=info.effect||'効果なし';
+        if(resultEl)resultEl.innerText=info.result||'変化なし';
       }
+
+      // 詳細処理が失敗しても、イベント1件につき最低3秒は画面を保持する。
+      const remaining=Math.max(0,3000-(Date.now()-startedAt));
+      if(remaining)await sleep(remaining);
+      modal.classList.add("hidden");
     }
 
     let actionPopupQueue = Promise.resolve();
@@ -4227,7 +4214,20 @@
       return;
     }
     if(m.type==='room_recovered'){
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineAssetsReady=false;onlineSelection=m.selection||{};onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;onlineDeckRequestId=null;renderRoomPanel();renderPlayerList(m.players||[]);if(m.deploymentOptions)onlineDeckOptions=m.deploymentOptions;renderOnlineSelection();sendCardAssets();setOnlineStatus('部屋・対戦状態を復元しました。');return;
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineAssetsReady=false;
+      onlineSelection={...(m.selection||{})};
+      // ページ更新時は「出撃設定(selection)」とは別に保存されている
+      // 「使用デッキ(deckSelection)」を必ず復元する。これをしないとUIだけ
+      // 先頭デッキへ戻り、サーバーが復元したカード群と表示デッキが食い違う。
+      const recoveredDeckId=m.deckSelection?.id||m.deploymentOptions?.deckId||onlineSelection.deckId||'';
+      if(recoveredDeckId) onlineSelection.deckId=String(recoveredDeckId);
+      onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;onlineDeckRequestId=null;
+      renderRoomPanel();renderPlayerList(m.players||[]);
+      if(m.deploymentOptions){
+        onlineDeckOptions=m.deploymentOptions;
+        if(onlineDeckOptions.deckId) onlineSelection.deckId=String(onlineDeckOptions.deckId);
+      }
+      renderOnlineSelection();sendCardAssets();setOnlineStatus('部屋・対戦状態を復元しました。');return;
     }
     if(m.type==='spectate_joined'){
       onlineRoom=m.room;onlineSpectating=true;onlineReady=false;renderRoomPanel();$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。プレイヤー操作はできません。</div>';setOnlineStatus('観戦中です。');return;
@@ -4237,7 +4237,10 @@
     }
     if(m.type==='rental_decks'){onlineRentalDecks=m.decks||[];if(onlineRoom?.rule==='rental')renderOnlineSelection();return;}
     if(m.type==='deployment_options'){
-      (m.units||[]).forEach(registerPublicCard);(m.magics||[]).forEach(registerPublicCard);
+      // deployment_options はカード本体、deployment_assets は画像を別送する。
+      // ここで存在しない旧関数名 registerPublicCard を呼ぶと受信処理全体が
+      // 例外停止し、キャラクターカードが表示されないため、共通キャッシュ登録関数を使う。
+      (m.units||[]).forEach(registerOnlinePublicCard);(m.magics||[]).forEach(registerOnlinePublicCard);
       onlineDeckOptions={units:m.units||[],magics:m.magics||[],deckId:m.deckId,deckName:m.deckName};
       onlineDeckRequestId=String(m.deckId||onlineSelection?.deckId||'');
       onlineSelection=onlineSelection||{};onlineSelection.deckId=m.deckId;onlineSelection.unitIds=onlineDeckOptions.units.map(c=>String(c.id));onlineSelection.magicIds=onlineDeckOptions.magics.map(c=>String(c.id));onlineSelection.active=onlineSelection.active?.filter(id=>onlineSelection.unitIds.includes(id))||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));onlineSelection.reserve=(onlineSelection.reserve||[]).filter(id=>onlineSelection.unitIds.includes(id));onlineSelection.deployConfirmed=false;onlineReady=false;setOnlineStatus(`「${onlineDeckOptions.deckName||'選択したデッキ'}」のキャラクターカードを読み込みました。出撃3体を選択してください。`);renderOnlineSelection();return;
@@ -4254,7 +4257,11 @@
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
     if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);if(m.state?.phase==='decision'&&m.state?.deadline)startOnlineTimer(m.state.deadline);else if(m.state?.phase==='execution')showOnlineExecutionTimer();applyOnlineState(m.state);return;}
     if(m.type==='battle_event'){
-      applyOnlineState(m.state);onlineEventQueue.push(m.event);processOnlineEventQueue();return;
+      // サーバーはイベントと同時に最新stateも送る。state描画側で万一例外が
+      // 出てもイベントキュー自体は失わず、ポップアップ演出と次ターン復帰を止めない。
+      onlineEventQueue.push(m.event);
+      try{applyOnlineState(m.state);}catch(e){console.error('Online battle state render error:',e);}
+      processOnlineEventQueue();return;
     }
     if(m.type==='turn_start'||m.type==='battle_state'){
       const st=m.state;if(!st)return;
