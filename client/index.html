@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.23.0 - ストーリーモード強化版</title>
+  <title>カードAI対戦ゲーム v3.24.0 - ストーリーモード強化版</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -164,7 +164,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.23.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.24.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -460,6 +460,30 @@
       </div>
     </section>
 
+    <!-- ストーリーモード初期カード獲得モーダル -->
+    <div id="story-initial-reward-modal" class="fixed inset-0 z-[84] flex items-center justify-center bg-black/90 backdrop-blur-sm hidden px-3">
+      <div class="w-full max-w-5xl max-h-[92vh] overflow-y-auto bg-slate-950 border-2 border-amber-500/70 rounded-2xl shadow-2xl p-5 sm:p-7">
+        <div class="text-center">
+          <div class="text-xs font-black tracking-[0.3em] text-amber-300">STORY START REWARD</div>
+          <h3 class="text-2xl sm:text-3xl font-black text-white mt-2">🎴 トーナメント開始カード</h3>
+          <p class="text-xs sm:text-sm text-slate-300 mt-2">今回のトーナメントで最初に使用できるカードが決まりました。</p>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+          <div class="bg-slate-900 border border-cyan-700/50 rounded-xl p-3">
+            <div class="flex justify-between items-center mb-3"><span class="text-sm font-black text-cyan-300">キャラクター <span class="text-xs text-slate-500">5枚</span></span><span class="text-[10px] text-slate-500">この5枚が最初の候補です</span></div>
+            <div id="story-initial-unit-reward" class="grid grid-cols-2 sm:grid-cols-3 gap-2"></div>
+          </div>
+          <div class="bg-slate-900 border border-purple-700/50 rounded-xl p-3">
+            <div class="flex justify-between items-center mb-3"><span class="text-sm font-black text-purple-300">マジック <span class="text-xs text-slate-500">10枚</span></span><span class="text-[10px] text-slate-500">この10枚が最初の候補です</span></div>
+            <div id="story-initial-magic-reward" class="grid grid-cols-2 sm:grid-cols-3 gap-2"></div>
+          </div>
+        </div>
+        <div class="flex justify-center mt-5">
+          <button type="button" onclick="closeStoryInitialReward()" class="w-full sm:w-auto px-8 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg">📝 ストーリー編成へ進む</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ストーリーモード -->
     <section id="view-story" class="view-section hidden space-y-4">
       <div class="bg-gradient-to-r from-rose-950/90 via-slate-900 to-amber-950/80 border-2 border-rose-500/50 rounded-2xl p-4 sm:p-5 shadow-2xl">
@@ -470,7 +494,7 @@
             <p class="text-xs sm:text-sm text-slate-300 mt-2">カード一覧から手に入れたカードだけで即席デッキを組み、32人トーナメントを勝ち抜きます。</p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <button type="button" onclick="startNewStoryMode()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs">🆕 新しいトーナメント</button>
+            <button type="button" onclick="prepareNewStoryMode()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs">🆕 新しいトーナメント</button>
             <button type="button" onclick="switchView('battle-setup')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs">通常対戦へ</button>
           </div>
         </div>
@@ -504,6 +528,17 @@
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">勝利数</div><div id="story-win-label" class="text-lg font-black text-emerald-300 mt-1">0 / 5</div></div>
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">使用可能キャラ</div><div id="story-unit-count" class="text-lg font-black text-cyan-300 mt-1">0</div></div>
           <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">使用可能マジック</div><div id="story-magic-count" class="text-lg font-black text-purple-300 mt-1">0</div></div>
+        </div>
+
+        <div class="bg-slate-900 border border-amber-700/50 rounded-2xl p-4">
+          <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+            <div>
+              <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">トーナメント表</div>
+              <div id="story-bracket-status" class="text-[10px] text-slate-500 mt-1">全32枠・敵同士の対戦は自動処理</div>
+            </div>
+            <div class="text-[10px] font-black text-cyan-300">現在地を表示中</div>
+          </div>
+          <div id="story-bracket-top" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2"></div>
         </div>
 
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -2737,22 +2772,115 @@
       return {ok:true,message:`出撃3体：${dep.active.map(id=>storyCardById(id)?.name||'').join(' / ')} ｜ 控え${dep.reserve.length}体 ｜ マジック${m.length}枚`};
     }
 
-    function openStoryMode(){
+    async function openStoryMode(){
       switchView('story');
-      if(!storyModeState)storyEnsureDraftTournament();
-      if(storyModeState && !storyModeState.playerDeployment){storyModeState.playerDeployment={active:(storyModeState.playerDeck?.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck?.unitIds||[]).slice(3,5)};saveStoryModeState();}
+      if(!storyModeState){storyEnsureDraftTournament();}
+      else if(storyRepairLoadedState()){await saveStoryModeState();}
+      if(storyModeState && (!storyModeState.rounds?.length) && storyModeState.active){storyPrepareCurrentRound();await saveStoryModeState();}
       renderStoryMode();
     }
+    function storyDrawUniqueIds(cardType,count,excludeIds=[]){
+      const excluded=new Set((excludeIds||[]).map(String));
+      const pool=allCards.filter(c=>c.cardType===cardType&&!excluded.has(String(c.id)));
+      return storyShuffle(pool).slice(0,count).map(c=>c.id);
+    }
+
+    function storyRenderInitialRewardModal(){
+      const modal=document.getElementById('story-initial-reward-modal');
+      const ub=document.getElementById('story-initial-unit-reward');
+      const mb=document.getElementById('story-initial-magic-reward');
+      if(!modal||!ub||!mb||!storyModeState)return;
+      ub.innerHTML='';mb.innerHTML='';
+      (storyModeState.initialUnitIds||storyModeState.availableUnitIds||[]).slice(0,5).forEach(id=>{
+        const c=storyCardById(id); if(!c)return;
+        const d=document.createElement('div'); d.className='bg-slate-950 border border-cyan-900/60 rounded-lg p-1.5';
+        d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});
+        d.onclick=()=>openCardDetail(c.id); ub.appendChild(d);
+      });
+      (storyModeState.initialMagicIds||storyModeState.availableMagicIds||[]).slice(0,10).forEach(id=>{
+        const c=storyCardById(id); if(!c)return;
+        const d=document.createElement('div'); d.className='bg-slate-950 border border-purple-900/60 rounded-lg p-1.5';
+        d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});
+        d.onclick=()=>openCardDetail(c.id); mb.appendChild(d);
+      });
+      modal.classList.remove('hidden');
+    }
+    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');}
+
+    function storyRepairLoadedState(){
+      if(!storyModeState)return false;
+      let changed=false;
+      const validUnits=new Set(allCards.filter(c=>c.cardType==='unit').map(c=>String(c.id)));
+      const validMagics=new Set(allCards.filter(c=>c.cardType==='magic').map(c=>String(c.id)));
+      storyModeState.availableUnitIds=[...new Set((storyModeState.availableUnitIds||[]).map(String).filter(id=>validUnits.has(id)))];
+      storyModeState.availableMagicIds=[...new Set((storyModeState.availableMagicIds||[]).map(String).filter(id=>validMagics.has(id)))];
+      const expectedUnits=Math.min(validUnits.size,5+((storyModeState.wins||0)*3));
+      const expectedMagics=Math.min(validMagics.size,10+((storyModeState.wins||0)*5));
+      const addUnits=storyDrawUniqueIds('unit',Math.max(0,expectedUnits-storyModeState.availableUnitIds.length),storyModeState.availableUnitIds);
+      const addMagics=storyDrawUniqueIds('magic',Math.max(0,expectedMagics-storyModeState.availableMagicIds.length),storyModeState.availableMagicIds);
+      if(addUnits.length){storyModeState.availableUnitIds.push(...addUnits);changed=true;}
+      if(addMagics.length){storyModeState.availableMagicIds.push(...addMagics);changed=true;}
+      if((storyModeState.wins||0)===0){
+        const initialUnits=(storyModeState.initialUnitIds||[]).filter(id=>storyCardById(id)?.cardType==='unit');
+        const initialMagics=(storyModeState.initialMagicIds||[]).filter(id=>storyCardById(id)?.cardType==='magic');
+        if(initialUnits.length!==Math.min(5,validUnits.size)){storyModeState.initialUnitIds=storyModeState.availableUnitIds.slice(0,Math.min(5,storyModeState.availableUnitIds.length));changed=true;}
+        if(initialMagics.length!==Math.min(10,validMagics.size)){storyModeState.initialMagicIds=storyModeState.availableMagicIds.slice(0,Math.min(10,storyModeState.availableMagicIds.length));changed=true;}
+      }
+      const legacyEmptyDeck=!storyModeState.playerDeck || !Array.isArray(storyModeState.playerDeck.unitIds) || !Array.isArray(storyModeState.playerDeck.magicIds) || ((storyModeState.wins||0)===0 && storyModeState.playerDeck.unitIds.length===0 && storyModeState.playerDeck.magicIds.length===0);
+      if(legacyEmptyDeck){storyModeState.playerDeck={unitIds:storyModeState.availableUnitIds.slice(0,5),magicIds:storyModeState.availableMagicIds.slice(0,10)};changed=true;}
+      else {
+        const validAvailableUnits=new Set(storyModeState.availableUnitIds.map(String));
+        const validAvailableMagics=new Set(storyModeState.availableMagicIds.map(String));
+        const nextUnits=[...new Set(storyModeState.playerDeck.unitIds.map(String))].filter(id=>validAvailableUnits.has(id)).slice(0,5);
+        const nextMagics=[...new Set(storyModeState.playerDeck.magicIds.map(String))].filter(id=>validAvailableMagics.has(id)).slice(0,10);
+        if((storyModeState.wins||0)===0 && nextUnits.length<3){
+          const fill=storyModeState.availableUnitIds.filter(id=>!nextUnits.includes(String(id))).slice(0,3-nextUnits.length);
+          nextUnits.push(...fill);
+        }
+        if(JSON.stringify(nextUnits)!==JSON.stringify(storyModeState.playerDeck.unitIds)||JSON.stringify(nextMagics)!==JSON.stringify(storyModeState.playerDeck.magicIds)){storyModeState.playerDeck={unitIds:nextUnits,magicIds:nextMagics};changed=true;}
+      }
+      if(!storyModeState.playerDeployment || !Array.isArray(storyModeState.playerDeployment.active) || !Array.isArray(storyModeState.playerDeployment.reserve)){storyModeState.playerDeployment={active:(storyModeState.playerDeck.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck.unitIds||[]).slice(3,5)};changed=true;}
+      if(!Array.isArray(storyModeState.participants) || storyModeState.participants.length!==32){
+        storyModeState.participants=storyDraftToParticipants();
+        storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];
+        storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
+        changed=true;
+      } else {
+        const playerParticipant=storyModeState.participants[0];
+        if(!playerParticipant || playerParticipant.type!=='player'){
+          storyModeState.participants=storyDraftToParticipants();
+          changed=true;
+        }
+        if(storyModeState.participants[0]){
+          storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];
+          storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
+        }
+      }
+      return changed;
+    }
+
+    async function prepareNewStoryMode(){
+      storyModeState=null; storyPendingBattle=null; storyBattleOverride=null; closeStoryInitialReward(); closeStoryMatchIntro(); hideBattleResultModal();
+      storyModeDraft={version:3,entries:storyCreateDraftEntries()};
+      await saveStoryModeDraft(); await saveStoryModeState();
+      switchView('story'); renderStoryMode();
+    }
+
     async function startNewStoryMode(){
-      const units=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,5).map(c=>c.id);
-      const magics=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,10).map(c=>c.id);
-      if(units.length<3){alert('ストーリーモード開始にはキャラクターカードが3枚以上必要です。');return;}
-      storyEnsureDraftTournament();
-      storyModeState={version:2,active:true,completed:false,defeated:false,roundIndex:0,wins:0,availableUnitIds:units,availableMagicIds:magics,playerDeck:{unitIds:units.slice(0,5),magicIds:magics.slice(0,10)},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:storyDraftToParticipants(),rounds:[],currentOpponent:null,rewardHistory:[]};
+      if(!Array.isArray(allCards)||allCards.length===0){alert('カード一覧を読み込み中です。少し待ってからもう一度開始してください。');return;}
+      const unitCount=allCards.filter(c=>c.cardType==='unit').length;
+      const magicCount=allCards.filter(c=>c.cardType==='magic').length;
+      if(unitCount<5||magicCount<10){alert(`ストーリーモード開始にはキャラ5枚以上・マジック10枚以上が必要です。現在：キャラ${unitCount}枚 / マジック${magicCount}枚`);return;}
+      const units=storyDrawUniqueIds('unit',5);
+      const magics=storyDrawUniqueIds('magic',10,units);
+      storyModeDraft=storyEnsureDraftTournament();
+      storyModeState={version:3,active:true,completed:false,defeated:false,roundIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:storyDraftToParticipants(),rounds:[],currentOpponent:null,rewardHistory:[]};
       storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
       storyPrepareCurrentRound();
       await saveStoryModeState();
+      await saveStoryModeDraft();
       hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();
+      storyRenderInitialRewardModal();
     }
     
     function storyRenderOpponent(){
@@ -2787,8 +2915,8 @@
         box.appendChild(m);
       }
     }
-    function storyRenderFullBracket(){
-      const box=document.getElementById('story-bracket'); if(!box)return; box.innerHTML='';
+    function storyRenderFullBracketInto(targetId='story-bracket'){
+      const box=document.getElementById(targetId); if(!box)return; box.innerHTML='';
       const labels=['1回戦','2回戦','準々決勝','準決勝','決勝'];
       for(let ri=0;ri<5;ri++){
         const col=document.createElement('div');col.className=`bg-slate-950 rounded-xl border ${ri===(storyModeState.roundIndex||0)?'border-amber-500/80':'border-slate-800'} p-2 space-y-1 overflow-y-auto max-h-[520px]`;
@@ -2810,8 +2938,11 @@
       }
     }
 
+    function storyRenderFullBracket(){storyRenderFullBracketInto('story-bracket');}
+
     function renderStoryMode(){
       const start=document.getElementById('story-start-panel'),main=document.getElementById('story-main-panel');if(!start||!main)return;
+      if(storyModeState) storyRepairLoadedState();
       if(!storyModeState||(!storyModeState.active&&!storyModeState.completed)){
         start.classList.remove('hidden');main.classList.add('hidden');storyEnsureDraftTournament();storyRenderStartBracket();return;
       }
@@ -2829,6 +2960,7 @@
       const valid=storyValidateDeck();const val=document.getElementById('story-deck-validation');val.innerHTML=valid.ok?`<span class="text-emerald-300">✓ ${valid.message}</span>`:`<span class="text-amber-300">⚠ ${valid.message}</span>`;
       const btn=document.querySelector('#view-story button[onclick="startStoryBattle()"]');if(btn)btn.classList.toggle('hidden',!!storyModeState.completed);
       storyRenderFullBracket();
+      storyRenderFullBracketInto('story-bracket-top');
       const hist=document.getElementById('story-reward-history-list');hist.innerHTML='';(storyModeState.rewardHistory||[]).forEach(h=>{const d=document.createElement('div');d.className='bg-slate-950 rounded-lg border border-slate-800 p-2';d.innerText=`第${h.win}勝利：${h.names.length?h.names.join('、'):'追加カードなし'}`;hist.appendChild(d);});
       if(storyModeState.completed)document.getElementById('story-deck-validation').innerHTML='<span class="text-emerald-300 font-black">🏆 トーナメント優勝済みです。新しい挑戦を始められます。</span>';
     }
