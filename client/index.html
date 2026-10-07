@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.26.0 - 5戦ストーリーモード</title>
+  <title>カードAI対戦ゲーム v3.27.1 - 5戦ストーリーモード</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.26.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.1</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -1091,17 +1091,17 @@
     function getEffectText(eff) {
       if (!eff || eff.type === "none") return "効果なし";
       let durText = eff.duration ? `(${eff.duration}ターン)` : "";
-      let stackText = eff.stackable ? "[重複可]" : "[重複不可]";
+      
       switch(eff.type) {
         case "dmg_fixed": return `${eff.val}の固定ダメージ`;
-        case "dmg_atk_ratio": return `基礎攻撃力×${eff.val}%のダメージ`;
+        case "dmg_atk_ratio": return `攻撃力×${eff.val}%のダメージ`;
         case "heal_fixed": return `${eff.val}回復`;
         case "heal_max_hp_ratio": return `最大HPの${eff.val}%回復`;
-        case "mod_atk_ratio": return `攻撃力を${eff.val >= 0 ? '+' : ''}${eff.val}%(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}${stackText}`;
-        case "mod_atk_val": return `攻撃力を${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}${stackText}`;
+        case "mod_atk_ratio": return `攻撃力を${eff.val >= 0 ? '+' : ''}${eff.val}%(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
+        case "mod_atk_val": return `攻撃力を${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
         case "mod_speed": return `行動値を${eff.val >= 0 ? '+' : ''}${eff.val}${durText}`;
         case "mod_ap": return `APを${eff.val >= 0 ? '+' : ''}${eff.val}`;
-        case "damage_cut_ratio": return `受けるダメージを${eff.val}%カット(バフ)${durText}${stackText}`;
+        case "damage_cut_ratio": return `受けるダメージを${eff.val}%カット(バフ)${durText}`;
         case "clear_buffs": return `バフを全て解除`;
         case "clear_debuffs": return `デバフを全て解除`;
         case "heal_block": return `回復禁止(デバフ)${durText}`;
@@ -1662,7 +1662,7 @@
             <span class="text-[9px] font-bold text-emerald-400">【メイン効果】</span>
             <div class="grid grid-cols-2 gap-1 mb-1">
               <select class="${prefix}-main-eff-type bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-                <option value="dmg_atk_ratio">基礎攻撃力×○％ダメージ</option>
+                <option value="dmg_atk_ratio">攻撃力×○％ダメージ</option>
                 <option value="dmg_fixed">○の固定ダメージ</option>
                 <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                 <option value="heal_fixed">○回復</option>
@@ -1682,12 +1682,8 @@
               <input type="number" class="${prefix}-main-eff-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="100" placeholder="効果量" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
               <select class="${prefix}-main-eff-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
             </div>
-            <div class="grid grid-cols-2 gap-1">
-              <input type="number" class="${prefix}-main-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-              <select class="${prefix}-main-eff-stack bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-                <option value="true">バフ重複あり</option>
-                <option value="false">バフ重複なし</option>
-              </select>
+            <div>
+              <input type="number" class="${prefix}-main-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px] w-full" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
             </div>
           </div>
 
@@ -1704,6 +1700,7 @@
                   <span class="text-[8px] text-slate-400">追加効果の対象:</span>
                   <select class="${prefix}-sub-target-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                     ${!isMagic ? `<option value="self">自分自身</option>` : ''}
+                    <option value="same_main_target">メイン効果と同じ対象</option>
                     <option value="select_enemy_1">指定した敵1体</option>
                     <option value="random_enemy_1">ランダムな敵1体</option>
                     <option value="select_ally_1">指定した味方1体</option>
@@ -1716,7 +1713,7 @@
                 <div>
                   <span class="text-[8px] text-slate-400">追加効果の種別:</span>
                   <select class="${prefix}-sub-eff-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-                    <option value="dmg_atk_ratio">基礎攻撃力×○％ダメージ</option>
+                    <option value="dmg_atk_ratio">攻撃力×○％ダメージ</option>
                     <option value="dmg_fixed">○の固定ダメージ</option>
                     <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                     <option value="heal_fixed">○回復</option>
@@ -1733,6 +1730,18 @@
                     <option value="status_remove">状態異常を解除</option>
                     <option value="clear_statuses">全ての状態異常を解除</option>
                   </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-1 mb-1">
+                <div>
+                  <span class="text-[8px] text-slate-400">追加効果の対象条件:</span>
+                  <select class="${prefix}-sub-target-cond-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+                    <option value="none">条件なし</option><option value="hp_ratio_gte">対象のHPが○％以上</option><option value="hp_ratio_lte">対象のHPが○％以下</option><option value="attr_is">対象が◯属性</option><option value="attr_not">対象が◯属性以外</option>
+                  </select>
+                </div>
+                <div class="grid grid-cols-2 gap-1">
+                  <input type="number" class="${prefix}-sub-target-cond-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="50" placeholder="HP%" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+                  <input type="text" list="registered-attributes-list" class="${prefix}-sub-target-cond-attr bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="炎" placeholder="属性名" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-1">
@@ -1791,17 +1800,17 @@
         type: getVal(`${prefix}-main-eff-type`) || "dmg_atk_ratio",
         val: parseInt(getVal(`${prefix}-main-eff-val`)) || 100,
         duration: parseInt(getVal(`${prefix}-main-eff-dur`)) || 0,
-        stackable: getVal(`${prefix}-main-eff-stack`) === "true",
+
         status: getVal(`${prefix}-main-eff-status`) || "poison"
       };
 
       const hasSubEffect = !!isChecked(`${prefix}-has-sub`);
       const subEffect = {
-        targetType: getVal(`${prefix}-sub-target-type`) || "self",
+        targetType: getVal(`${prefix}-sub-target-type`) || "same_main_target",
+        targetCond: { type:getVal(`${prefix}-sub-target-cond-type`)||"none", val:parseInt(getVal(`${prefix}-sub-target-cond-val`))||0, attr:getVal(`${prefix}-sub-target-cond-attr`)||"炎" },
         type: getVal(`${prefix}-sub-eff-type`) || "heal_fixed",
         val: parseInt(getVal(`${prefix}-sub-eff-val`)) || 0,
         duration: parseInt(getVal(`${prefix}-sub-eff-dur`)) || 0,
-        stackable: true,
         status: getVal(`${prefix}-sub-eff-status`) || "poison"
       };
 
@@ -2097,8 +2106,8 @@
       setEditorField(prefix,'name',skill.name); setEditorField(prefix,'cost',skill.cost||0); setEditorField(prefix,'timing',skill.timing||'turn_start');
       setEditorField(prefix,'self-cond-type',skill.selfCond?.type||'none'); setEditorField(prefix,'self-cond-val',skill.selfCond?.val||0); setEditorField(prefix,'self-cond-attr',skill.selfCond?.attr||'炎'); setEditorField(prefix,'self-cond-status',skill.selfCond?.status||'poison');
       setEditorField(prefix,'target-type',skill.targetType||'self'); setEditorField(prefix,'target-cond-type',skill.targetCond?.type||'none'); setEditorField(prefix,'target-cond-val',skill.targetCond?.val||0); setEditorField(prefix,'target-cond-attr',skill.targetCond?.attr||'炎');
-      setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',skill.mainEffect?.duration||0); setEditorField(prefix,'main-eff-stack',String(skill.mainEffect?.stackable!==false)); setEditorField(prefix,'main-eff-status',skill.mainEffect?.status||'poison');
-      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'self'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); setEditorField(prefix,'sub-eff-dur',skill.subEffect?.duration||0); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
+      setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',skill.mainEffect?.duration||0); setEditorField(prefix,'main-eff-status',skill.mainEffect?.status||'poison');
+      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'same_main_target'); setEditorField(prefix,'sub-target-cond-type',skill.subEffect?.targetCond?.type||'none'); setEditorField(prefix,'sub-target-cond-val',skill.subEffect?.targetCond?.val||0); setEditorField(prefix,'sub-target-cond-attr',skill.subEffect?.targetCond?.attr||'炎'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); setEditorField(prefix,'sub-eff-dur',skill.subEffect?.duration||0); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
       updateSkillFormDisplay(prefix,type,isMagic);
     }
     function openCardEditor(cardId) {
@@ -2977,7 +2986,8 @@
           const nextAction = {
             type: 'skill',
             skillIndex: sIdx,
-            targetInstanceId: null
+            targetInstanceId: null,
+            subTargetInstanceId: null
           };
           activeUnit.reservedAction = nextAction;
           renderBattleState();
@@ -2985,52 +2995,21 @@
         };
         optContainer.appendChild(skBtn);
 
-        // 選択中のスキルについて、指定対象なら対象選択欄を表示
-        if (isSelected && skillNeedsManualTarget(sk)) {
-          const candidates = getManualTargetCandidates(sk, activeUnit);
-          const targetBox = document.createElement("div");
-          targetBox.className = "w-full mt-2 p-2 rounded-lg border border-cyan-500/40 bg-cyan-950/20";
-
-          const selectedTarget = candidates.find(
-            t => t.instanceId === activeUnit.reservedAction.targetInstanceId
-          );
-
-          const title = document.createElement("div");
-          title.className = "text-[10px] font-black text-cyan-300 mb-1.5";
-          title.innerText = selectedTarget
-            ? `🎯 対象: ${selectedTarget.name}`
-            : "🎯 対象を選択してください";
-          targetBox.appendChild(title);
-
-          if (candidates.length === 0) {
-            const empty = document.createElement("div");
-            empty.className = "text-[10px] text-rose-300";
-            empty.innerText = "有効な対象がいません";
-            targetBox.appendChild(empty);
-          } else {
-            const targetRow = document.createElement("div");
-            targetRow.className = "flex flex-wrap gap-1.5";
-
-            candidates.forEach(target => {
-              const targetBtn = document.createElement("button");
-              const selected = target.instanceId === activeUnit.reservedAction.targetInstanceId;
-              targetBtn.className = `px-2 py-1 rounded border text-[10px] font-bold ${
-                selected
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-300'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-              }`;
-              targetBtn.innerText = `${target.name} (HP ${target.currentHp}/${target.maxHp})`;
-              targetBtn.onclick = () => {
-                activeUnit.reservedAction.targetInstanceId = target.instanceId;
-                renderBattleState();
-                updateReservationSummary();
-              };
-              targetRow.appendChild(targetBtn);
-            });
-            targetBox.appendChild(targetRow);
+        if (isSelected) {
+          const renderTargetPicker=(label,type,cond,field,candidates)=>{
+            if(!isManualTargetType(type)) return;
+            const box=document.createElement('div'); box.className='w-full mt-2 p-2 rounded-lg border border-cyan-500/40 bg-cyan-950/20';
+            const sid=activeUnit.reservedAction[field]; const title=document.createElement('div'); title.className='text-[10px] font-black text-cyan-300 mb-1.5';
+            const st=candidates.find(t=>t.instanceId===sid); title.innerText=st?`🎯 ${label}: ${st.name}`:`🎯 ${label}を選択してください`; box.appendChild(title);
+            const row=document.createElement('div'); row.className='flex flex-wrap gap-1.5';
+            candidates.forEach(t=>{const b=document.createElement('button');const sel=t.instanceId===sid;b.className=`px-2 py-1 rounded border text-[10px] font-bold ${sel?'bg-emerald-500 text-slate-950 border-emerald-300':'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'}`;b.innerText=`${t.name} (HP ${t.currentHp}/${t.maxHp})`;b.onclick=()=>{activeUnit.reservedAction[field]=t.instanceId;renderBattleState();updateReservationSummary();};row.appendChild(b);});
+            if(!candidates.length){const e=document.createElement('div');e.className='text-[10px] text-rose-300';e.innerText='有効な対象がいません';box.appendChild(e);} else box.appendChild(row); optContainer.appendChild(box);
+          };
+          if(isManualTargetType(sk.targetType)) renderTargetPicker('メイン効果の対象',sk.targetType,sk.targetCond,'targetInstanceId',getManualTargetCandidates(sk,activeUnit));
+          if(sk.hasSubEffect&&sk.subEffect){
+            if(sk.subEffect.targetType==='same_main_target'){const i=document.createElement('div');i.className='w-full text-[10px] text-emerald-300 mt-1';i.innerText='↳ 追加効果の対象：メイン効果と同じ対象';optContainer.appendChild(i);}
+            else if(isManualTargetType(sk.subEffect.targetType)) renderTargetPicker('追加効果の対象',sk.subEffect.targetType,sk.subEffect.targetCond,'subTargetInstanceId',getManualSubTargetCandidates(sk,activeUnit));
           }
-
-          optContainer.appendChild(targetBox);
         }
       });
 
@@ -3042,7 +3021,9 @@
           return sk && skillNeedsManualTarget(sk);
         })();
 
-      if (needsTarget && !activeUnit.reservedAction.targetInstanceId) {
+      const needsMainTarget=activeUnit.reservedAction.type==='skill'&&(()=>{const sk=activeUnit.skills[activeUnit.reservedAction.skillIndex];return sk&&isManualTargetType(sk.targetType);})();
+      const needsSubTarget=activeUnit.reservedAction.type==='skill'&&(()=>{const sk=activeUnit.skills[activeUnit.reservedAction.skillIndex];return sk?.hasSubEffect&&sk.subEffect&&isManualTargetType(sk.subEffect.targetType);})();
+      if ((needsMainTarget&&!activeUnit.reservedAction.targetInstanceId)||(needsSubTarget&&!activeUnit.reservedAction.subTargetInstanceId)) {
         const hint = document.createElement("div");
         hint.className = "w-full text-[10px] text-amber-300 font-bold mt-1";
         hint.innerText = "※「指定した1体」のスキルなので、対象カードを選んでください。";
@@ -3091,9 +3072,9 @@
       return pool.filter(t => matchesTargetCondition(t, skill.targetCond));
     }
 
-    function skillNeedsManualTarget(skill) {
-      return !!skill && (skill.targetType === 'select_enemy_1' || skill.targetType === 'select_ally_1');
-    }
+    function isManualTargetType(targetType) { return targetType === 'select_enemy_1' || targetType === 'select_ally_1'; }
+    function skillNeedsManualTarget(skill) { return !!skill && (isManualTargetType(skill.targetType) || (skill.hasSubEffect && skill.subEffect && isManualTargetType(skill.subEffect.targetType))); }
+    function getManualSubTargetCandidates(skill, actor) { if(!skill?.hasSubEffect||!skill.subEffect||!isManualTargetType(skill.subEffect.targetType)) return []; return getTargetPool(skill.subEffect.targetType,actor).filter(t=>matchesTargetCondition(t,skill.subEffect.targetCond)); }
 
     function renderMagicHand() {
       const grid = document.getElementById("magic-hand-grid");
@@ -3109,17 +3090,32 @@
         wrap.onclick = () => {
           if (isUsed) { openCardDetail(m.id); return; }
           battleState.reservedMagic = isReserved ? null : m;
-          battleState.reservedMagicTargetInstanceId = null;
+          battleState.reservedMagicTargetInstanceId = null; battleState.reservedMagicSubTargetInstanceId = null;
           renderBattleState();
           updateReservationSummary();
         };
         grid.appendChild(wrap);
-        if(isReserved && ['select_enemy_1','select_ally_1'].includes(m.effect?.targetType)){
-          const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-purple-500/40 bg-purple-950/20 text-[9px]';
-          const actor={side:'player',currentHp:1,maxHp:1}; const pool=(getTargetPool(m.effect.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,m.effect.targetCond));
-          box.innerHTML='<div class="font-black text-purple-300 mb-1">🎯 マジック対象</div>';
-          pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicTargetInstanceId=t.instanceId;renderBattleState();updateReservationSummary();};box.appendChild(b);});
-          wrap.appendChild(box);
+        if(isReserved){
+          const actor={side:'player',currentHp:1,maxHp:1};
+          const mainType=m.effect?.targetType;
+          if(isManualTargetType(mainType)){
+            const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-purple-500/40 bg-purple-950/20 text-[9px]';
+            const pool=(getTargetPool(mainType,actor)||[]).filter(t=>matchesTargetCondition(t,m.effect.targetCond));
+            box.innerHTML='<div class="font-black text-purple-300 mb-1">🎯 メイン効果の対象</div>';
+            pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicTargetInstanceId=t.instanceId;renderBattleState();updateReservationSummary();};box.appendChild(b);});
+            wrap.appendChild(box);
+          }
+          const sub=m.effect?.subEffect;
+          if(m.effect?.hasSubEffect&&sub){
+            if(sub.targetType==='same_main_target'){const info=document.createElement('div');info.className='text-[9px] text-emerald-300 mt-1';info.innerText='↳ 追加効果：メイン効果と同じ対象';wrap.appendChild(info);}
+            else if(isManualTargetType(sub.targetType)){
+              const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-emerald-500/40 bg-emerald-950/20 text-[9px]';
+              const pool=(getTargetPool(sub.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,sub.targetCond));
+              box.innerHTML='<div class="font-black text-emerald-300 mb-1">🎯 追加効果の対象</div>';
+              pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicSubTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicSubTargetInstanceId=t.instanceId;renderBattleState();updateReservationSummary();};box.appendChild(b);});
+              wrap.appendChild(box);
+            }
+          }
         }
       });
     }
@@ -3380,11 +3376,7 @@
         duration,
         source: isBuff ? 'buff' : 'debuff'
       };
-      if (effect.stackable === false) {
-        const idx = dest.findIndex(x => x.type === item.type);
-        if (idx >= 0) dest[idx] = item;
-        else dest.push(item);
-      } else dest.push(item);
+      dest.push(item);
     }
 
     function aiPlannerApplyEffect(state, effect, target, actor, isMagic = false) {
@@ -3978,14 +3970,16 @@
       if (card.effect) {
         const eff = card.effect;
         const mainTargets = resolveTargets(eff.targetType, eff.targetCond, actor, isPlayerActor, battleState.reservedMagicTargetInstanceId || null, true);
+        let mainEffectSucceeded=false;
         mainTargets.forEach(t => {
           targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
           if (t && !t.__playerTarget) targetEntities.push(t);
           const r = applyEffect(eff.mainEffect, t, isPlayerActor, true, actor);
-          if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
+          if (r) { mainEffectSucceeded=true; effectLines.push(r.effect); resultLines.push(r.result); }
         });
-        if (eff.hasSubEffect && eff.subEffect) {
-          const subTargets = resolveTargets(eff.subEffect.targetType || eff.targetType, eff.subEffect.targetCond || eff.targetCond, actor, isPlayerActor, battleState.reservedMagicTargetInstanceId || eff.subEffect.targetInstanceId || null, true);
+        if (mainEffectSucceeded && eff.hasSubEffect && eff.subEffect) {
+          const subType=eff.subEffect.targetType||'same_main_target';
+          const subTargets = subType==='same_main_target' ? mainTargets : resolveTargets(subType, eff.subEffect.targetCond || {type:'none'}, actor, isPlayerActor, battleState.reservedMagicSubTargetInstanceId || null, true);
           subTargets.forEach(t => {
             targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
             const r = applyEffect(eff.subEffect, t, isPlayerActor, true, actor);
@@ -4058,13 +4052,14 @@
       const actorHpBefore = { current: unit.currentHp, max: unit.maxHp };
       const targetHpBeforeMap = new Map();
       const mainTargets=mainTargetsPreview;
+      let mainEffectSucceeded=false;
       mainTargets.forEach(t=>{
         if(t && !t.__playerTarget) targetHpBeforeMap.set(t.instanceId, { current: t.currentHp, max: t.maxHp });
-        targetNames.push(t.name||'プレイヤー'); if(t && !t.__playerTarget) targetEntities.push(t); const r=applyEffect(sk.mainEffect,t,isPlayer,false,unit); if(r){effectLines.push(r.effect);resultLines.push(r.result);}
+        targetNames.push(t.name||'プレイヤー'); if(t && !t.__playerTarget) targetEntities.push(t); const r=applyEffect(sk.mainEffect,t,isPlayer,false,unit); if(r){mainEffectSucceeded=true;effectLines.push(r.effect);resultLines.push(r.result);}
       });
-      if(sk.hasSubEffect&&sk.subEffect){
-        const subTargetType=sk.subEffect.targetType||sk.targetType, subTargetCond=sk.subEffect.targetCond||sk.targetCond;
-        const subTargets=resolveTargets(subTargetType,subTargetCond,unit,isPlayer,sk.subEffect.targetInstanceId||act.targetInstanceId);
+      if(mainEffectSucceeded&&sk.hasSubEffect&&sk.subEffect){
+        const subTargetType=sk.subEffect.targetType||'same_main_target', subTargetCond=sk.subEffect.targetCond||{type:'none'};
+        const subTargets=subTargetType==='same_main_target'?mainTargets:resolveTargets(subTargetType,subTargetCond,unit,isPlayer,act.subTargetInstanceId||null);
         subTargets.forEach(t=>{
           if(t && !t.__playerTarget && !targetHpBeforeMap.has(t.instanceId)) targetHpBeforeMap.set(t.instanceId, { current: t.currentHp, max: t.maxHp });
           targetNames.push(t.name||'プレイヤー'); if(t && !t.__playerTarget) targetEntities.push(t); const r=applyEffect(sk.subEffect,t,isPlayer,false,unit);if(r){effectLines.push(r.effect);resultLines.push(r.result);}
@@ -4106,7 +4101,7 @@
       return pool;
     }
 
-    function addTimedStatus(target, status, isBuff, stackable = true) {
+    function addTimedStatus(target, status, isBuff) {
       if (!target) return;
       const arrName = isBuff ? 'buffs' : 'debuffs';
       target[arrName] = target[arrName] || [];
@@ -4116,13 +4111,6 @@
       const appliedTurn = battleState._statusApplicationTiming === 'battle_start'
         ? battleState.turn - 1
         : battleState.turn;
-      if (!stackable) {
-        const sameIndex = arr.findIndex(b => b.type === status.type);
-        if (sameIndex >= 0) {
-          arr[sameIndex] = { ...arr[sameIndex], ...status, appliedTurn };
-          return;
-        }
-      }
       arr.push({ ...status, appliedTurn });
     }
 
@@ -4148,7 +4136,7 @@
         // マジックカードの発動者はプレイヤーでありキャラではないため、
         // 基礎攻撃力参照ダメージはマジックでは使用不可。
         if (isMagic) {
-          logBattle(`⚠️ マジックカードでは「基礎攻撃力×○％ダメージ」は使用できません。`);
+          logBattle(`⚠️ マジックカードでは「攻撃力×○％ダメージ」は使用できません。`);
           return;
         }
         const baseAtk = actor ? getEffectiveAtk(actor) : 1000;
@@ -4157,7 +4145,7 @@
         if(target.currentHp<beforeHp) triggerPassiveEvent('hp_decrease',target);
         if(target.currentHp<=0&&beforeHp>0){ triggerPassiveEvent('death',target); [...getActiveUnits(target.side==='player'?'player':'enemy')].filter(u=>u!==target).forEach(u=>triggerPassiveEvent('ally_death',u)); }
         logBattle(`💥 ${target.name} に ${beforeHp-target.currentHp} のダメージ！`);
-        return {effect:`基礎攻撃力×${eff.val}%ダメージ`, result:`${target.name} に ${dmg} ダメージ`};
+        return {effect:`攻撃力×${eff.val}%ダメージ`, result:`${target.name} に ${dmg} ダメージ`};
       }
 
       if (eff.type === "dmg_fixed") {
@@ -4188,25 +4176,25 @@
         addTimedStatus(target, {
           type: 'dmg_cut', val: eff.val, duration,
           source: eff.val >= 0 ? 'buff' : 'debuff'
-        }, eff.val >= 0, eff.stackable !== false);
+        }, eff.val >= 0);
         logBattle(`🛡 ${target.name} の受けるダメージが ${eff.val}% カットされる！`);
         return {effect:`被ダメージ${eff.val}%カット`, result:`${target.name} に ${duration}ターン適用`};
       }
 
       if (eff.type === "mod_atk_ratio") {
-        addTimedStatus(target, { type: 'atk_ratio', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0, eff.stackable !== false);
+        addTimedStatus(target, { type: 'atk_ratio', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`⚔️ ${target.name} の攻撃力が ${eff.val >= 0 ? '+' : ''}${eff.val}%変化！`);
         return {effect:`攻撃力 ${eff.val >= 0 ? '+' : ''}${eff.val}%`, result:`${target.name} の攻撃力に${duration}ターン適用`};
       }
 
       if (eff.type === "mod_atk_val") {
-        addTimedStatus(target, { type: 'atk_val', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0, eff.stackable !== false);
+        addTimedStatus(target, { type: 'atk_val', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`⚔️ ${target.name} の攻撃力が ${eff.val >= 0 ? '+' : ''}${eff.val}変化！`);
         return {effect:`攻撃力 ${eff.val >= 0 ? '+' : ''}${eff.val}`, result:`${target.name} に ${duration}ターン適用`};
       }
 
       if (eff.type === "mod_speed") {
-        addTimedStatus(target, { type: 'speed', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0, eff.stackable !== false);
+        addTimedStatus(target, { type: 'speed', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`💨 ${target.name} の行動値が ${eff.val >= 0 ? '+' : ''}${eff.val}変化！`);
         return {effect:`行動値 ${eff.val >= 0 ? '+' : ''}${eff.val}`, result:`${target.name} の現在行動値: ${getEffectiveSpeed(target)}（${duration}ターン）`};
       }
@@ -4236,14 +4224,14 @@
 
       if (eff.type === "heal_block") {
         target.debuffs = target.debuffs || [];
-        addTimedStatus(target, { type: 'heal_block', duration, source: 'debuff' }, false, eff.stackable !== false);
+        addTimedStatus(target, { type: 'heal_block', duration, source: 'debuff' }, false);
         logBattle(`🚫 ${target.name} は ${duration}ターン回復禁止！`);
         return {effect:`回復禁止 ${duration}ターン`, result:`${target.name} に適用`};
       }
 
       if (eff.type === "skill_block") {
         target.debuffs = target.debuffs || [];
-        addTimedStatus(target, { type: 'skill_block', duration, source: 'debuff' }, false, eff.stackable !== false);
+        addTimedStatus(target, { type: 'skill_block', duration, source: 'debuff' }, false);
         logBattle(`🚫 ${target.name} は ${duration}ターンスキル使用禁止！`);
         return {effect:`スキル使用禁止 ${duration}ターン`, result:`${target.name} に適用`};
       }
@@ -5106,7 +5094,7 @@
     const magicCards=(me?.magicCards||[]).length?me.magicCards.map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})):((me?.magicIds||[]).map(id=>localCards.get(id)||getOnlinePublicCard(id)).filter(Boolean));
     battleState={
       battleId:st.battleId,phase:st.phase,turn:st.turn,playerAp:me?.ap??0,enemyAp:opp?.ap??0,
-      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,enemyMagicHand:(opp?.magicCards||[]).map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})),usedMagicCardIds:new Set(me?.usedMagicIds||[]),enemyUsedMagicCardIds:new Set(opp?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
+      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,enemyMagicHand:(opp?.magicCards||[]).map(c=>({...c,...(getOnlinePublicCard(c.id)||{})})),usedMagicCardIds:new Set(me?.usedMagicIds||[]),enemyUsedMagicCardIds:new Set(opp?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,reservedMagicSubTargetInstanceId:null,
       selectedPlayerInstanceId:onlineSelectedUnitId||(myUnits.find(u=>u.isActive&&u.currentHp>0)?.instanceId||null),
       playerName:me?.name||'プレイヤー',enemyName:opp?.name||'ライバル',playerIconUrl:playerIcon,enemyIconUrl:null,
       playerReserveQueue:[...(me?.reserveQueue||[])].map(String),enemyReserveQueue:[...(opp?.reserveQueue||[])].map(String),yourSide:st.yourSide
