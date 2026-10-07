@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v18 - リアルタイム行動順・戦闘演出強化版</title>
+  <title>カードAI対戦ゲーム v3.21.0 - 戦術AI強化版</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -109,6 +109,7 @@
     <div class="bg-slate-950 border-4 border-amber-500 rounded-3xl p-6 sm:p-8 w-[94%] max-w-xl text-center shadow-[0_0_80px_rgba(245,158,11,0.45)]">
       <div id="battle-result-title" class="text-4xl sm:text-6xl font-black text-amber-300 leading-tight">勝利！</div>
       <div id="battle-result-message" class="mt-3 text-base sm:text-xl font-bold text-slate-200">戦闘に勝利しました。</div>
+      <div id="battle-result-reward" class="hidden mt-5 bg-slate-900/90 border border-amber-700/70 rounded-2xl p-4 text-left"></div>
       <div class="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <button type="button" id="battle-result-rematch" class="py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base shadow-lg">🔄 再戦</button>
         <button type="button" id="battle-result-back" class="py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-black text-base">↩ 戻る</button>
@@ -129,11 +130,12 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.20.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.22.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
         <button onclick="openOnlineView()" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded text-xs font-bold transition">🌐 オンライン対戦</button>
+        <button onclick="openStoryMode()" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 rounded text-xs font-black transition">📖 ストーリー</button>
         <button onclick="switchView('deck-manager')" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 rounded text-xs font-bold transition">デッキ編成</button>
         <button onclick="switchView('deck')" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold transition">カード一覧</button>
         <button onclick="resetCardEditorState('unit'); switchView('editor')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-bold transition">カード作成</button>
@@ -424,6 +426,81 @@
       </div>
     </section>
 
+    <!-- ストーリーモード -->
+    <section id="view-story" class="view-section hidden space-y-4">
+      <div class="bg-gradient-to-r from-rose-950/90 via-slate-900 to-amber-950/80 border-2 border-rose-500/50 rounded-2xl p-4 sm:p-5 shadow-2xl">
+        <div class="flex flex-col lg:flex-row justify-between gap-4 items-start lg:items-center">
+          <div>
+            <div class="text-xs font-black tracking-[0.25em] text-rose-300">STORY TOURNAMENT</div>
+            <h2 class="text-2xl sm:text-3xl font-black text-white mt-1">📖 ストーリートーナメント</h2>
+            <p class="text-xs sm:text-sm text-slate-300 mt-2">カード一覧から手に入れたカードだけで即席デッキを組み、32人トーナメントを勝ち抜きます。</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="startNewStoryMode()" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs">🆕 新しいトーナメント</button>
+            <button type="button" onclick="switchView('battle-setup')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs">通常対戦へ</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="story-start-panel" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-xl">
+        <div class="text-5xl mb-3">🏆</div>
+        <h3 class="text-xl font-black text-amber-300">トーナメントに挑戦</h3>
+        <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">開始時にキャラ5枚＋マジック10枚をランダム獲得。勝利するたびにキャラ3枚＋マジック5枚が追加解放されます。</p>
+        <button type="button" onclick="startNewStoryMode()" class="mt-5 px-8 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg">🎴 トーナメント開始</button>
+      </div>
+
+      <div id="story-main-panel" class="hidden space-y-4">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">現在のラウンド</div><div id="story-round-label" class="text-lg font-black text-amber-300 mt-1">第1回戦</div></div>
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">勝利数</div><div id="story-win-label" class="text-lg font-black text-emerald-300 mt-1">0 / 5</div></div>
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">使用可能キャラ</div><div id="story-unit-count" class="text-lg font-black text-cyan-300 mt-1">0</div></div>
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3"><div class="text-[10px] text-slate-500 font-bold">使用可能マジック</div><div id="story-magic-count" class="text-lg font-black text-purple-300 mt-1">0</div></div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+          <div class="xl:col-span-4 bg-slate-900 border border-rose-700/50 rounded-2xl p-4 space-y-3">
+            <div class="text-xs font-black text-rose-300 border-l-2 border-rose-400 pl-2">次のライバル</div>
+            <div id="story-opponent-card" class="bg-slate-950 rounded-xl border border-slate-800 p-4"></div>
+            <div class="text-[10px] text-slate-500 leading-relaxed">自分以外の試合は裏で自動進行し、次の対戦相手が決まります。</div>
+          </div>
+
+          <div class="xl:col-span-8 bg-slate-900 border border-cyan-700/50 rounded-2xl p-4">
+            <div class="flex flex-col sm:flex-row justify-between gap-2 items-start sm:items-center mb-3">
+              <div>
+                <div class="text-xs font-black text-cyan-300 border-l-2 border-cyan-400 pl-2">ストーリー用デッキ編成</div>
+                <div class="text-[10px] text-slate-500 mt-1">キャラ3～5枚、マジック最大10枚。カードは勝利するほど増えます。</div>
+              </div>
+              <button type="button" onclick="storyResetDeckToSafeDefault()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-[10px] font-bold text-slate-300">初期構成に戻す</button>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-amber-300">キャラクター</span><span id="story-unit-selection-label" class="text-[10px] text-slate-400">0 / 5</span></div>
+                <div id="story-unit-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[480px] overflow-y-auto pr-1"></div>
+              </div>
+              <div>
+                <div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-purple-300">マジック</span><span id="story-magic-selection-label" class="text-[10px] text-slate-400">0 / 10</span></div>
+                <div id="story-magic-pool" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[480px] overflow-y-auto pr-1"></div>
+              </div>
+            </div>
+            <div class="mt-4 border-t border-slate-800 pt-3 flex flex-col sm:flex-row justify-between gap-3 items-center">
+              <div id="story-deck-validation" class="text-xs text-slate-300"></div>
+              <button type="button" onclick="startStoryBattle()" class="w-full sm:w-auto px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl shadow-lg">⚔️ 次の対戦へ</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="flex justify-between items-center mb-3"><div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">トーナメント進行</div><div class="text-[10px] text-slate-500">全32枠・敵同士の対戦は自動処理</div></div>
+          <div id="story-bracket" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2"></div>
+        </div>
+
+        <div id="story-reward-history" class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2 mb-2">獲得カード履歴</div>
+          <div id="story-reward-history-list" class="space-y-2 text-[10px] text-slate-400"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- 戦闘画面 -->
     <section id="view-battle" class="view-section hidden space-y-4">
       
@@ -599,6 +676,7 @@
                     <option value="novice">AIの賢さ：素人</option>
                     <option value="normal" selected>AIの賢さ：凡人</option>
                     <option value="expert">AIの賢さ：玄人</option>
+                    <option value="master">AIの賢さ：達人</option>
                   </select>
                 </div>
                 <div class="flex gap-2">
@@ -648,6 +726,8 @@
     let currentDetailCardId = null;
     window.__onlineBattleCards = window.__onlineBattleCards || {};
     let deploymentSelection = { player: { active: [], reserve: [] }, enemy: { active: [], reserve: [] } };
+    let storyModeState = null;
+    let storyBattleOverride = null;
 
 
     // 戦闘状態管理
@@ -1050,6 +1130,11 @@
       const pIconSetting = await getFromStore("settings", "player_icon");
       if (pIconSetting) playerIcon = pIconSetting.value;
 
+      const storySetting = await getFromStore("settings", "story_mode_state");
+      if (storySetting?.value) {
+        try { storyModeState = storySetting.value; } catch (_) { storyModeState = null; }
+      }
+
       if (allRivals.length === 0 && allDecks.length > 0) await seedDefaultRivals();
 
       refreshAttributeDatalist();
@@ -1364,6 +1449,7 @@
       if (viewId === "deck") renderDeckList();
       if (viewId === "deck-manager") renderDeckManager();
       if (viewId === "battle-setup") renderBattleSetup();
+      if (viewId === "story") renderStoryMode();
       if (viewId === "editor") updatePreview();
     }
 
@@ -2228,7 +2314,7 @@
             </div>
             <div>
               <div class="font-bold text-rose-300">${r.name}</div>
-              <div class="text-[10px] text-slate-400">使用デッキ: ${d ? d.name : '不明'} ／ AI: ${{novice:'素人',normal:'凡人',expert:'玄人'}[r.intelligence||'normal']}</div>
+              <div class="text-[10px] text-slate-400">使用デッキ: ${d ? d.name : '不明'} ／ AI: ${{novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[r.intelligence||'normal']||'凡人'}</div>
             </div>
           </div>
           <button onclick="deleteRival('${r.id}')" class="px-2 py-1 bg-rose-900/80 hover:bg-rose-800 text-rose-200 rounded text-[10px] font-bold">削除</button>
@@ -2319,12 +2405,232 @@
       }
     }
 
+
+    // ===== ストーリーモード =====
+    // ストーリーの進行はIndexedDBのsettingsに保存し、ページ更新後も途中から再開できるようにする。
+    function storyShuffle(arr){
+      const a=[...(arr||[])];
+      for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+      return a;
+    }
+    async function saveStoryModeState(){
+      if(!storyModeState){await deleteFromStore('settings','story_mode_state');return;}
+      await saveToStore('settings',{key:'story_mode_state',value:storyModeState});
+    }
+    function storyCardById(id){return allCards.find(c=>String(c.id)===String(id));}
+    function storyUnitIds(){return (storyModeState?.availableUnitIds||[]).filter(id=>storyCardById(id)?.cardType==='unit');}
+    function storyMagicIds(){return (storyModeState?.availableMagicIds||[]).filter(id=>storyCardById(id)?.cardType==='magic');}
+    function storySelectedUnits(){return (storyModeState?.playerDeck?.unitIds||[]).filter(id=>storyUnitIds().includes(id));}
+    function storySelectedMagics(){return (storyModeState?.playerDeck?.magicIds||[]).filter(id=>storyMagicIds().includes(id));}
+
+    function storyMakeInstantRival(serial){
+      const units=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,Math.min(5,allCards.filter(c=>c.cardType==='unit').length));
+      const magics=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,Math.min(10,allCards.filter(c=>c.cardType==='magic').length));
+      return {id:`story_instant_${Date.now()}_${serial}_${Math.random().toString(36).slice(2,7)}`,type:'instant',name:`即席ライバル ${String(serial).padStart(2,'0')}`,iconImage:null,intelligence:Math.random()<0.5?'novice':'normal',unitIds:units.map(c=>c.id),magicIds:magics.map(c=>c.id)};
+    }
+
+    function storyBuildFixedParticipant(rival, serial){
+      const deck=allDecks.find(d=>d.id===rival.deckId);
+      if(!deck || (deck.unitIds||[]).length<3) return storyMakeInstantRival(serial);
+      return {id:`story_rival_${rival.id}`,type:'rival',name:rival.name||`ライバル${serial}`,iconImage:rival.iconImage||null,intelligence:rival.intelligence||'normal',deckId:deck.id,unitIds:[...(deck.unitIds||[])].slice(0,5),magicIds:[...(deck.magicIds||[])].slice(0,10)};
+    }
+
+    function storyCloneParticipant(p){return p ? JSON.parse(JSON.stringify(p)) : null;}
+
+    // AI同士の試合は画面演出を使わない高速シミュレーターで裏処理する。
+    // 通常の戦闘AIと同じカード・AP・スキル構成を参照し、最大20ターンで勝敗を確定する。
+    function storySimUnit(card,side,active=true){
+      return {instanceId:generateUniqueId('storysim'),cardId:card.id,name:card.name,mainAttr:card.mainAttr,subAttrs:card.subAttrs||[],maxHp:Number(card.stats?.hp)||1,currentHp:Number(card.stats?.hp)||1,atk:Number(card.stats?.atk)||0,priority:Number(card.stats?.priority)||0,skills:JSON.parse(JSON.stringify(card.skills||[])),buffs:[],debuffs:[],statuses:[],side,isActive:active};
+    }
+    function storySimState(a,b){
+      const au=(a.unitIds||[]).map(id=>storyCardById(id)).filter(Boolean).slice(0,5), bu=(b.unitIds||[]).map(id=>storyCardById(id)).filter(Boolean).slice(0,5);
+      return {turn:1,side:'player',playerAp:0,enemyAp:0,units:[...au.map((c,i)=>storySimUnit(c,'player',i<3)),...bu.map((c,i)=>storySimUnit(c,'enemy',i<3))],hands:{player:(a.magicIds||[]).map(id=>storyCardById(id)).filter(Boolean),enemy:(b.magicIds||[]).map(id=>storyCardById(id)).filter(Boolean)}};
+    }
+    function storySimTargetScore(target,skill,actor){
+      if(!target||target.currentHp<=0)return -99999;
+      const eff=skill.mainEffect||{}; let score=Math.random()*2;
+      if(eff.type==='dmg_fixed'||eff.type==='dmg_atk_ratio'){const raw=eff.type==='dmg_fixed'?Number(eff.val)||0:Math.round(actor.atk*(Number(eff.val)||0)/100); score+=Math.min(target.currentHp,raw)*0.8; if(raw>=target.currentHp)score+=900; if(target.currentHp/target.maxHp<0.35)score+=180;}
+      if(eff.type==='heal_fixed'||eff.type==='heal_max_hp_ratio')score+=(1-target.currentHp/target.maxHp)*300;
+      if(eff.type==='skill_block'||eff.type==='heal_block')score+=target.side!==actor.side?180:0;
+      if(eff.type==='mod_speed'||eff.type==='mod_atk_ratio'||eff.type==='mod_atk_val')score+=target.side===actor.side?120:60;
+      if(eff.type==='damage_cut_ratio')score+=target.side===actor.side?180:0;
+      return score;
+    }
+    function storySimChooseAction(state,side,intelligence){
+      const actors=state.units.filter(u=>u.side===side&&u.isActive&&u.currentHp>0);
+      let ap=side==='player'?state.playerAp:state.enemyAp;
+      const enemies=state.units.filter(u=>u.side!==side&&u.isActive&&u.currentHp>0);
+      const plan=[];
+      const ordered=[...actors].sort((a,b)=>b.priority-a.priority);
+      for(const actor of ordered){
+        let best={type:'attack',actor,target:enemies.slice().sort((x,y)=>{const sy=storySimTargetScore(y,{mainEffect:{type:'dmg_atk_ratio',val:100}},actor),sx=storySimTargetScore(x,{mainEffect:{type:'dmg_atk_ratio',val:100}},actor);return sy-sx;})[0]||null,score:-1};
+        for(const sk of (actor.skills||[])){if(sk.type!=='active')continue; const cost=Math.max(0,Number(sk.cost)||0); if(cost>ap)continue; const e=sk.targetType?.includes('ally')||sk.mainEffect?.type?.startsWith('heal')?state.units.filter(u=>u.side===side&&u.isActive&&u.currentHp>0):enemies; const pool=e.filter(t=>!sk.targetCond||sk.targetCond.type==='none'||aiPlannerTargetCondition(t,sk.targetCond)); for(const t of pool){const sc=storySimTargetScore(t,sk,actor)-cost*1.5+(intelligence==='normal'?Math.random()*12:Math.random()*30); if(sc>best.score)best={type:'skill',actor,skill:sk,target:t,score:sc};}}
+        plan.push(best); if(best.type==='skill')ap-=Math.max(0,Number(best.skill.cost)||0);
+        if(ap<=0)break;
+      }
+      return {plan,remainingAp:Math.max(0,ap)};
+    }
+    function storySimApplyAction(state,action){
+      const actor=action.actor;if(!actor||actor.currentHp<=0)return;
+      if(action.type==='attack'){const enemy=action.target;if(!enemy||enemy.currentHp<=0)return;const raw=aiPlannerEffectiveAtk(actor),actual=aiPlannerDamageAfterCut(enemy,raw);enemy.currentHp=Math.max(0,enemy.currentHp-actual);return;}
+      const sk=action.skill;if(!sk)return;const cost=Math.max(0,Number(sk.cost)||0);const key=actor.side==='player'?'playerAp':'enemyAp'; if(state[key]<cost)return;state[key]-=cost;
+      const effects=[sk.mainEffect].filter(Boolean);if(sk.hasSubEffect&&sk.subEffect)effects.push(sk.subEffect);
+      for(const eff0 of effects){const eff={...eff0,targetType:eff0.targetType||sk.targetType,targetCond:eff0.targetCond||sk.targetCond};let targets=[];
+        if(eff.targetType==='self')targets=[actor];
+        else if(eff.targetType==='all_enemy')targets=state.units.filter(u=>u.side!==actor.side&&u.isActive&&u.currentHp>0);
+        else if(eff.targetType==='all_ally')targets=state.units.filter(u=>u.side===actor.side&&u.isActive&&u.currentHp>0);
+        else if(eff.targetType==='player_self'||eff.targetType==='player_opp'){
+          const targetSide=eff.targetType==='player_self'?actor.side:(actor.side==='player'?'enemy':'player'); state[targetSide==='player'?'playerAp':'enemyAp']=clamp(state[targetSide==='player'?'playerAp':'enemyAp']+(Number(eff.val)||0),0,100); continue;
+        } else targets=[action.target].filter(t=>t&&t.currentHp>0);
+        targets.forEach(t=>{if(!t)return;const r=aiPlannerApplyEffect(state,eff,t,actor,false);});
+      }
+    }
+    function storySimulateAiMatch(a,b){
+      const state=storySimState(a,b);
+      for(let turn=1;turn<=20;turn++){
+        state.turn=turn;state.playerAp=Math.min(100,state.playerAp+20);state.enemyAp=Math.min(100,state.enemyAp+20);
+        const p=storySimChooseAction(state,'player',a.intelligence); const e=storySimChooseAction(state,'enemy',b.intelligence);
+        state.playerAp=p.remainingAp; state.enemyAp=e.remainingAp;
+        const actions=[...p.plan.map(x=>({...x,speed:x.actor.priority,side:'player'})),...e.plan.map(x=>({...x,speed:x.actor.priority,side:'enemy'}))].sort((x,y)=>y.speed-x.speed);
+        for(const act of actions){storySimApplyAction(state,act); if(!state.units.some(u=>u.side==='player'&&u.currentHp>0)||!state.units.some(u=>u.side==='enemy'&&u.currentHp>0))break;}
+        const pa=state.units.filter(u=>u.side==='player'&&u.currentHp>0).length, ea=state.units.filter(u=>u.side==='enemy'&&u.currentHp>0).length;
+        if(pa===0||ea===0)return pa>0?a:b;
+        state.units.filter(u=>u.currentHp<=0&&u.isActive).forEach(u=>u.isActive=false);
+        ['player','enemy'].forEach(side=>{const q=state.units.filter(u=>u.side===side&&!u.isActive&&u.currentHp>0); if(q.length){const reserve=state.units.filter(u=>u.side===side&&!u.isActive&&u.currentHp>0);reserve.slice(0,Math.max(0,3-state.units.filter(x=>x.side===side&&x.isActive&&x.currentHp>0).length)).forEach(u=>u.isActive=true);}});
+      }
+      const ps=state.units.filter(u=>u.side==='player'&&u.currentHp>0).reduce((n,u)=>n+u.currentHp,0); const es=state.units.filter(u=>u.side==='enemy'&&u.currentHp>0).reduce((n,u)=>n+u.currentHp,0); return ps>=es?a:b;
+    }
+
+    function storyCreateInitialTournament(){
+      const availableRivals=storyShuffle(allRivals).slice(0,31);
+      const participants=[{id:'story_player',type:'player',name:playerName,iconImage:playerIcon||null,intelligence:'master',unitIds:[],magicIds:[]}];
+      availableRivals.forEach((r,i)=>participants.push(storyBuildFixedParticipant(r,i+1)));
+      let serial=1;while(participants.length<32){participants.push(storyMakeInstantRival(serial++));}
+      const unique=[];const seen=new Set();participants.forEach(p=>{if(!seen.has(p.id)){seen.add(p.id);unique.push(p);}});while(unique.length<32)unique.push(storyMakeInstantRival(serial++));
+      return unique.slice(0,32);
+    }
+
+    function storyResolveRoundAiMatches(round){
+      if(!round)return;
+      for(let i=1;i<round.length;i++){
+        const m=round[i]; if(m.winner||!m.p1||!m.p2)continue;
+        const winner=storySimulateAiMatch(m.p1,m.p2);m.winner=storyCloneParticipant(winner);m.loser=storyCloneParticipant(winner.id===m.p1.id?m.p2:m.p1);m.status='finished';
+      }
+    }
+
+    function storyBuildRoundFromSources(roundIndex,sources){
+      const matches=[];for(let i=0;i<sources.length;i+=2){matches.push({index:i/2,p1:sources[i]||null,p2:sources[i+1]||null,winner:null,loser:null,status:'waiting',isPlayerMatch:i===0});}
+      if(matches[0])matches[0].isPlayerMatch=true;
+      storyResolveRoundAiMatches(matches);return matches;
+    }
+
+    function storyPrepareCurrentRound(){
+      if(!storyModeState||storyModeState.completed)return;
+      const r=storyModeState.roundIndex||0;let sources;
+      if(r===0)sources=storyModeState.participants.map(storyCloneParticipant);
+      else{const prev=storyModeState.rounds[r-1]||[];sources=prev.map(m=>m.winner).filter(Boolean);}
+      storyModeState.rounds[r]=storyBuildRoundFromSources(r,sources);
+      storyModeState.currentOpponent=storyModeState.rounds[r]?.[0]?.p2||null;
+    }
+
+    function storyGrantVictoryReward(){
+      const remainingUnits=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().includes(c.id));
+      const remainingMagics=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().includes(c.id));
+      const unitRewards=storyShuffle(remainingUnits).slice(0,3).map(c=>c.id);
+      const magicRewards=storyShuffle(remainingMagics).slice(0,5).map(c=>c.id);
+      storyModeState.availableUnitIds.push(...unitRewards);storyModeState.availableMagicIds.push(...magicRewards);
+      return {units:unitRewards.map(storyCardById).filter(Boolean),magics:magicRewards.map(storyCardById).filter(Boolean)};
+    }
+
+    function storyRecordReward(reward){
+      const names=[...(reward.units||[]).map(c=>`キャラ：${c.name}`),...(reward.magics||[]).map(c=>`マジック：${c.name}`)];
+      storyModeState.rewardHistory=storyModeState.rewardHistory||[];storyModeState.rewardHistory.unshift({win:storyModeState.wins,names,at:Date.now()});
+      storyModeState.rewardHistory=storyModeState.rewardHistory.slice(0,10);
+    }
+
+    function openStoryMode(){ switchView('story'); renderStoryMode(); }
+    async function startNewStoryMode(){
+      const units=storyShuffle(allCards.filter(c=>c.cardType==='unit')).slice(0,5).map(c=>c.id);
+      const magics=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,10).map(c=>c.id);
+      if(units.length<3){alert('ストーリーモード開始にはキャラクターカードが3枚以上必要です。');return;}
+      if(!magics.length){alert('ストーリーモード開始にはマジックカードが1枚以上あることを推奨します。');}
+      storyModeState={version:1,active:true,completed:false,roundIndex:0,wins:0,availableUnitIds:units,availableMagicIds:magics,playerDeck:{unitIds:units.slice(0,3),magicIds:[]},participants:storyCreateInitialTournament(),rounds:[],currentOpponent:null,rewardHistory:[]};
+      storyModeState.participants[0].unitIds=[...storyModeState.playerDeck.unitIds];storyModeState.participants[0].magicIds=[...storyModeState.playerDeck.magicIds];
+      storyPrepareCurrentRound();
+      await saveStoryModeState();
+      hideBattleResultModal();storyBattleOverride=null;switchView('story');renderStoryMode();
+    }
+
+    function storyResetDeckToSafeDefault(){
+      if(!storyModeState)return;const units=storyUnitIds();storyModeState.playerDeck.unitIds=units.slice(0,3);storyModeState.playerDeck.magicIds=[];saveStoryModeState();renderStoryMode();
+    }
+    function toggleStoryUnit(id){
+      if(!storyModeState)return;const deck=storyModeState.playerDeck;const i=deck.unitIds.indexOf(id);if(i>=0){if(deck.unitIds.length<=3){alert('キャラクターは最低3枚必要です。');return;}deck.unitIds.splice(i,1);}else{if(deck.unitIds.length>=5){alert('キャラクターは最大5枚までです。');return;}deck.unitIds.push(id);}storyModeState.participants[0].unitIds=[...deck.unitIds];saveStoryModeState();renderStoryMode();
+    }
+    function toggleStoryMagic(id){
+      if(!storyModeState)return;const deck=storyModeState.playerDeck;const i=deck.magicIds.indexOf(id);if(i>=0)deck.magicIds.splice(i,1);else{if(deck.magicIds.length>=10){alert('マジックカードは最大10枚までです。');return;}deck.magicIds.push(id);}storyModeState.participants[0].magicIds=[...deck.magicIds];saveStoryModeState();renderStoryMode();
+    }
+    function storyValidateDeck(){
+      if(!storyModeState)return {ok:false,message:'ストーリーモードを開始してください。'};const u=storySelectedUnits(),m=storySelectedMagics();if(u.length<3||u.length>5)return {ok:false,message:`キャラクターを3～5枚選択してください（現在${u.length}枚）。`};if(m.length>10)return {ok:false,message:'マジックは最大10枚です。'};return {ok:true,message:`出撃3体：${u.slice(0,3).map(id=>storyCardById(id)?.name||'').join(' / ')}　｜　マジック${m.length}枚`};
+    }
+
+    function storyRenderOpponent(){
+      const box=document.getElementById('story-opponent-card');if(!box)return;const o=storyModeState?.currentOpponent;if(!o){box.innerHTML='<div class="text-sm text-slate-500">対戦相手を準備中…</div>';return;}const aiName={novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[o.intelligence]||'凡人';box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900 flex-shrink-0">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${esc(o.name)}</div><div class="text-xs text-rose-300 font-bold mt-1">AI：${aiName}</div><div class="text-[10px] text-slate-500 mt-1">${o.type==='instant'?'カード一覧から生成された即席ライバル':'登録ライバル'}</div></div></div>`;
+    }
+
+    function renderStoryMode(){
+      const start=document.getElementById('story-start-panel'),main=document.getElementById('story-main-panel');if(!start||!main)return;
+      if(!storyModeState||(!storyModeState.active&&!storyModeState.completed)){start.classList.remove('hidden');main.classList.add('hidden');return;}
+      start.classList.add('hidden');main.classList.remove('hidden');
+      document.getElementById('story-round-label').innerText=storyModeState.completed?'🏆 優勝！':`第${(storyModeState.roundIndex||0)+1}回戦 / 全5回戦`;
+      document.getElementById('story-win-label').innerText=`${storyModeState.wins||0} / 5`;
+      document.getElementById('story-unit-count').innerText=storyUnitIds().length;document.getElementById('story-magic-count').innerText=storyMagicIds().length;
+      const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');ul.innerHTML='';ml.innerHTML='';
+      storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const selected=storySelectedUnits().includes(id);const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer select-none ${selected?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-70'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});
+      storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const selected=storySelectedMagics().includes(id);const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer select-none ${selected?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-70'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});
+      document.getElementById('story-unit-selection-label').innerText=`${storySelectedUnits().length} / 5`;document.getElementById('story-magic-selection-label').innerText=`${storySelectedMagics().length} / 10`;
+      const valid=storyValidateDeck();const val=document.getElementById('story-deck-validation');val.innerHTML=valid.ok?`<span class="text-emerald-300">✓ ${valid.message}</span>`:`<span class="text-amber-300">⚠ ${valid.message}</span>`;
+      storyRenderOpponent();
+      const bracket=document.getElementById('story-bracket');bracket.innerHTML='';
+      (storyModeState.rounds||[]).forEach((round,ri)=>{const col=document.createElement('div');col.className='bg-slate-950 rounded-xl border border-slate-800 p-2 space-y-1';col.innerHTML=`<div class="text-[10px] font-black ${ri===(storyModeState.roundIndex||0)?'text-amber-300':'text-slate-500'} mb-1">${ri===4?'決勝':`第${ri+1}回戦`}</div>`;const pm=round[0];if(pm){const label=pm.winner?`${pm.winner.name} 勝利`:pm.p1&&pm.p2?`${pm.p1.name} vs ${pm.p2.name}`:'対戦相手を待機';const div=document.createElement('div');div.className=`text-[10px] p-2 rounded ${pm.winner?.type==='player'?'bg-emerald-950/60 border border-emerald-700':'bg-slate-900 border border-slate-800'}`;div.innerText=label;col.appendChild(div);}const finished=round.filter(m=>m.status==='finished').length;const waiting=round.length-finished-((pm&&!pm.winner)?1:0);const st=document.createElement('div');st.className='text-[9px] text-slate-500 mt-1';st.innerText=`裏対戦終了: ${finished} / ${Math.max(0,round.length-1)}${waiting>0?'　準備中':''}`;col.appendChild(st);bracket.appendChild(col);});
+      const hist=document.getElementById('story-reward-history-list');hist.innerHTML='';(storyModeState.rewardHistory||[]).forEach(h=>{const d=document.createElement('div');d.className='bg-slate-950 rounded-lg border border-slate-800 p-2';d.innerText=`第${h.win}勝利：${h.names.length?h.names.join('、'):'追加カードなし'}`;hist.appendChild(d);});
+      if(storyModeState.completed){document.getElementById('story-deck-validation').innerHTML='<span class="text-emerald-300 font-black">🏆 トーナメント優勝済みです。新しい挑戦を始められます。</span>';document.querySelector('#view-story button[onclick="startStoryBattle()"]')?.classList.add('hidden');}
+    }
+
+    async function startStoryBattle(){
+      if(!storyModeState||storyModeState.completed)return;const valid=storyValidateDeck();if(!valid.ok){alert(valid.message);return;}const opponent=storyModeState.currentOpponent;if(!opponent){alert('次の対戦相手が決まっていません。');return;}
+      const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();const enemyDeck={id:`story_enemy_deck_${Date.now()}`,name:`${opponent.name}のデッキ`,unitIds:[...opponent.unitIds],magicIds:[...opponent.magicIds]};const playerDeck={id:`story_player_deck_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]};
+      storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();
+      storyBattleOverride={playerDeck,enemyDeck,enemyIntelligence:opponent.intelligence||'normal',enemyName:opponent.name,enemyIconUrl:opponent.iconImage||null,playerActive:pUnits.slice(0,3),playerReserve:pUnits.slice(3,5)};
+      switchView('battle');startBattle();
+    }
+
+    async function handleStoryBattleEnd(winner){
+      if(!storyModeState||!battleState.storyMode)return null;const round=storyModeState.roundIndex||0;const match=storyModeState.rounds?.[round]?.[0];if(!match)return null;
+      if(winner!=='player') {storyModeState.active=false;storyModeState.defeated=true;await saveStoryModeState();return {defeat:true,reward:null};}
+      match.winner=storyCloneParticipant(storyModeState.participants[0]);match.loser=match.p2?storyCloneParticipant(match.p2):null;match.status='finished';storyModeState.wins=(storyModeState.wins||0)+1;const reward=storyGrantVictoryReward();storyRecordReward(reward);
+      if(storyModeState.wins>=5){storyModeState.active=false;storyModeState.completed=true;storyModeState.currentOpponent=null;await saveStoryModeState();return {defeat:false,champion:true,reward};}
+      storyModeState.roundIndex=round+1;storyPrepareCurrentRound();await saveStoryModeState();return {defeat:false,champion:false,reward};
+    }
+
+    async function storyRestartFromScratch(){hideBattleResultModal();storyBattleOverride=null;await startNewStoryMode();}
+
+    // ===== ストーリーモードここまで =====
+
     // 戦闘エンジン
     function startBattle() {
       hideBattleResultModal();
-      const pDeckId=document.getElementById('select-player-deck').value, eDeckId=document.getElementById('select-enemy-deck').value;
-      const pDeck=allDecks.find(d=>d.id===pDeckId), eDeck=allDecks.find(d=>d.id===eDeckId); if(!pDeck||!eDeck){alert('デッキを正しく選択してください。');return;}
-      normalizeDeploymentForDeck(pDeck);
+      const override = storyBattleOverride;
+      const pDeckId=document.getElementById('select-player-deck')?.value || '';
+      const eDeckId=document.getElementById('select-enemy-deck')?.value || '';
+      const pDeck=override?.playerDeck || allDecks.find(d=>d.id===pDeckId);
+      const eDeck=override?.enemyDeck || allDecks.find(d=>d.id===eDeckId);
+      if(!pDeck||!eDeck){alert('デッキを正しく選択してください。');return;}
+      if (override) {
+        deploymentSelection.player = { active:[...(override.playerActive||pDeck.unitIds||[]).slice(0,3)], reserve:[...(override.playerReserve||pDeck.unitIds||[]).slice(3,5)] };
+      } else {
+        normalizeDeploymentForDeck(pDeck);
+      }
       if(deploymentSelection.player.active.length!==3){alert('戦闘開始前に出撃する3体を選択してください。');return;}
       const enemyIds=eDeck.unitIds||[]; const enemyActive=enemyIds.slice(0,3), enemyReserve=enemyIds.slice(3,5);
       battleState={phase:'decision',turn:1,playerAp:0,enemyAp:0,
@@ -2333,10 +2639,10 @@
         magicHand:(pDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),
         enemyMagicHand:(eDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),
         usedMagicCardIds:new Set(),enemyUsedMagicCardIds:new Set(),reservedMagic:null,reservedEnemyMagic:null,selectedPlayerInstanceId:null,
-        enemyIntelligence:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.intelligence)||'normal',
-        playerName:playerName,enemyName:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.name)||'ライバル',playerIconUrl:playerIcon,
-        enemyIconUrl:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.iconImage)||null,
-        playerReserveQueue:[...deploymentSelection.player.reserve],enemyReserveQueue:[...enemyReserve],resultWinner:null};
+        enemyIntelligence:override?.enemyIntelligence || (allRivals.find(r=>r.id===document.getElementById('select-rival-preset')?.value)?.intelligence)||'normal',
+        playerName:playerName,enemyName:override?.enemyName || (allRivals.find(r=>r.id===document.getElementById('select-rival-preset')?.value)?.name)||'ライバル',playerIconUrl:playerIcon,
+        enemyIconUrl:override?.enemyIconUrl || (allRivals.find(r=>r.id===document.getElementById('select-rival-preset')?.value)?.iconImage)||null,
+        playerReserveQueue:[...deploymentSelection.player.reserve],enemyReserveQueue:[...enemyReserve],resultWinner:null, storyMode:!!override};
       battleState.selectedPlayerInstanceId = getActiveUnits('player')[0]?.instanceId || null;
       runPassiveSkills('battle_start');
       // 開幕の出撃3体も「登場」扱い。戦闘開始時とは別に登場時パッシブを発動する。
@@ -2407,8 +2713,7 @@
       runPassiveSkills('turn_start');
 
       // 敵AI：ユニット行動とマジックを同時に思考する。
-      chooseAiActions('enemy');
-      chooseAiMagic();
+      chooseAiTurnPlan('enemy');
 
       renderBattleState();
       await showTurnStartOverlay(battleState.turn);
@@ -2851,15 +3156,504 @@
     }
 
     function getAiIntelligence() {
-      return battleState.enemyIntelligence === 'novice' || battleState.enemyIntelligence === 'expert'
-        ? battleState.enemyIntelligence : 'normal';
+      const value = battleState.enemyIntelligence;
+      return ['novice', 'normal', 'expert', 'master'].includes(value) ? value : 'normal';
     }
+
+    // ===== AI 戦術評価エンジン =====
+    // 玄人：そのターン全体の共有APを見て行動を組み合わせる。
+    // 達人：さらにビームサーチ＋次ターン価値＋反撃リスクまで評価する。
 
     function getAiTargetsForSkill(skill, unit) {
       const pool = getManualTargetCandidates(skill, unit);
       if (skillNeedsManualTarget(skill)) return pool;
-      const resolved = resolveTargets(skill.targetType, skill.targetCond, unit, false, null, false);
+      const resolved = resolveTargets(skill.targetType, skill.targetCond, unit, unit?.side === 'player', null, false);
       return resolved.filter(t => t && !t.__playerTarget);
+    }
+
+    function aiPlannerCloneUnit(unit) {
+      return {
+        instanceId: unit.instanceId,
+        cardId: unit.cardId,
+        name: unit.name,
+        mainAttr: unit.mainAttr,
+        subAttrs: Array.isArray(unit.subAttrs) ? [...unit.subAttrs] : [],
+        maxHp: Number(unit.maxHp) || 1,
+        currentHp: Math.max(0, Number(unit.currentHp) || 0),
+        atk: Number(unit.atk) || 0,
+        priority: Number(unit.priority) || 0,
+        skills: unit.skills || [],
+        buffs: (unit.buffs || []).map(x => ({ ...x })),
+        debuffs: (unit.debuffs || []).map(x => ({ ...x })),
+        statuses: (unit.statuses || []).map(x => ({ ...x })),
+        side: unit.side,
+        isActive: !!unit.isActive
+      };
+    }
+
+    function aiPlannerCreateState(side) {
+      return {
+        turn: battleState.turn,
+        side,
+        playerAp: Math.max(0, Number(battleState.playerAp) || 0),
+        enemyAp: Math.max(0, Number(battleState.enemyAp) || 0),
+        units: [...(battleState.playerUnits || []), ...(battleState.enemyUnits || [])].map(aiPlannerCloneUnit)
+      };
+    }
+
+    function aiPlannerCloneState(state) {
+      return {
+        turn: state.turn,
+        side: state.side,
+        playerAp: state.playerAp,
+        enemyAp: state.enemyAp,
+        units: state.units.map(aiPlannerCloneUnit)
+      };
+    }
+
+    function aiPlannerActive(state, side, includeDead = false) {
+      return state.units.filter(u => u.side === side && u.isActive && (includeDead || u.currentHp > 0));
+    }
+
+    function aiPlannerFindUnit(state, id) {
+      return state.units.find(u => u.instanceId === id) || null;
+    }
+
+    function aiPlannerEffectiveAtk(unit) {
+      let atk = unit.atk;
+      (unit.buffs || []).forEach(b => {
+        if (b.type === 'atk_ratio') atk += Math.round(unit.atk * (Number(b.val) || 0) / 100);
+        if (b.type === 'atk_val') atk += Number(b.val) || 0;
+      });
+      (unit.debuffs || []).forEach(b => {
+        if (b.type === 'atk_ratio') atk += Math.round(unit.atk * (Number(b.val) || 0) / 100);
+        if (b.type === 'atk_val') atk += Number(b.val) || 0;
+      });
+      return Math.max(0, atk);
+    }
+
+    function aiPlannerEffectiveSpeed(unit) {
+      let speed = unit.priority;
+      (unit.buffs || []).forEach(b => { if (b.type === 'speed') speed += Number(b.val) || 0; });
+      (unit.debuffs || []).forEach(b => { if (b.type === 'speed') speed += Number(b.val) || 0; });
+      if ((unit.statuses || []).some(s => s.type === 'slow' && Number(s.duration) > 0)) speed = Math.floor(speed / 2);
+      return speed;
+    }
+
+    function aiPlannerHasStatus(unit, type) {
+      return (unit.statuses || []).some(s => s.type === type && Number(s.duration) > 0);
+    }
+
+    function aiPlannerCondition(cond, actor, state) {
+      if (!cond || cond.type === 'none') return true;
+      const allies = aiPlannerActive(state, actor.side);
+      const enemies = aiPlannerActive(state, actor.side === 'player' ? 'enemy' : 'player');
+      const ap = actor.side === 'player' ? state.playerAp : state.enemyAp;
+      if (cond.type === 'hp_ratio_gte') return actor.maxHp > 0 && actor.currentHp / actor.maxHp * 100 >= Number(cond.val);
+      if (cond.type === 'hp_ratio_lte') return actor.maxHp > 0 && actor.currentHp / actor.maxHp * 100 <= Number(cond.val);
+      if (cond.type === 'ap_val_gte') return ap >= Number(cond.val);
+      if (cond.type === 'ap_val_lte') return ap <= Number(cond.val);
+      if (cond.type === 'ally_has_attr') return allies.some(u => u !== actor && (u.mainAttr === cond.attr || (u.subAttrs || []).includes(cond.attr)));
+      if (cond.type === 'enemy_has_attr') return enemies.some(u => u.mainAttr === cond.attr || (u.subAttrs || []).includes(cond.attr));
+      if (cond.type === 'all_ally_attr') return allies.length > 0 && allies.every(u => u.mainAttr === cond.attr || (u.subAttrs || []).includes(cond.attr));
+      if (cond.type === 'all_enemy_attr') return enemies.length > 0 && enemies.every(u => u.mainAttr === cond.attr || (u.subAttrs || []).includes(cond.attr));
+      if (cond.type === 'turn_lte') return state.turn <= Number(cond.val);
+      if (cond.type === 'turn_gte') return state.turn >= Number(cond.val);
+      if (cond.type === 'self_status') return aiPlannerHasStatus(actor, cond.status);
+      if (cond.type === 'self_any_status') return (actor.statuses || []).some(x => Number(x.duration) > 0);
+      if (cond.type === 'ally_has_status') return allies.some(u => u !== actor && aiPlannerHasStatus(u, cond.status));
+      if (cond.type === 'ally_has_any_status') return allies.some(u => u !== actor && (u.statuses || []).some(x => Number(x.duration) > 0));
+      if (cond.type === 'enemy_has_status') return enemies.some(u => aiPlannerHasStatus(u, cond.status));
+      if (cond.type === 'enemy_has_any_status') return enemies.some(u => (u.statuses || []).some(x => Number(x.duration) > 0));
+      return true;
+    }
+
+    function aiPlannerTargetCondition(target, cond) {
+      if (!target || target.__playerTarget) return true;
+      if (!cond || cond.type === 'none') return true;
+      if (cond.type === 'hp_ratio_gte') return target.maxHp > 0 && target.currentHp / target.maxHp * 100 >= Number(cond.val);
+      if (cond.type === 'hp_ratio_lte') return target.maxHp > 0 && target.currentHp / target.maxHp * 100 <= Number(cond.val);
+      if (cond.type === 'attr_is') return target.mainAttr === cond.attr || (target.subAttrs || []).includes(cond.attr);
+      if (cond.type === 'attr_not') return !(target.mainAttr === cond.attr || (target.subAttrs || []).includes(cond.attr));
+      return true;
+    }
+
+    function aiPlannerTargetPool(state, targetType, actor) {
+      const enemies = aiPlannerActive(state, actor.side === 'player' ? 'enemy' : 'player');
+      const allies = aiPlannerActive(state, actor.side);
+      if (targetType === 'select_enemy_1' || targetType === 'random_enemy_1' || targetType === 'all_enemy') return enemies;
+      if (targetType === 'select_ally_1' || targetType === 'random_ally_1' || targetType === 'all_ally') return allies;
+      if (targetType === 'all_field' || targetType === 'random_all_1') return [...aiPlannerActive(state, 'player'), ...aiPlannerActive(state, 'enemy')];
+      return [];
+    }
+
+    function aiPlannerResolveTargets(state, actor, effect, explicitTargetId = null) {
+      if (!effect) return [];
+      const targetType = effect.targetType || 'none';
+      if (targetType === 'player_self') return [{ __playerTarget: 'self', __playerSide: actor.side }];
+      if (targetType === 'player_opp') return [{ __playerTarget: 'opp', __playerSide: actor.side === 'player' ? 'enemy' : 'player' }];
+      if (targetType === 'self') return [actor];
+      let pool = aiPlannerTargetPool(state, targetType, actor).filter(t => aiPlannerTargetCondition(t, effect.targetCond));
+      if (!pool.length) return [];
+      if (targetType === 'select_enemy_1' || targetType === 'select_ally_1') {
+        return [pool.find(t => t.instanceId === explicitTargetId) || pool[0]].filter(Boolean);
+      }
+      if (targetType === 'random_enemy_1' || targetType === 'random_ally_1' || targetType === 'random_all_1') {
+        return [pool[0]];
+      }
+      return pool;
+    }
+
+    function aiPlannerDamageAfterCut(target, raw) {
+      if (!target || target.__playerTarget) return 0;
+      let cut = 0;
+      [...(target.buffs || []), ...(target.debuffs || [])].forEach(b => {
+        if (b.type === 'dmg_cut') cut = Math.max(cut, Number(b.val) || 0);
+      });
+      return Math.max(0, Math.round(raw * (1 - cut / 100)));
+    }
+
+    function aiPlannerAddTimed(target, effect) {
+      if (!target || target.__playerTarget || !effect) return;
+      const duration = Math.max(1, Number(effect.duration) || 1);
+      const isBuff = Number(effect.val) >= 0;
+      const dest = isBuff ? target.buffs : target.debuffs;
+      const item = {
+        type: effect.type === 'damage_cut_ratio' ? 'dmg_cut' : effect.type === 'mod_speed' ? 'speed' : effect.type === 'mod_atk_ratio' ? 'atk_ratio' : 'atk_val',
+        val: Number(effect.val) || 0,
+        duration,
+        source: isBuff ? 'buff' : 'debuff'
+      };
+      if (effect.stackable === false) {
+        const idx = dest.findIndex(x => x.type === item.type);
+        if (idx >= 0) dest[idx] = item;
+        else dest.push(item);
+      } else dest.push(item);
+    }
+
+    function aiPlannerApplyEffect(state, effect, target, actor, isMagic = false) {
+      if (!effect || effect.type === 'none') return { value: 0, kills: 0, damage: 0, healing: 0 };
+      if (effect.type === 'mod_ap') {
+        let targetSide = actor.side;
+        if (target?.__playerTarget === 'opp') targetSide = actor.side === 'player' ? 'enemy' : 'player';
+        const delta = Number(effect.val) || 0;
+        const key = targetSide === 'player' ? 'playerAp' : 'enemyAp';
+        const before = state[key];
+        state[key] = Math.max(0, Math.min(100, state[key] + delta));
+        return { value: (state[key] - before) * 2, kills: 0, damage: 0, healing: 0 };
+      }
+      if (!target || target.__playerTarget) return { value: 0, kills: 0, damage: 0, healing: 0 };
+
+      const beforeHp = target.currentHp;
+      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
+        const raw = effect.type === 'dmg_fixed' ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
+        if (isMagic && effect.type === 'dmg_atk_ratio') return { value: -50, kills: 0, damage: 0, healing: 0 };
+        const actual = aiPlannerDamageAfterCut(target, raw);
+        target.currentHp = Math.max(0, target.currentHp - actual);
+        return {
+          value: actual * 1.15 + (beforeHp > 0 && target.currentHp <= 0 ? 1300 : 0),
+          kills: beforeHp > 0 && target.currentHp <= 0 ? 1 : 0,
+          damage: actual,
+          healing: 0
+        };
+      }
+      if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
+        const heal = effect.type === 'heal_fixed' ? Number(effect.val) || 0 : Math.round(target.maxHp * ((Number(effect.val) || 0) / 100));
+        const actual = Math.max(0, Math.min(target.maxHp, target.currentHp + heal) - target.currentHp);
+        target.currentHp += actual;
+        return { value: actual * 0.95, kills: 0, damage: 0, healing: actual };
+      }
+      if (effect.type === 'damage_cut_ratio' || effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') {
+        aiPlannerAddTimed(target, effect);
+        const val = Number(effect.val) || 0;
+        const weight = effect.type === 'damage_cut_ratio' ? 18 : effect.type === 'mod_speed' ? 10 : 7;
+        return { value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.8), kills: 0, damage: 0, healing: 0 };
+      }
+      if (effect.type === 'clear_buffs') {
+        target.buffs = (target.buffs || []).filter(b => b.source && b.source !== 'buff');
+        return { value: target.side !== actor.side ? 70 : 30, kills: 0, damage: 0, healing: 0 };
+      }
+      if (effect.type === 'clear_debuffs') {
+        target.debuffs = [];
+        return { value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 };
+      }
+      if (effect.type === 'status_apply') {
+        target.statuses = target.statuses || [];
+        const status = effect.status || 'poison';
+        if (!target.statuses.some(x => x.type === status && Number(x.duration) > 0)) target.statuses.push({ type: status, duration: Math.max(1, Number(effect.duration) || 1) });
+        return { value: (status === 'poison' || status === 'burn' ? 50 : status === 'freeze' || status === 'paralysis' ? 85 : 35) * (target.side === actor.side ? -0.5 : 1), kills: 0, damage: 0, healing: 0 };
+      }
+      if (effect.type === 'status_remove') {
+        target.statuses = (target.statuses || []).filter(x => x.type !== (effect.status || 'poison'));
+        return { value: target.side === actor.side ? 45 : 15, kills: 0, damage: 0, healing: 0 };
+      }
+      if (effect.type === 'clear_statuses') {
+        target.statuses = [];
+        return { value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 };
+      }
+      if (effect.type === 'heal_block' || effect.type === 'skill_block') {
+        target.debuffs = target.debuffs || [];
+        const type = effect.type;
+        if (!target.debuffs.some(x => x.type === type && Number(x.duration) > 0)) target.debuffs.push({ type, duration: Math.max(1, Number(effect.duration) || 1), source: 'debuff' });
+        return { value: (type === 'skill_block' ? 105 : 60) * (target.side === actor.side ? -0.3 : 1), kills: 0, damage: 0, healing: 0 };
+      }
+      return { value: 0, kills: 0, damage: 0, healing: 0 };
+    }
+
+    function aiPlannerApplySkill(state, actorId, skill, explicitTargetId = null, isMagic = false) {
+      const actor = aiPlannerFindUnit(state, actorId);
+      if (!actor || actor.currentHp <= 0 || !skill) return { value: -9999, kills: 0, damage: 0, healing: 0 };
+      const cost = Math.max(0, Number(skill.cost) || 0);
+      const apKey = actor.side === 'player' ? 'playerAp' : 'enemyAp';
+      if (state[apKey] < cost) return { value: -9999, kills: 0, damage: 0, healing: 0 };
+      state[apKey] -= cost;
+      let total = { value: -cost * 1.2, kills: 0, damage: 0, healing: 0 };
+      const effects = [skill.mainEffect].filter(Boolean);
+      if (skill.hasSubEffect && skill.subEffect) effects.push(skill.subEffect);
+      for (const effect of effects) {
+        const eff = { ...effect, targetType: effect.targetType || skill.targetType, targetCond: effect.targetCond || skill.targetCond };
+        let targets = aiPlannerResolveTargets(state, actor, eff, explicitTargetId);
+        if (!targets.length) return { value: -650 - cost * 5, kills: 0, damage: 0, healing: 0 };
+        // random単体は、実際の抽選を直接再現せず「期待値＋安全側」で近似する。
+        if ((eff.targetType || '') === 'random_enemy_1' || (eff.targetType || '') === 'random_ally_1' || (eff.targetType || '') === 'random_all_1') {
+          const pool = aiPlannerTargetPool(state, eff.targetType, actor).filter(t => aiPlannerTargetCondition(t, eff.targetCond));
+          if (pool.length > 1 && (eff.mainEffect?.type === 'dmg_fixed' || eff.type === 'dmg_fixed')) {
+            const avg = pool.reduce((sum, t) => sum + aiPlannerDamageAfterCut(t, Number(eff.val) || 0), 0) / pool.length;
+            total.value += avg * 0.85;
+            total.damage += avg;
+            continue;
+          }
+        }
+        targets.forEach(target => {
+          const r = aiPlannerApplyEffect(state, eff, target, actor, isMagic);
+          total.value += r.value; total.kills += r.kills; total.damage += r.damage; total.healing += r.healing;
+        });
+      }
+      return total;
+    }
+
+    function aiPlannerApplyAttack(state, actorId, targetId) {
+      const actor = aiPlannerFindUnit(state, actorId);
+      const target = aiPlannerFindUnit(state, targetId);
+      if (!actor || !target || actor.currentHp <= 0 || target.currentHp <= 0) return { value: -9999, kills: 0, damage: 0, healing: 0 };
+      const raw = aiPlannerEffectiveAtk(actor);
+      const before = target.currentHp;
+      const actual = aiPlannerDamageAfterCut(target, raw);
+      target.currentHp = Math.max(0, target.currentHp - actual);
+      return { value: actual * 1.05 + (before > 0 && target.currentHp <= 0 ? 1300 : 0), kills: before > 0 && target.currentHp <= 0 ? 1 : 0, damage: actual, healing: 0 };
+    }
+
+    function aiPlannerEvaluateState(state, side) {
+      const own = aiPlannerActive(state, side, true);
+      const enemy = aiPlannerActive(state, side === 'player' ? 'enemy' : 'player', true);
+      let score = 0;
+      own.forEach(u => {
+        const ratio = u.maxHp > 0 ? u.currentHp / u.maxHp : 0;
+        if (u.currentHp > 0) score += 220 + ratio * 520;
+        else score -= 1750;
+        score += (aiPlannerEffectiveAtk(u) - u.atk) * 0.18;
+        score += (aiPlannerEffectiveSpeed(u) - u.priority) * 0.75;
+        [...(u.buffs || [])].forEach(b => {
+          if (b.type === 'dmg_cut') score += Math.max(0, Number(b.val) || 0) * 1.6;
+          if (b.type === 'atk_ratio') score += Math.max(0, Number(b.val) || 0) * 0.9;
+          if (b.type === 'speed') score += Math.max(0, Number(b.val) || 0) * 0.7;
+        });
+        [...(u.debuffs || [])].forEach(b => {
+          if (b.type === 'skill_block') score -= 75;
+          if (b.type === 'heal_block') score -= 35;
+        });
+      });
+      enemy.forEach(u => {
+        const missing = u.maxHp > 0 ? 1 - u.currentHp / u.maxHp : 0;
+        score += missing * 780;
+        if (u.currentHp <= 0) score += 1750;
+        else if (u.currentHp / u.maxHp <= 0.25) score += 220;
+        if ((u.debuffs || []).some(b => b.type === 'skill_block')) score += 75;
+        if ((u.debuffs || []).some(b => b.type === 'heal_block')) score += 30;
+        (u.debuffs || []).forEach(b => {
+          if (b.type === 'speed') score += Math.max(0, -(Number(b.val) || 0)) * 0.7;
+          if (b.type === 'atk_ratio') score += Math.max(0, -(Number(b.val) || 0)) * 0.6;
+        });
+      });
+      const ownAp = side === 'player' ? state.playerAp : state.enemyAp;
+      score += ownAp * 1.15;
+      // 行動可能数が多いほど次の局面が安定する。
+      score += own.filter(u => u.currentHp > 0).length * 90;
+      return score;
+    }
+
+    function aiPlannerEstimateThreat(state, side) {
+      const enemies = aiPlannerActive(state, side === 'player' ? 'enemy' : 'player');
+      const targets = aiPlannerActive(state, side);
+      let threat = 0;
+      targets.forEach(target => {
+        let best = aiPlannerEffectiveAtk(enemies[0] || { atk: 0, buffs: [], debuffs: [], priority: 0 }) * 0.0;
+        enemies.forEach(enemy => {
+          const normal = aiPlannerDamageAfterCut(target, aiPlannerEffectiveAtk(enemy));
+          best = Math.max(best, normal);
+          (enemy.skills || []).forEach(sk => {
+            if (sk.type !== 'active' || !aiPlannerCondition(sk.selfCond, enemy, state)) return;
+            if (sk.mainEffect?.type === 'dmg_fixed') best = Math.max(best, aiPlannerDamageAfterCut(target, Number(sk.mainEffect.val) || 0));
+            if (sk.mainEffect?.type === 'dmg_atk_ratio') best = Math.max(best, aiPlannerDamageAfterCut(target, Math.round(aiPlannerEffectiveAtk(enemy) * (Number(sk.mainEffect.val) || 0) / 100)));
+          });
+        });
+        if (target.currentHp > 0) threat += Math.min(target.currentHp, best) * (target.currentHp / Math.max(1, target.maxHp) < 0.35 ? 1.35 : 0.7);
+      });
+      return threat * 0.65;
+    }
+
+    function aiPlannerCandidateTargets(state, actor, skill) {
+      if (skillNeedsManualTarget(skill)) {
+        return aiPlannerTargetPool(state, skill.targetType, actor).filter(t => aiPlannerTargetCondition(t, skill.targetCond));
+      }
+      return [null];
+    }
+
+    function aiPlannerBuildUnitCandidates(state, actorId, intelligence) {
+      const actor = aiPlannerFindUnit(state, actorId);
+      if (!actor || actor.currentHp <= 0) return [{ type: 'skip', actorId, targetInstanceId: null, cost: 0, name: 'skip' }];
+      const side = actor.side;
+      const enemies = aiPlannerActive(state, side === 'player' ? 'enemy' : 'player');
+      const candidates = [];
+      enemies.forEach(t => candidates.push({ type: 'attack', actorId, targetInstanceId: t.instanceId, cost: 0, name: '通常攻撃' }));
+
+      const skillBlocked = (actor.debuffs || []).some(d => d.type === 'skill_block' && Number(d.duration) > 0);
+      if (!skillBlocked) {
+        (actor.skills || []).forEach((sk, sIdx) => {
+          if (sk.type !== 'active' || !aiPlannerCondition(sk.selfCond, actor, state)) return;
+          const cost = Math.max(0, Number(sk.cost) || 0);
+          if ((side === 'player' ? state.playerAp : state.enemyAp) < cost) return;
+          const targets = aiPlannerCandidateTargets(state, actor, sk);
+          if (skillNeedsManualTarget(sk) && targets.length === 0) return;
+          targets.forEach(target => candidates.push({ type: 'skill', actorId, skillIndex: sIdx, skill: sk, targetInstanceId: target?.instanceId || null, cost, name: sk.name }));
+        });
+      }
+      // 各キャラにつき探索候補を絞る。ただし撃破確定・回復・無効化系は切り捨てない。
+      const scored = candidates.map(c => {
+        const copy = aiPlannerCloneState(state);
+        const r = c.type === 'attack' ? aiPlannerApplyAttack(copy, c.actorId, c.targetInstanceId) : c.type === 'skill' ? aiPlannerApplySkill(copy, c.actorId, c.skill, c.targetInstanceId, false) : {value:0};
+        const delta = aiPlannerEvaluateState(copy, side) - aiPlannerEvaluateState(state, side);
+        return { c, score: delta + (r.kills || 0) * 250 + Math.random() * (intelligence === 'master' ? 1 : 3) };
+      }).sort((a,b) => b.score - a.score);
+      const keep = intelligence === 'master' ? 8 : intelligence === 'expert' ? 6 : 4;
+      return scored.slice(0, Math.min(keep, scored.length)).map(x => x.c);
+    }
+
+    function aiPlannerBuildMagicCandidates(state, side, intelligence) {
+      const hand = side === 'player' ? (battleState.magicHand || []) : (battleState.enemyMagicHand || []);
+      const used = side === 'player' ? battleState.usedMagicCardIds : battleState.enemyUsedMagicCardIds;
+      const ap = side === 'player' ? state.playerAp : state.enemyAp;
+      const usable = hand.filter(c => c && !(used?.has?.(c.id)) && ap >= Number(c.effect?.cost || 0));
+      const candidates = [{ type:'none', card:null, targetInstanceId:null, cost:0 }];
+      usable.forEach(card => {
+        const eff = card.effect || {};
+        if (eff.targetType === 'select_enemy_1' || eff.targetType === 'select_ally_1') {
+          const actor = { instanceId:'magic_actor', side, currentHp:1, maxHp:1, atk:0, priority:999, buffs:[], debuffs:[], statuses:[] };
+          aiPlannerTargetPool(state, eff.targetType, actor).filter(t => aiPlannerTargetCondition(t, eff.targetCond)).forEach(t => candidates.push({type:'magic', card, targetInstanceId:t.instanceId, cost:Number(eff.cost||0)}));
+        } else candidates.push({type:'magic', card, targetInstanceId:null, cost:Number(eff.cost||0)});
+      });
+      const scored = candidates.map(c => {
+        const copy = aiPlannerCloneState(state);
+        let delta = 0;
+        if (c.card) {
+          const actor = { instanceId:'magic_actor', side, currentHp:1, maxHp:1, atk:0, priority:999, buffs:[], debuffs:[], statuses:[], skills:[], isActive:false, name:'マジック' };
+          copy.units.push(actor);
+          const pseudoSkill = { ...c.card.effect, cost:Number(c.card.effect?.cost||0), mainEffect:c.card.effect?.mainEffect, hasSubEffect:c.card.effect?.hasSubEffect, subEffect:c.card.effect?.subEffect };
+          const r = aiPlannerApplySkill(copy, actor.instanceId, pseudoSkill, c.targetInstanceId, true);
+          delta = (r.value || 0) + (r.kills || 0) * 300;
+        }
+        delta += aiPlannerEvaluateState(copy, side) - aiPlannerEvaluateState(state, side);
+        return {c,score:delta + Math.random() * (intelligence === 'master' ? 0.8 : 2)};
+      }).sort((a,b)=>b.score-a.score);
+      return scored.slice(0, intelligence === 'master' ? 7 : 5).map(x=>x.c);
+    }
+
+    function aiPlannerApplyCandidate(state, candidate) {
+      if (!candidate || candidate.type === 'none' || candidate.type === 'skip') return { value: 0, kills:0, damage:0, healing:0 };
+      if (candidate.type === 'attack') return aiPlannerApplyAttack(state, candidate.actorId, candidate.targetInstanceId);
+      if (candidate.type === 'skill') return aiPlannerApplySkill(state, candidate.actorId, candidate.skill, candidate.targetInstanceId, false);
+      if (candidate.type === 'magic') {
+        const actorId = 'magic_actor_' + candidate.card?.id;
+        state.units.push({instanceId:actorId,side:state.side,currentHp:1,maxHp:1,atk:0,priority:999,buffs:[],debuffs:[],statuses:[],skills:[],isActive:false,name:'マジック'});
+        const pseudoSkill = { ...(candidate.card?.effect || {}), cost:Number(candidate.card?.effect?.cost || 0), mainEffect:candidate.card?.effect?.mainEffect, hasSubEffect:candidate.card?.effect?.hasSubEffect, subEffect:candidate.card?.effect?.subEffect };
+        return aiPlannerApplySkill(state, actorId, pseudoSkill, candidate.targetInstanceId, true);
+      }
+      return {value:0,kills:0,damage:0,healing:0};
+    }
+
+    function aiPlannerSearch(side, intelligence) {
+      const base = aiPlannerCreateState(side);
+      const activeIds = aiPlannerActive(base, side).sort((a,b) => aiPlannerEffectiveSpeed(b) - aiPlannerEffectiveSpeed(a)).map(u => u.instanceId);
+      const beamWidth = intelligence === 'master' ? 48 : 20;
+      let beams = [{ state: base, plan: [], score: aiPlannerEvaluateState(base, side) }];
+
+      // マジックは共有APを消費するので、キャラより先に候補として組み込む。
+      const magicCandidates = aiPlannerBuildMagicCandidates(base, side, intelligence);
+      const magicBeam = [];
+      beams.forEach(b => magicCandidates.forEach(c => {
+        const state = aiPlannerCloneState(b.state);
+        aiPlannerApplyCandidate(state, c);
+        magicBeam.push({state, plan:c.type === 'none' ? [] : [c], score:aiPlannerEvaluateState(state, side)});
+      }));
+      beams = magicBeam.sort((a,b)=>b.score-a.score).slice(0, Math.min(beamWidth, magicBeam.length));
+
+      for (const actorId of activeIds) {
+        const next = [];
+        beams.forEach(b => {
+          const actor = aiPlannerFindUnit(b.state, actorId);
+          const candidates = aiPlannerBuildUnitCandidates(b.state, actorId, intelligence);
+          candidates.forEach(c => {
+            const state = aiPlannerCloneState(b.state);
+            const r = aiPlannerApplyCandidate(state, c);
+            if (r.value < -9000) return;
+            const score = aiPlannerEvaluateState(state, side) + (r.kills || 0) * 350;
+            next.push({ state, plan:[...b.plan, c], score });
+          });
+        });
+        beams = next.sort((a,b)=>b.score-a.score).slice(0, beamWidth);
+        if (!beams.length) break;
+      }
+
+      let best = null;
+      for (const b of beams) {
+        const now = aiPlannerEvaluateState(b.state, side);
+        const future = aiPlannerCloneState(b.state);
+        const apKey = side === 'player' ? 'playerAp' : 'enemyAp';
+        future[apKey] = Math.min(100, future[apKey] + 20);
+        const futureValue = aiPlannerEvaluateState(future, side);
+        const threat = aiPlannerEstimateThreat(future, side);
+        const strategicScore = intelligence === 'master'
+          ? now + futureValue * 0.38 - threat * 0.82
+          : now + futureValue * 0.10 - threat * 0.18;
+        const score = strategicScore + Math.random() * (intelligence === 'master' ? 0.4 : 2.0);
+        if (!best || score > best.score) best = { ...b, score };
+      }
+      return best || {state:base,plan:[],score:aiPlannerEvaluateState(base,side)};
+    }
+
+    function applyAiPlanToBattle(side, plan) {
+      if (!Array.isArray(plan)) return;
+      battleState.reservedEnemyMagic = null;
+      if (side === 'player') battleState.reservedMagic = null;
+      plan.forEach(c => {
+        if (!c) return;
+        if (c.type === 'magic') {
+          if (side === 'enemy') {
+            battleState.reservedEnemyMagic = c.card;
+            battleState.reservedMagicTargetInstanceId = c.targetInstanceId || null;
+          } else {
+            battleState.reservedMagic = c.card;
+            battleState.reservedMagicTargetInstanceId = c.targetInstanceId || null;
+          }
+          return;
+        }
+        if (c.type !== 'attack' && c.type !== 'skill') return;
+        const unit = (side === 'player' ? battleState.playerUnits : battleState.enemyUnits).find(u => u.instanceId === c.actorId);
+        if (!unit) return;
+        unit.reservedAction = c.type === 'attack'
+          ? { type:'attack', targetInstanceId:c.targetInstanceId || null }
+          : { type:'skill', skillIndex:c.skillIndex, targetInstanceId:c.targetInstanceId || null };
+      });
     }
 
     function scoreAiTarget(target, skill, unit) {
@@ -2867,17 +3661,17 @@
       const effect = skill.mainEffect || {};
       let score = Math.random() * 2;
       if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
-        score += (target.currentHp / Math.max(1, target.maxHp)) < 0.35 ? 55 : 10;
-        if (effect.type === 'dmg_fixed' && Number(effect.val) >= target.currentHp) score += 100;
+        const raw = effect.type === 'dmg_fixed' ? Number(effect.val || 0) : Math.round(aiPlannerEffectiveAtk(unit) * Number(effect.val || 0) / 100);
+        const actual = aiPlannerDamageAfterCut(target, raw);
+        score += actual * 0.8;
+        if (actual >= target.currentHp) score += 260;
+        if (target.currentHp / Math.max(1, target.maxHp) < 0.35) score += 75;
       }
-      if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
-        score += (1 - target.currentHp / Math.max(1, target.maxHp)) * 80;
-      }
-      if (effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') {
-        score += target.side === unit.side ? 45 : 15;
-      }
-      if (effect.type === 'damage_cut_ratio') score += target.side === unit.side ? 60 : 5;
-      if (effect.type === 'heal_block' || effect.type === 'skill_block') score += target.side !== unit.side ? 55 : -20;
+      if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') score += (1 - target.currentHp / Math.max(1, target.maxHp)) * 110;
+      if (effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') score += target.side === unit.side ? 55 : 20;
+      if (effect.type === 'damage_cut_ratio') score += target.side === unit.side ? 75 : 5;
+      if (effect.type === 'heal_block' || effect.type === 'skill_block') score += target.side !== unit.side ? 85 : -20;
+      if (effect.type === 'mod_ap') score += Number(effect.val || 0) > 0 ? 55 : 35;
       return score;
     }
 
@@ -2886,99 +3680,99 @@
       const aliveEnemies = side === 'player' ? getActiveUnits('enemy') : getActiveUnits('player');
       if (aliveEnemies.length === 0) return;
       const intelligence = side === 'enemy' ? getAiIntelligence() : 'expert';
-      const ap = side === 'player' ? battleState.playerAp : battleState.enemyAp;
+      if (intelligence === 'master' || intelligence === 'expert') {
+        const result = aiPlannerSearch(side, intelligence);
+        applyAiPlanToBattle(side, result.plan);
+        return;
+      }
 
+      // 素人・凡人は従来の軽量ロジックを維持しつつ、合計APを超えないよう共有予算を管理する。
+      let remainingAp = side === 'player' ? battleState.playerAp : battleState.enemyAp;
       units.forEach(u => {
         if (u.currentHp <= 0) return;
-        const skillBlocked = (u.debuffs || []).some(d => d.type === 'skill_block' && d.duration > 0);
+        const blocked = (u.debuffs || []).some(d => d.type === 'skill_block' && d.duration > 0);
         const usable = [];
-        if (!skillBlocked) {
-          for (let sIdx = 0; sIdx < (u.skills || []).length; sIdx++) {
-            const sk = u.skills[sIdx];
-            if (sk.type !== 'active' || !evalCond(sk.selfCond, u, side === 'player') || ap < (sk.cost || 0)) continue;
-            const candidates = getAiTargetsForSkill(sk, u);
-            if (skillNeedsManualTarget(sk) && candidates.length === 0) continue;
-            usable.push({sIdx, sk, candidates});
-          }
-        }
-
+        if (!blocked) (u.skills || []).forEach((sk, sIdx) => {
+          if (sk.type !== 'active' || !evalCond(sk.selfCond, u, side === 'player')) return;
+          const cost = Number(sk.cost || 0);
+          if (cost > remainingAp) return;
+          const candidates = getAiTargetsForSkill(sk, u);
+          if (skillNeedsManualTarget(sk) && !candidates.length) return;
+          usable.push({sIdx,sk,candidates,score:Number(sk.mainEffect?.val||0) - cost * 0.25 + Math.random()*10});
+        });
         let pick = null;
-        if (usable.length) {
-          if (intelligence === 'novice') {
-            // 素人：使えるスキルをたまに使う。対象もほぼランダム。
-            if (Math.random() < 0.35) pick = usable[Math.floor(Math.random() * usable.length)];
-          } else if (intelligence === 'normal') {
-            // 凡人：コストと対象を考慮して、比較的有利なスキルを選ぶ。
-            pick = usable.map(x => ({x, score: 10 + (x.sk.mainEffect?.val || 0) + Math.random() * 10 + (x.sk.cost || 0) * -0.2})).sort((a,b)=>b.score-a.score)[0]?.x || null;
-          } else {
-            // 玄人：各対象への効果まで評価して最も期待値の高いスキルを選ぶ。
-            let best = null, bestScore = -Infinity;
-            for (const x of usable) {
-              const targets = x.candidates.length ? x.candidates : getAiTargetsForSkill(x.sk, u);
-              const targetScore = targets.length ? Math.max(...targets.map(t => scoreAiTarget(t, x.sk, u))) : 15;
-              const effectVal = Number(x.sk.mainEffect?.val || 0);
-              const score = targetScore + effectVal * 0.35 - Number(x.sk.cost || 0) * 0.45;
-              if (score > bestScore) { bestScore = score; best = x; }
-            }
-            pick = best;
-          }
+        if (intelligence === 'novice') {
+          if (Math.random() < 0.35 && usable.length) pick = usable[Math.floor(Math.random()*usable.length)];
+        } else if (usable.length) {
+          pick = usable.sort((a,b)=>b.score-a.score)[0];
         }
-
         if (pick) {
-          const candidates = pick.candidates.length ? pick.candidates : getAiTargetsForSkill(pick.sk, u);
-          let targetInstanceId = null;
-          if (skillNeedsManualTarget(pick.sk) && candidates.length) {
-            if (intelligence === 'expert') {
-              targetInstanceId = candidates.slice().sort((a,b)=>scoreAiTarget(b,pick.sk,u)-scoreAiTarget(a,pick.sk,u))[0].instanceId;
-            } else targetInstanceId = candidates[Math.floor(Math.random()*candidates.length)].instanceId;
-          }
-          u.reservedAction = { type:'skill', skillIndex:pick.sIdx, targetInstanceId };
+          const candidates = pick.candidates.length ? pick.candidates : getAiTargetsForSkill(pick.sk,u);
+          let target = null;
+          if (skillNeedsManualTarget(pick.sk) && candidates.length) target = candidates.sort((a,b)=>scoreAiTarget(b,pick.sk,u)-scoreAiTarget(a,pick.sk,u))[0];
+          u.reservedAction = {type:'skill',skillIndex:pick.sIdx,targetInstanceId:target?.instanceId||null};
+          remainingAp -= Number(pick.sk.cost||0);
         } else {
-          // 通常攻撃も玄人なら撃破優先、凡人以下はランダム寄り。
-          let target = aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
-          if (intelligence === 'expert') target = aliveEnemies.slice().sort((a,b)=>((a.currentHp/b.maxHp)-(b.currentHp/a.maxHp)) || (a.currentHp-b.currentHp))[0];
-          u.reservedAction = { type:'attack', targetInstanceId:target?.instanceId || null };
+          const target = aliveEnemies.slice().sort((a,b)=>((a.currentHp/a.maxHp)-(b.currentHp/b.maxHp)) || (a.currentHp-b.currentHp))[0] || aliveEnemies[Math.floor(Math.random()*aliveEnemies.length)];
+          u.reservedAction = {type:'attack',targetInstanceId:target?.instanceId||null};
         }
       });
     }
 
     function scoreAiMagic(card) {
-      const eff = card?.effect;
-      if (!eff) return -9999;
-      const targets = resolveTargets(eff.targetType, eff.targetCond, {side:'enemy',currentHp:1,maxHp:1}, false, null, true);
-      let score = 0;
-      const effect = eff.mainEffect || {};
-      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
-        score += targets.reduce((n,t)=>n + (t && t.currentHp <= Number(effect.val||0) ? 100 : 20), 0);
-      } else if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
-        score += targets.reduce((n,t)=>n + (t && t.currentHp < t.maxHp ? 40 + (1-t.currentHp/t.maxHp)*60 : 0), 0);
-      } else if (effect.type === 'mod_ap') {
-        score += Number(effect.val||0) > 0 ? 35 : -20;
-      } else if (effect.type === 'skill_block' || effect.type === 'heal_block') {
-        score += targets.some(t=>t?.side==='player') ? 50 : 15;
-      } else if (effect.type === 'damage_cut_ratio') score += 45;
-      return score + Math.random()*8;
+      if (!card?.effect) return -9999;
+      const state = aiPlannerCreateState('enemy');
+      const actorId = 'magic_score_actor';
+      state.units.push({instanceId:actorId,side:'enemy',currentHp:1,maxHp:1,atk:0,priority:999,buffs:[],debuffs:[],statuses:[],skills:[],isActive:false,name:'マジック'});
+      const pseudoSkill = { ...card.effect, cost:Number(card.effect.cost||0), mainEffect:card.effect.mainEffect, hasSubEffect:card.effect.hasSubEffect, subEffect:card.effect.subEffect };
+      const before = aiPlannerEvaluateState(state,'enemy');
+      const r = aiPlannerApplySkill(state,actorId,pseudoSkill,null,true);
+      return aiPlannerEvaluateState(state,'enemy') - before + (r.kills||0)*300 + Math.random()*3;
     }
 
     function chooseAiMagic() {
       battleState.reservedEnemyMagic = null;
+      battleState.reservedMagicTargetInstanceId = null;
       const cards = (battleState.enemyMagicHand || []).filter(c => !battleState.enemyUsedMagicCardIds.has(c.id));
       if (!cards.length) return;
-      const ap = battleState.enemyAp;
+      const reservedUnitCost = getActiveUnits('enemy').reduce((sum, u) => {
+        const a = u.reservedAction;
+        if (a?.type !== 'skill') return sum;
+        const sk = u.skills?.[a.skillIndex];
+        return sum + Number(sk?.cost || 0);
+      }, 0);
+      const ap = Math.max(0, Number(battleState.enemyAp) || 0) - reservedUnitCost;
       const usable = cards.filter(c => ap >= Number(c.effect?.cost || 0));
       if (!usable.length) return;
       const intelligence = getAiIntelligence();
       let chosen = null;
       if (intelligence === 'novice') {
         if (Math.random() < 0.35) chosen = usable[Math.floor(Math.random()*usable.length)];
-      } else if (intelligence === 'normal') {
-        const useful = usable.filter(c => scoreAiMagic(c) > 10);
-        if (useful.length && Math.random() < 0.75) chosen = useful.sort((a,b)=>scoreAiMagic(b)-scoreAiMagic(a))[0];
       } else {
-        const useful = usable.slice().sort((a,b)=>scoreAiMagic(b)-scoreAiMagic(a));
-        if (useful.length && scoreAiMagic(useful[0]) > 5) chosen = useful[0];
+        const ranked = usable.map(card => ({card, score:scoreAiMagic(card)})).sort((a,b)=>b.score-a.score);
+        if (ranked.length && (intelligence === 'master' || ranked[0].score > 5) && (intelligence === 'expert' || Math.random() < 0.75)) chosen = ranked[0].card;
       }
-      if (chosen) battleState.reservedEnemyMagic = chosen;
+      if (!chosen) return;
+      battleState.reservedEnemyMagic = chosen;
+      if (['select_enemy_1','select_ally_1'].includes(chosen.effect?.targetType)) {
+        const actor = {side:'enemy',currentHp:1,maxHp:1};
+        const pool = (getTargetPool(chosen.effect.targetType, actor) || []).filter(t => matchesTargetCondition(t, chosen.effect.targetCond));
+        if (pool.length) {
+          pool.sort((a,b)=>scoreAiTarget(b,{mainEffect:chosen.effect.mainEffect},actor)-scoreAiTarget(a,{mainEffect:chosen.effect.mainEffect},actor));
+          battleState.reservedMagicTargetInstanceId = pool[0].instanceId;
+        }
+      }
+    }
+
+    function chooseAiTurnPlan(side) {
+      const intelligence = side === 'enemy' ? getAiIntelligence() : 'expert';
+      if (intelligence === 'master' || intelligence === 'expert') {
+        const result = aiPlannerSearch(side, intelligence);
+        applyAiPlanToBattle(side, result.plan);
+      } else {
+        chooseAiActions(side);
+        if (side === 'enemy') chooseAiMagic();
+      }
     }
 
     async function confirmPlayerActions() {
@@ -3525,37 +4319,54 @@
       const modal = document.getElementById('battle-result-modal');
       const title = document.getElementById('battle-result-title');
       const message = document.getElementById('battle-result-message');
+      const rewardBox = document.getElementById('battle-result-reward');
       const rematch = document.getElementById('battle-result-rematch');
       const back = document.getElementById('battle-result-back');
       if (!modal || !title || !message) return;
+      const isStory = !!battleState.storyMode;
+      const storyResult = battleState.storyResult || null;
+      if (rewardBox) { rewardBox.classList.add('hidden'); rewardBox.innerHTML=''; }
 
       if (winner === 'player') {
-        title.innerText = '🎉 勝利！';
+        title.innerText = isStory && storyResult?.champion ? '🏆 優勝！' : '🎉 勝利！';
         title.className = 'text-4xl sm:text-6xl font-black text-emerald-300 leading-tight';
-        message.innerText = 'おめでとうございます！あなたの勝利です。';
+        message.innerText = isStory ? (storyResult?.champion ? '32人トーナメントを制覇しました！' : `第${(storyModeState?.wins||0)}回戦突破！次のライバルが待っています。`) : 'おめでとうございます！あなたの勝利です。';
       } else if (winner === 'enemy') {
-        title.innerText = '💀 敗北';
+        title.innerText = isStory ? '💀 トーナメント敗退' : '💀 敗北';
         title.className = 'text-4xl sm:text-6xl font-black text-rose-300 leading-tight';
-        message.innerText = '今回は敗北しました。';
+        message.innerText = isStory ? 'このトーナメントは終了です。最初から再挑戦できます。' : '今回は敗北しました。';
       } else {
-        title.innerText = '🤝 引き分け';
+        title.innerText = isStory ? '🤝 トーナメント敗退' : '🤝 引き分け';
         title.className = 'text-4xl sm:text-6xl font-black text-amber-300 leading-tight';
-        message.innerText = '両者とも勝利条件を満たさなかったため引き分けです。';
+        message.innerText = isStory ? '引き分けはトーナメント敗退扱いです。' : '両者とも勝利条件を満たさなかったため引き分けです。';
+      }
+      if (isStory && storyResult?.reward && rewardBox) {
+        const u=(storyResult.reward.units||[]),m=(storyResult.reward.magics||[]);
+        rewardBox.classList.remove('hidden');
+        rewardBox.innerHTML=`<div class="text-xs font-black text-amber-300 mb-2">🎴 勝利報酬：新しく使えるカード</div><div class="text-[10px] text-slate-300 mb-1">キャラクター ${u.length}枚 / マジック ${m.length}枚</div><div class="space-y-1 text-[11px] text-slate-200">${[...u.map(c=>`<div>🧑 ${esc(c.name)}</div>`),...m.map(c=>`<div>✨ ${esc(c.name)}</div>`)].join('')||'<div class="text-slate-500">新規解放できるカードはありませんでした。</div>'}</div>`;
       }
 
       if (rematch) {
-        rematch.onclick = () => {
+        rematch.classList.remove('hidden');
+        rematch.innerText = isStory ? (winner === 'player' ? (storyResult?.champion ? '🏆 ストーリーを確認' : '➡️ 次の対戦へ') : '🔄 最初からやり直す') : '🔄 再戦';
+        rematch.onclick = async () => {
           hideBattleResultModal();
           battleExecutionRunning = false;
-          startBattle();
+          if (isStory) {
+            storyBattleOverride=null;
+            if (winner === 'player') { switchView('story'); renderStoryMode(); }
+            else await storyRestartFromScratch();
+          } else startBattle();
         };
       }
       if (back) {
+        back.innerText = isStory ? '↩ ストーリー画面へ' : '↩ 戻る';
         back.onclick = () => {
           hideBattleResultModal();
           battleExecutionRunning = false;
-          battleState.phase = 'decision';
-          switchView('battle-setup');
+          storyBattleOverride=null;
+          if (isStory) { switchView('story'); renderStoryMode(); }
+          else { battleState.phase = 'decision'; switchView('battle-setup'); }
         };
       }
       modal.classList.remove('hidden');
@@ -3580,7 +4391,11 @@
         if(winner==='player') logBattle('🎉 VICTORIA! あなたの勝利です！');
         else if(winner==='enemy') logBattle('💀 DEFEAT... 敗北しました。');
         else logBattle('🤝 DRAW... 引き分けです。');
-        showBattleResultModal(winner);
+        if (battleState.storyMode && !battleState.storyResult) {
+          handleStoryBattleEnd(winner).then(result => { battleState.storyResult=result||null; showBattleResultModal(winner); }).catch(err=>{ console.error('Story result error:',err); battleState.storyResult={defeat:winner!=='player',champion:false,reward:null}; showBattleResultModal(winner); });
+        } else {
+          showBattleResultModal(winner);
+        }
         return true;
       }
       return false;
