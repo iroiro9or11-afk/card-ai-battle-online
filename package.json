@@ -1,11 +1,12 @@
 {
   "name": "card-ai-online",
-  "version": "3.5.0",
+  "version": "3.8.0",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.5",
+  "description": "カードAIバトル オンライン対戦 v3.8",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:online": "node tests/online-smoke-test.js"
   },
   "dependencies": {}
 }
