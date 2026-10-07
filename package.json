@@ -1,14 +1,15 @@
 {
   "name": "card-ai-online",
-  "version": "3.18.0",
+  "version": "3.19.0",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.18",
+  "description": "カードAIバトル オンライン対戦 v3.19",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js",
     "test:card-id": "node tests/card-id-migration-test.js",
-    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/client-online-regression.js && node tests/online-smoke-test.js"
+    "test:offline": "node tests/offline-battle-regression.js",
+    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js"
   },
   "dependencies": {}
 }
