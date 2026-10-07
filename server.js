@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.8.0';
+const SERVER_VERSION = '3.10.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -92,6 +92,22 @@ function normalizeProfile(msg, fallbackName) {
     if (x) decks.push(x);
   }
   return { name: safeName(msg?.name, fallbackName), cards, decks };
+}
+
+function mergeProfileAssets(s, assets) {
+  if (!s?.profile || !Array.isArray(assets)) return 0;
+  const byId = new Map(s.profile.cards.map(c => [String(c.id), c]));
+  let count = 0;
+  for (const a of assets) {
+    const id = String(a?.id || '');
+    const image = typeof a?.image === 'string' ? a.image : (typeof a?.imageUrl === 'string' ? a.imageUrl : null);
+    const card = byId.get(id);
+    if (!id || !card || !image) continue;
+    card.image = image;
+    card.imageUrl = null;
+    count++;
+  }
+  return count;
 }
 
 function publicRoom(r) {
@@ -1018,6 +1034,15 @@ server.on('upgrade',(req,socket) => {
       s.profile = normalizeProfile(m, s.name);
       const r = roomBySession(sid);
       if (r) r.profiles[sid] = clone(s.profile);
+      if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
+      return;
+    }
+
+    if (type === 'profile_assets') {
+      const count = mergeProfileAssets(s, m.assets);
+      const r = roomBySession(sid);
+      if (r) r.profiles[sid] = clone(s.profile);
+      send(ws,'profile_assets_ack',{done:Number(m.batch||0) + 1 >= Number(m.total||1),batch:Number(m.batch||0),total:Number(m.total||1),count});
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
       return;
     }
