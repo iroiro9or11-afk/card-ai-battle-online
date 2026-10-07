@@ -336,7 +336,7 @@
     <!-- 戦闘準備画面 -->
     <section id="view-online" class="view-section hidden space-y-4">
       <div class="flex items-center justify-between gap-2">
-        <div><h2 class="text-lg font-bold text-emerald-400 border-l-4 border-emerald-400 pl-2">🌐 オンライン対戦</h2><p class="text-[11px] text-slate-400 mt-1">2人対戦・観戦・90秒制限。ゲーム結果はサーバーが管理します。</p></div>
+        <div><div class="flex items-center gap-2"><h2 class="text-lg font-bold text-emerald-400 border-l-4 border-emerald-400 pl-2">🌐 オンライン対戦</h2><span id="online-connection-badge" class="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-400">未接続</span></div><p class="text-[11px] text-slate-400 mt-1">2人対戦・観戦・90秒制限。ゲーム結果はサーバーが管理します。</p></div>
         <button onclick="leaveOnlineRoom(); switchView('battle-setup')" class="px-3 py-2 bg-slate-700 rounded text-xs font-bold">戻る</button>
       </div>
       <div id="online-lobby" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -496,6 +496,7 @@
           <span id="magic-reserved-status" class="text-[10px] text-amber-300 font-bold">予約中: なし</span>
         </div>
         <div id="magic-hand-grid" class="flex gap-3 overflow-x-auto custom-scrollbar p-2 min-h-[160px]"></div>
+        <div id="online-magic-targets" class="hidden border-t border-slate-800 pt-2"></div>
       </div>
 
       <!-- 戦闘ログ -->
@@ -640,6 +641,7 @@
       usedMagicCardIds: new Set(),
       enemyUsedMagicCardIds: new Set(),
       reservedMagic: null,
+      reservedMagicTargetInstanceId: null,
       reservedEnemyMagic: null,
       selectedPlayerInstanceId: null,
       enemyIntelligence: "normal",
@@ -650,6 +652,7 @@
     };
 
     const PRESET_ATTRIBUTES = ["人間", "亜人", "機械", "幻獣", "モンスター", "炎", "水", "風", "地", "光", "闇", "無", "物理", "魔法", "戦士", "回復", "重装"];
+    let battleExecutionRunning = false;
 
     function generateUniqueId(prefix = "id") {
       return prefix + "_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
@@ -662,6 +665,18 @@
     }
 
     function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+    const STATUS_DEFS = {
+      poison: { name: '毒', kind: 'debuff' },
+      paralysis: { name: '麻痺', kind: 'debuff' },
+      freeze: { name: '凍結', kind: 'debuff' },
+      slow: { name: '鈍足', kind: 'debuff' }
+    };
+    // 状態異常の正規化ルールはサーバーと同じ4種類。状態異常は statuses にのみ保持する。
+    function statusName(type) { return STATUS_DEFS[type]?.name || type || '状態異常'; }
+    function statusOptions(selected='') {
+      return Object.entries(STATUS_DEFS).map(([k,v]) => `<option value="${k}" ${selected===k?'selected':''}>${v.name}</option>`).join('');
+    }
 
     // 全登録カードから属性リストを収集しdatalistを更新
     function refreshAttributeDatalist() {
@@ -676,147 +691,125 @@
       }
     }
 
-    // カードのタップ・長押し共通処理。
-    // 既存の pointer 系だけに依存せず、touchstart/touchend も明示的に処理する。
+    // カード操作：通常タップは各画面の既存clickへ任せ、長押しだけ詳細を開く。
+    // 戦闘中も通常タップ（行動選択）を横取りしない。
+    // スマホの画像長押しメニューだけcontextmenuで抑止する。
     const cardLongPressStyle = document.createElement("style");
     cardLongPressStyle.textContent = `
-      .card-element[data-card-id],
-      .card-element[data-card-id] img {
+      [data-card-id],
+      [data-card-id] img {
         -webkit-touch-callout: none !important;
         -webkit-user-select: none !important;
         user-select: none !important;
         -webkit-user-drag: none !important;
-        touch-action: manipulation !important;
       }
     `;
     document.head.appendChild(cardLongPressStyle);
 
-    let cardTouchTimer = null;
-    let cardTouchActive = false;
-    let cardTouchTriggered = false;
-    let cardTouchId = null;
-    let cardTouchStartX = 0;
-    let cardTouchStartY = 0;
+    let cardLongPressTimer = null;
+    let cardLongPressId = null;
+    let cardLongPressActive = false;
+    let cardLongPressTriggered = false;
+    let cardLongPressStartX = 0;
+    let cardLongPressStartY = 0;
     let suppressCardClickUntil = 0;
 
-    function getAnyCardElement(target) {
-      return target instanceof Element ? target.closest('[data-card-id]') : null;
-    }
-
-    function getDetailCardElement(target) {
-      return target instanceof Element ? target.closest('.card-element[data-card-id]') : null;
-    }
-
-    function clearCardTouchTimer() {
-      if (cardTouchTimer !== null) {
-        clearTimeout(cardTouchTimer);
-        cardTouchTimer = null;
+    function clearCardLongPress() {
+      if (cardLongPressTimer !== null) {
+        clearTimeout(cardLongPressTimer);
+        cardLongPressTimer = null;
       }
+      cardLongPressActive = false;
+      cardLongPressId = null;
+      cardLongPressTriggered = false;
     }
 
-    function resetCardTouchState() {
-      clearCardTouchTimer();
-      cardTouchActive = false;
-      cardTouchTriggered = false;
-      cardTouchId = null;
-      cardTouchStartX = 0;
-      cardTouchStartY = 0;
+    function beginCardLongPress(cardId, x = 0, y = 0) {
+      if (!cardId) return;
+      if (cardLongPressTimer !== null) clearTimeout(cardLongPressTimer);
+      cardLongPressActive = true;
+      cardLongPressId = String(cardId);
+      cardLongPressTriggered = false;
+      cardLongPressStartX = Number(x) || 0;
+      cardLongPressStartY = Number(y) || 0;
+      cardLongPressTimer = setTimeout(() => {
+        if (!cardLongPressActive || !cardLongPressId) return;
+        cardLongPressTriggered = true;
+        suppressCardClickUntil = Date.now() + 1000;
+        openCardDetail(cardLongPressId);
+      }, 500);
     }
 
-    function startCardLongPress(cardId, x, y) {
-      resetCardTouchState();
-      cardTouchActive = true;
-      cardTouchId = String(cardId);
-      cardTouchStartX = Number(x) || 0;
-      cardTouchStartY = Number(y) || 0;
-      cardTouchTriggered = false;
-      cardTouchTimer = setTimeout(() => {
-        if (!cardTouchActive || !cardTouchId) return;
-        cardTouchTriggered = true;
-        suppressCardClickUntil = Date.now() + 800;
-        openCardDetail(cardTouchId);
-      }, 450);
+    function moveCardLongPress(x = 0, y = 0) {
+      if (!cardLongPressActive) return;
+      const dx = (Number(x) || 0) - cardLongPressStartX;
+      const dy = (Number(y) || 0) - cardLongPressStartY;
+      if ((dx * dx) + (dy * dy) > 12 * 12) clearCardLongPress();
     }
 
-    function moveCardLongPress(x, y) {
-      if (!cardTouchActive) return;
-      const dx = (Number(x) || 0) - cardTouchStartX;
-      const dy = (Number(y) || 0) - cardTouchStartY;
-      if ((dx * dx) + (dy * dy) > 12 * 12) resetCardTouchState();
-    }
-
-    function finishCardTouch(e) {
-      if (!cardTouchActive) return;
-      const wasLongPress = cardTouchTriggered;
-      const cardId = cardTouchId;
-      clearCardTouchTimer();
+    function finishCardLongPress(e) {
+      if (!cardLongPressActive) return;
+      const wasLongPress = cardLongPressTriggered;
+      clearCardLongPress();
       if (wasLongPress) {
-        suppressCardClickUntil = Date.now() + 800;
+        suppressCardClickUntil = Date.now() + 1000;
         if (e?.cancelable) e.preventDefault();
-        if (e?.stopPropagation) e.stopPropagation();
-      } else if (cardId) {
-        suppressCardClickUntil = Date.now() + 800;
-        if (e?.cancelable) e.preventDefault();
-        openCardDetail(cardId);
       }
-      resetCardTouchState();
     }
 
-    // タッチ端末：通常タップはtouchend、長押しは450msで即時表示。
-    // カード操作：
-    // ・カード一覧/デッキ編成など通常のカードUIは「単押し」で詳細表示
-    // ・戦闘中のカードUIは「単押し」を行動選択に使用するため、
-    //   「長押し」だけ詳細表示する
-    // ・長押し成立後にブラウザが生成するclickだけを抑止する
-    // ・画像長押し時のコンテキストメニューはカード上だけ抑止する
     function initLongPressGlobalListener() {
+      // タッチ：通常タップは何もしない。長押し成立時だけ詳細を開く。
+      document.addEventListener("touchstart", (e) => {
+        const touch = e.touches && e.touches[0];
+        const cardEl = e.target.closest?.("[data-card-id]");
+        if (!cardEl || !touch) return;
+        beginCardLongPress(cardEl.getAttribute("data-card-id"), touch.clientX, touch.clientY);
+      }, { passive: true });
+
+      document.addEventListener("touchmove", (e) => {
+        const touch = e.touches && e.touches[0];
+        if (touch) moveCardLongPress(touch.clientX, touch.clientY);
+      }, { passive: true });
+
+      document.addEventListener("touchend", (e) => {
+        finishCardLongPress(e);
+      }, { passive: false });
+
+      document.addEventListener("touchcancel", () => {
+        clearCardLongPress();
+      }, { passive: true });
+
+      // マウス/ペン：pointerイベントで同じ長押し処理。touchは上のtouchイベントに任せる。
       document.addEventListener("pointerdown", (e) => {
-        const cardEl = e.target.closest("[data-card-id]");
+        if (e.pointerType === "touch") return;
+        const cardEl = e.target.closest?.("[data-card-id]");
         if (!cardEl) return;
-
-        const cardId = cardEl.getAttribute("data-card-id");
-        if (!cardId) return;
-
-        isLongPressTriggered = false;
-        if (longPressTimer) clearTimeout(longPressTimer);
-
-        longPressTimer = setTimeout(() => {
-          isLongPressTriggered = true;
-          openCardDetail(cardId);
-        }, 500);
+        beginCardLongPress(cardEl.getAttribute("data-card-id"), e.clientX, e.clientY);
       });
-
-      const cancelTimer = () => {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-      };
-
-      document.addEventListener("pointerup", cancelTimer);
-      document.addEventListener("pointercancel", cancelTimer);
-
       document.addEventListener("pointermove", (e) => {
-        if (Math.abs(Number(e.movementX) || 0) > 5 || Math.abs(Number(e.movementY) || 0) > 5) {
-          cancelTimer();
-        }
+        if (e.pointerType === "touch") return;
+        moveCardLongPress(e.clientX, e.clientY);
+      });
+      document.addEventListener("pointerup", (e) => {
+        if (e.pointerType === "touch") return;
+        finishCardLongPress(e);
+      });
+      document.addEventListener("pointercancel", (e) => {
+        if (e.pointerType === "touch") return;
+        clearCardLongPress();
       });
 
-      // 長押し後にだけ発生する合成clickを抑止。
-      // 通常の単押しはここでは横取りせず、各画面の既存onclickへ渡す。
+      // 長押し後にブラウザが発生させるclickだけ抑止。通常clickは絶対に横取りしない。
       document.addEventListener("click", (e) => {
-        if (!isLongPressTriggered) return;
-
+        if (Date.now() >= suppressCardClickUntil) return;
         e.preventDefault();
         e.stopPropagation();
-        isLongPressTriggered = false;
-        cancelTimer();
+        suppressCardClickUntil = 0;
       }, true);
 
-      // スマホ/タブレットでカード画像を長押しした際のブラウザメニューだけ抑止。
-      // カード操作そのもののclick/pointerイベントは奪わない。
+      // スマホの画像保存/コンテキストメニューだけカード上で抑止。
       document.addEventListener("contextmenu", (e) => {
-        if (e.target.closest("[data-card-id]")) e.preventDefault();
+        if (e.target.closest?.("[data-card-id]")) e.preventDefault();
       }, true);
     }
 
@@ -831,7 +824,11 @@
           battle_start: "戦闘開始時",
           turn_start: "各ターン開始時",
           turn_end: "各ターン終了前",
-          deploy: "登場時"
+          deploy: "登場時",
+          death: "死亡時",
+          ally_death: "味方死亡時",
+          hp_increase: "HP増加時",
+          hp_decrease: "HP減少時"
         }[skill.timing] || "パッシブ発動時";
         parts.push(`【パッシブ：${timingText}】`);
       }
@@ -870,6 +867,14 @@
         case "enemy_has_attr": return `敵に[${cond.attr || '炎'}]属性がいる場合`;
         case "all_ally_attr": return `味方全員が[${cond.attr || '炎'}]属性`;
         case "all_enemy_attr": return `敵全員が[${cond.attr || '炎'}]属性`;
+        case "turn_lte": return `${cond.val}ターン目以内`;
+        case "turn_gte": return `${cond.val}ターン目以降`;
+        case "self_status": return `自分が[${statusName(cond.status)}]のとき`;
+        case "self_any_status": return `自分が状態異常のとき`;
+        case "ally_has_status": return `[${statusName(cond.status)}]の味方がいる場合`;
+        case "ally_has_any_status": return `状態異常の味方がいる場合`;
+        case "enemy_has_status": return `[${statusName(cond.status)}]の敵がいる場合`;
+        case "enemy_has_any_status": return `状態異常の敵がいる場合`;
         case "attr_is": return `${prefix}が[${cond.attr || '炎'}]属性`;
         case "attr_not": return `${prefix}が[${cond.attr || '炎'}]属性以外`;
         default: return "";
@@ -918,6 +923,9 @@
         case "clear_debuffs": return `デバフを全て解除`;
         case "heal_block": return `回復禁止(デバフ)${durText}`;
         case "skill_block": return `スキル使用禁止(デバフ)${durText}`;
+        case "status_apply": return `${statusName(eff.status)}を付与${durText}`;
+        case "status_remove": return `${statusName(eff.status)}を解除`;
+        case "clear_statuses": return `全ての状態異常を解除`;
         default: return "";
       }
     }
@@ -983,7 +991,9 @@
       if (pIconSetting) playerIcon = pIconSetting.value;
 
       if (allCards.length === 0) await seedDefaultCards();
+      await ensureDefaultMagicCards();
       if (allDecks.length === 0) await seedDefaultDeck();
+      await ensureDefaultDeckMagicCards();
       if (allRivals.length === 0 && allDecks.length > 0) await seedDefaultRivals();
 
       refreshAttributeDatalist();
@@ -1050,6 +1060,11 @@
             hasSubEffect: false, subCond: { type: "none" }, subEffect: { type: "none", val: 0 }
           }
         }
+,
+        { id:"card_mag_fireball", cardType:"magic", name:"ファイアボール", image:createDummyCardImage("🔥","#7f1d1d"), stats:{priority:999}, effect:{id:"msk_fireball",type:"active",name:"ファイアボール",cost:20,selfCond:{type:"none"},targetType:"select_enemy_1",targetCond:{type:"none"},mainEffect:{type:"dmg_fixed",val:2000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0}} },
+        { id:"card_mag_mini_thunder", cardType:"magic", name:"ミニサンダー", image:createDummyCardImage("⚡","#312e81"), stats:{priority:999}, effect:{id:"msk_mini_thunder",type:"active",name:"ミニサンダー",cost:20,selfCond:{type:"none"},targetType:"all_enemy",targetCond:{type:"none"},mainEffect:{type:"dmg_fixed",val:1000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0}} },
+        { id:"card_mag_protection", cardType:"magic", name:"プロテクション", image:createDummyCardImage("🛡️","#14532d"), stats:{priority:999}, effect:{id:"msk_protection",type:"active",name:"プロテクション",cost:20,selfCond:{type:"none"},targetType:"all_ally",targetCond:{type:"none"},mainEffect:{type:"damage_cut_ratio",val:20,duration:1,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0}} },
+        { id:"card_mag_healing", cardType:"magic", name:"ヒーリング", image:createDummyCardImage("💚","#166534"), stats:{priority:999}, effect:{id:"msk_healing",type:"active",name:"ヒーリング",cost:0,selfCond:{type:"none"},targetType:"select_ally_1",targetCond:{type:"none"},mainEffect:{type:"heal_max_hp_ratio",val:50,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0}} }
       ];
       for (const c of defaults) {
         if (c.skills) c.skills.forEach(s => s.desc = buildAutoSkillDescriptionFromData(s));
@@ -1065,6 +1080,13 @@
       const deck = { id: "deck_def_1", name: "基本デッキ", unitIds: units.map(u => u.id), magicIds: magics.map(m => m.id) };
       await saveToStore("decks", deck);
       allDecks = await getAllFromStore("decks");
+    }
+    async function ensureDefaultDeckMagicCards() {
+      const deck = allDecks.find(d => d.id === 'deck_def_1');
+      if (!deck) return;
+      const defaults = ['card_mag_fireball','card_mag_mini_thunder','card_mag_protection','card_mag_healing'];
+      const next = [...new Set([...(deck.magicIds||[]), ...defaults.filter(id=>allCards.some(c=>c.id===id))])].slice(0,10);
+      if (JSON.stringify(next) !== JSON.stringify(deck.magicIds||[])) { deck.magicIds=next; await saveToStore('decks',deck); allDecks=await getAllFromStore('decks'); }
     }
 
     async function seedDefaultRivals() {
@@ -1142,6 +1164,22 @@
         }
       }
       if (changed) allCards = await getAllFromStore("cards");
+    }
+
+    async function ensureDefaultMagicCards() {
+      const existing = new Set(allCards.filter(c=>c.cardType==='magic').map(c=>String(c.id)));
+      const defaults = [
+        { id:"card_mag_fireball", cardType:"magic", name:"ファイアボール", image:createDummyCardImage("🔥","#7f1d1d"), stats:{priority:999}, effect:{id:"msk_fireball",type:"active",name:"ファイアボール",cost:20,selfCond:{type:"none"},targetType:"select_enemy_1",targetCond:{type:"none"},mainEffect:{type:"dmg_fixed",val:2000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } },
+        { id:"card_mag_mini_thunder", cardType:"magic", name:"ミニサンダー", image:createDummyCardImage("⚡","#312e81"), stats:{priority:999}, effect:{id:"msk_mini_thunder",type:"active",name:"ミニサンダー",cost:20,selfCond:{type:"none"},targetType:"all_enemy",targetCond:{type:"none"},mainEffect:{type:"dmg_fixed",val:1000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } },
+        { id:"card_mag_protection", cardType:"magic", name:"プロテクション", image:createDummyCardImage("🛡️","#14532d"), stats:{priority:999}, effect:{id:"msk_protection",type:"active",name:"プロテクション",cost:20,selfCond:{type:"none"},targetType:"all_ally",targetCond:{type:"none"},mainEffect:{type:"damage_cut_ratio",val:20,duration:1,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } },
+        { id:"card_mag_healing", cardType:"magic", name:"ヒーリング", image:createDummyCardImage("💚","#166534"), stats:{priority:999}, effect:{id:"msk_healing",type:"active",name:"ヒーリング",cost:0,selfCond:{type:"none"},targetType:"select_ally_1",targetCond:{type:"none"},mainEffect:{type:"heal_max_hp_ratio",val:50,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } }
+      ];
+      for (const c of defaults) {
+        if (existing.has(c.id)) continue;
+        c.desc = buildAutoSkillDescriptionFromData(c.effect);
+        await saveToStore('cards', c);
+      }
+      allCards = await getAllFromStore('cards');
     }
 
     // カードHTMLレンダリング
@@ -1265,6 +1303,10 @@
               <option value="turn_start">ターン開始時</option>
               <option value="turn_end">ターン終了前</option>
               <option value="deploy">登場時</option>
+              <option value="death">死亡時</option>
+              <option value="ally_death">味方死亡時</option>
+              <option value="hp_increase">HP増加時</option>
+              <option value="hp_decrease">HP減少時</option>
             </select>
           </div>
           ` : ''}
@@ -1282,9 +1324,18 @@
                 <option value="enemy_has_attr">敵に◯属性がいる場合</option>
                 <option value="all_ally_attr">味方全員が◯属性</option>
                 <option value="all_enemy_attr">敵全員が◯属性</option>
+                <option value="turn_lte">○ターン目以内</option>
+                <option value="turn_gte">○ターン目以降</option>
+                <option value="self_status">自分が(状態異常)のとき</option>
+                <option value="self_any_status">自分が状態異常のとき</option>
+                <option value="ally_has_status">(状態異常)の味方がいる場合</option>
+                <option value="ally_has_any_status">状態異常の味方がいる場合</option>
+                <option value="enemy_has_status">(状態異常)の敵がいる場合</option>
+                <option value="enemy_has_any_status">状態異常の敵がいる場合</option>
               </select>
-              <input type="number" class="${prefix}-self-cond-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="50" placeholder="数値/％" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+              <input type="number" class="${prefix}-self-cond-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="50" placeholder="数値/％/ターン" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
               <input type="text" list="registered-attributes-list" class="${prefix}-self-cond-attr bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="炎" placeholder="属性" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+              <select class="${prefix}-self-cond-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})"><option value="poison">毒</option><option value="paralysis">麻痺</option><option value="freeze">凍結</option><option value="slow">鈍足</option></select>
             </div>
           </div>
 
@@ -1341,8 +1392,12 @@
                 <option value="clear_debuffs">デバフを全て解除</option>
                 <option value="heal_block">回復禁止(デバフ)</option>
                 <option value="skill_block">スキル使用禁止(デバフ)</option>
+                <option value="status_apply">(状態異常)を付与</option>
+                <option value="status_remove">(状態異常)を解除</option>
+                <option value="clear_statuses">全ての状態異常を解除</option>
               </select>
               <input type="number" class="${prefix}-main-eff-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="100" placeholder="効果量" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+              <select class="${prefix}-main-eff-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
             </div>
             <div class="grid grid-cols-2 gap-1">
               <input type="number" class="${prefix}-main-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
@@ -1378,19 +1433,28 @@
                 <div>
                   <span class="text-[8px] text-slate-400">追加効果の種別:</span>
                   <select class="${prefix}-sub-eff-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-                    <option value="heal_fixed">○回復</option>
-                    <option value="heal_max_hp_ratio">最大HPの○％回復</option>
+                    <option value="dmg_atk_ratio">基礎攻撃力×○％ダメージ</option>
                     <option value="dmg_fixed">○の固定ダメージ</option>
+                    <option value="heal_max_hp_ratio">最大HPの○％回復</option>
+                    <option value="heal_fixed">○回復</option>
+                    <option value="mod_atk_ratio">攻撃力を○％増加/減少</option>
+                    <option value="mod_atk_val">攻撃力を○増加/減少</option>
+                    <option value="damage_cut_ratio">受けるダメージを○％カット</option>
                     <option value="mod_speed">行動値を○増加/減少</option>
                     <option value="mod_ap">APを○増加/減少</option>
-                    <option value="mod_atk_ratio">攻撃力を○％増加/減少</option>
+                    <option value="clear_buffs">バフを全て解除</option>
+                    <option value="clear_debuffs">デバフを全て解除</option>
                     <option value="heal_block">回復禁止</option>
                     <option value="skill_block">スキル使用禁止</option>
+                    <option value="status_apply">状態異常を付与</option>
+                    <option value="status_remove">状態異常を解除</option>
+                    <option value="clear_statuses">全ての状態異常を解除</option>
                   </select>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-1">
                 <input type="number" class="${prefix}-sub-eff-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="500" placeholder="効果量" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+                <select class="${prefix}-sub-eff-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
                 <input type="number" class="${prefix}-sub-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
               </div>
             </div>
@@ -1429,7 +1493,8 @@
       const selfCond = {
         type: getVal(`${prefix}-self-cond-type`) || "none",
         val: parseInt(getVal(`${prefix}-self-cond-val`)) || 0,
-        attr: getVal(`${prefix}-self-cond-attr`) || "炎"
+        attr: getVal(`${prefix}-self-cond-attr`) || "炎",
+        status: getVal(`${prefix}-self-cond-status`) || "poison"
       };
 
       const targetType = getVal(`${prefix}-target-type`) || (isMagic ? "select_enemy_1" : "self");
@@ -1443,7 +1508,8 @@
         type: getVal(`${prefix}-main-eff-type`) || "dmg_atk_ratio",
         val: parseInt(getVal(`${prefix}-main-eff-val`)) || 100,
         duration: parseInt(getVal(`${prefix}-main-eff-dur`)) || 0,
-        stackable: getVal(`${prefix}-main-eff-stack`) === "true"
+        stackable: getVal(`${prefix}-main-eff-stack`) === "true",
+        status: getVal(`${prefix}-main-eff-status`) || "poison"
       };
 
       const hasSubEffect = !!isChecked(`${prefix}-has-sub`);
@@ -1451,7 +1517,9 @@
         targetType: getVal(`${prefix}-sub-target-type`) || "self",
         type: getVal(`${prefix}-sub-eff-type`) || "heal_fixed",
         val: parseInt(getVal(`${prefix}-sub-eff-val`)) || 0,
-        duration: parseInt(getVal(`${prefix}-sub-eff-dur`)) || 0
+        duration: parseInt(getVal(`${prefix}-sub-eff-dur`)) || 0,
+        stackable: true,
+        status: getVal(`${prefix}-sub-eff-status`) || "poison"
       };
 
       const rawSkill = {
@@ -1744,10 +1812,10 @@
     function setEditorChecked(prefix, cls, value) { const el=document.querySelector(`.${prefix}-${cls}`); if(el) el.checked=!!value; }
     function populateSkillEditor(prefix, skill, type, isMagic=false) {
       setEditorField(prefix,'name',skill.name); setEditorField(prefix,'cost',skill.cost||0); setEditorField(prefix,'timing',skill.timing||'turn_start');
-      setEditorField(prefix,'self-cond-type',skill.selfCond?.type||'none'); setEditorField(prefix,'self-cond-val',skill.selfCond?.val||0); setEditorField(prefix,'self-cond-attr',skill.selfCond?.attr||'炎');
+      setEditorField(prefix,'self-cond-type',skill.selfCond?.type||'none'); setEditorField(prefix,'self-cond-val',skill.selfCond?.val||0); setEditorField(prefix,'self-cond-attr',skill.selfCond?.attr||'炎'); setEditorField(prefix,'self-cond-status',skill.selfCond?.status||'poison');
       setEditorField(prefix,'target-type',skill.targetType||'self'); setEditorField(prefix,'target-cond-type',skill.targetCond?.type||'none'); setEditorField(prefix,'target-cond-val',skill.targetCond?.val||0); setEditorField(prefix,'target-cond-attr',skill.targetCond?.attr||'炎');
-      setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',skill.mainEffect?.duration||0); setEditorField(prefix,'main-eff-stack',String(skill.mainEffect?.stackable!==false));
-      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'self'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); setEditorField(prefix,'sub-eff-dur',skill.subEffect?.duration||0);
+      setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',skill.mainEffect?.duration||0); setEditorField(prefix,'main-eff-stack',String(skill.mainEffect?.stackable!==false)); setEditorField(prefix,'main-eff-status',skill.mainEffect?.status||'poison');
+      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'self'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); setEditorField(prefix,'sub-eff-dur',skill.subEffect?.duration||0); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
       updateSkillFormDisplay(prefix,type,isMagic);
     }
     function openCardEditor(cardId) {
@@ -1789,9 +1857,9 @@
       document.getElementById("detail-hp").innerText = `${unit.currentHp} / ${unit.maxHp}`;
       document.getElementById("detail-atk").innerText = getEffectiveAtk(unit);
       document.getElementById("detail-prio").innerText = getEffectiveSpeed(unit);
-      const statusLine = (arr, title, cls) => arr.length ? `<div class="mb-3"><div class="font-black ${cls} mb-1">${title}</div><div class="space-y-1">${arr.map(x=>`<div class="bg-slate-900 border border-slate-800 rounded px-2 py-1.5"><b>${x.type}</b>：${x.val !== undefined ? (x.val>=0?'+':'')+x.val : ''}${x.duration ? ` ／ 残り${x.duration}ターン` : ''}</div>`).join('')}</div></div>` : `<div class="text-slate-500">${title}なし</div>`;
+      const statusLine = (arr, title, cls) => arr.length ? `<div class="mb-3"><div class="font-black ${cls} mb-1">${title}</div><div class="space-y-1">${arr.map(x=>`<div class="bg-slate-900 border border-slate-800 rounded px-2 py-1.5"><b>${x.type==='status'?statusName(x.status):x.type}</b>：${x.type==='status' ? '' : (x.val !== undefined ? (x.val>=0?'+':'')+x.val : '')}${x.duration ? ` ／ 残り${x.duration}ターン` : ''}</div>`).join('')}</div></div>` : `<div class="text-slate-500">${title}なし</div>`;
       const buffs = unit.buffs || [], debuffs = unit.debuffs || [];
-      const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(base.skills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
+      const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}${statusLine((unit.statuses||[]).map(x=>({...x,val:statusName(x.type)})),'🟣 状態異常','text-purple-300')}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(base.skills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
       document.getElementById("detail-card-body").innerHTML = html;
       document.getElementById("btn-edit-card").classList.add('hidden');
       document.getElementById("btn-delete-card").classList.add('hidden');
@@ -1799,6 +1867,23 @@
     }
 
     function closeCardDetailModal() { document.getElementById("card-detail-modal").classList.add("hidden"); }
+
+    // 詳細モーダルは外側タップでも閉じる。全メニュー共通。
+    document.getElementById('card-detail-modal')?.addEventListener('pointerdown', e => { if (e.target.id === 'card-detail-modal') closeCardDetailModal(); });
+    let lastCardTap = { id:null, time:0 };
+    document.addEventListener('dblclick', e => {
+      const el = e.target.closest?.('[data-card-id]');
+      if (!el) return;
+      const id = el.getAttribute('data-card-id');
+      if (id) { e.preventDefault(); e.stopPropagation(); openCardDetail(id); }
+    }, true);
+    document.addEventListener('touchend', e => {
+      const el = e.target.closest?.('[data-card-id]'); if (!el) return;
+      const id = el.getAttribute('data-card-id'); const now = Date.now();
+      if (lastCardTap.id === id && now-lastCardTap.time < 360) {
+        e.preventDefault(); e.stopPropagation(); openCardDetail(id); suppressCardClickUntil = now + 450; lastCardTap={id:null,time:0};
+      } else lastCardTap={id,time:now};
+    }, {capture:true,passive:false});
 
     // デッキ管理
     function renderDeckManager() {
@@ -2138,6 +2223,7 @@
         atk: template.stats.atk,
         priority: template.stats.priority,
         skills: JSON.parse(JSON.stringify(template.skills || [])),
+        buffs: [], debuffs: [], statuses: [],
         side: side,
         isActive: active,
         buffs: [],
@@ -2170,6 +2256,7 @@
       battleState.playerAp = Math.min(100, battleState.playerAp + 20);
       battleState.enemyAp = Math.min(100, battleState.enemyAp + 20);
       battleState.reservedMagic = null;
+      battleState.reservedMagicTargetInstanceId = null;
       battleState.reservedEnemyMagic = null;
 
       // 前ターンの予約行動を完全に破棄し、毎ターン必ず通常攻撃から開始する。
@@ -2520,9 +2607,17 @@
         wrap.onclick = () => {
           if (isUsed) return;
           battleState.reservedMagic = isReserved ? null : m;
+          battleState.reservedMagicTargetInstanceId = isReserved ? null : null;
           renderBattleState();
         };
         grid.appendChild(wrap);
+        if(isReserved && ['select_enemy_1','select_ally_1'].includes(m.effect?.targetType)){
+          const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-purple-500/40 bg-purple-950/20 text-[9px]';
+          const actor={side:'player',currentHp:1,maxHp:1}; const pool=(getTargetPool(m.effect.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,m.effect.targetCond));
+          box.innerHTML='<div class="font-black text-purple-300 mb-1">🎯 マジック対象</div>';
+          pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicTargetInstanceId=t.instanceId;renderBattleState();};box.appendChild(b);});
+          wrap.appendChild(box);
+        }
       });
     }
 
@@ -2691,6 +2786,11 @@
     }
 
     async function confirmPlayerActions() {
+      // 二重クリックで同じターンを2重実行しない。
+      if (battleExecutionRunning || battleState.phase !== "decision") return;
+      battleExecutionRunning = true;
+      let turnAdvanceHandled = false;
+
       battleState.phase = "execution";
       document.getElementById("decision-command-panel")?.classList.add("hidden");
       renderBattleState();
@@ -2705,39 +2805,93 @@
 
       let magicPending = !!magic;
       let enemyMagicPending = !!enemyMagic;
-      while ((pendingUnits.size > 0 || magicPending || enemyMagicPending) && !checkBattleEnd()) {
-        const candidates = [];
-        pendingUnits.forEach(u => {
-          if (u.currentHp > 0 && u.isActive) candidates.push({ type:'unit', unit:u, speed:getEffectiveSpeed(u) });
-          else pendingUnits.delete(u);
-        });
-        if (magicPending && magic) candidates.push({ type:'magic', card:magic, side:'player', speed:magic.stats?.priority ?? 999 });
-        if (enemyMagicPending && enemyMagic) candidates.push({ type:'magic', card:enemyMagic, side:'enemy', speed:enemyMagic.stats?.priority ?? 999 });
-        if (!candidates.length) break;
 
-        candidates.forEach(x => x.tieRandom = Math.random());
-        candidates.sort((a,b) => (b.speed-a.speed) || (a.tieRandom-b.tieRandom));
-        const item = candidates[0];
-        if (item.type === 'magic') {
-          if (item.side === 'player') magicPending = false;
-          else enemyMagicPending = false;
-          await executeMagicCard(item.card, item.side);
-        } else {
-          pendingUnits.delete(item.unit);
-          if (item.unit.currentHp > 0 && item.unit.isActive) await executeUnitAction(item.unit);
+      try {
+        while ((pendingUnits.size > 0 || magicPending || enemyMagicPending) && !checkBattleEnd()) {
+          const candidates = [];
+          pendingUnits.forEach(u => {
+            if (u.currentHp > 0 && u.isActive) candidates.push({ type:'unit', unit:u, speed:getEffectiveSpeed(u) });
+            else pendingUnits.delete(u);
+          });
+          if (magicPending && magic) candidates.push({ type:'magic', card:magic, side:'player', speed:magic.stats?.priority ?? 999 });
+          if (enemyMagicPending && enemyMagic) candidates.push({ type:'magic', card:enemyMagic, side:'enemy', speed:enemyMagic.stats?.priority ?? 999 });
+          if (!candidates.length) break;
+
+          candidates.forEach(x => x.tieRandom = Math.random());
+          candidates.sort((a,b) => (b.speed-a.speed) || (a.tieRandom-b.tieRandom));
+          const item = candidates[0];
+          try {
+            if (item.type === 'magic') {
+              if (item.side === 'player') magicPending = false;
+              else enemyMagicPending = false;
+              await executeMagicCard(item.card, item.side);
+            } else {
+              pendingUnits.delete(item.unit);
+              if (item.unit.currentHp > 0 && item.unit.isActive) await executeUnitAction(item.unit);
+            }
+          } catch (actionError) {
+            console.error('Battle action error:', actionError);
+            logBattle(`⚠️ 行動演出中にエラーが発生しましたが、戦闘を続行します。`);
+          }
+
+          renderBattleState();
+          await sleep(650);
         }
 
-        renderBattleState();
-        await sleep(650);
-      }
+        // マジック（最遅）の処理後、毒→ターン終了パッシブの順。
+        try { await processEndTurnAbnormalitiesOffline(); }
+        catch (e) { console.error('abnormality end error:', e); }
+        try { runPassiveSkills('turn_end'); }
+        catch (e) { console.error('turn_end passive error:', e); logBattle('⚠️ ターン終了処理の一部にエラーがありました。'); }
+        try { processBuffDurations('turn_end'); }
+        catch (e) { console.error('buff duration error:', e); }
+        try { replaceDeadUnitsAtTurnEnd(); }
+        catch (e) { console.error('reserve replacement error:', e); }
+        try { await actionPopupQueue; } catch (_) {}
 
-      runPassiveSkills('turn_end');
-      processBuffDurations('turn_end');
-      replaceDeadUnitsAtTurnEnd();
-      if (!checkBattleEnd()) {
-        battleState.turn++;
-        document.getElementById("decision-command-panel")?.classList.remove("hidden");
-        await startTurnPhase();
+        if (!checkBattleEnd(true)) {
+          battleState.turn++;
+          turnAdvanceHandled = true;
+          try {
+            await startTurnPhase();
+          } catch (turnError) {
+            console.error('Next turn start error:', turnError);
+            logBattle('⚠️ 次ターン開始処理にエラーがあったため、行動選択を復旧しました。');
+            battleState.phase = 'decision';
+            document.getElementById("decision-command-panel")?.classList.remove("hidden");
+            renderBattleState();
+          }
+        }
+      } catch (executionError) {
+        console.error('Battle execution error:', executionError);
+        logBattle('⚠️ 戦闘処理でエラーが発生しました。行動選択を復旧します。');
+
+        if (!checkBattleEnd()) {
+          battleState.turn++;
+          turnAdvanceHandled = true;
+          try {
+            await startTurnPhase();
+          } catch (turnError) {
+            console.error('Recovery turn start error:', turnError);
+            battleState.phase = 'decision';
+            document.getElementById("decision-command-panel")?.classList.remove("hidden");
+            renderBattleState();
+          }
+        }
+      } finally {
+        // どの経路で例外が起きても、実行フェーズで止まりっぱなしにしない。
+        if (!checkBattleEnd() && !turnAdvanceHandled && battleState.phase !== 'decision') {
+          battleState.turn++;
+          try {
+            await startTurnPhase();
+          } catch (recoveryError) {
+            console.error('Final battle recovery error:', recoveryError);
+            battleState.phase = 'decision';
+            document.getElementById("decision-command-panel")?.classList.remove("hidden");
+            renderBattleState();
+          }
+        }
+        battleExecutionRunning = false;
       }
     }
 
@@ -2754,7 +2908,7 @@
         const cost = Number(eff.cost || 0);
         if ((isPlayerActor ? battleState.playerAp : battleState.enemyAp) < cost) return;
         if (isPlayerActor) battleState.playerAp = Math.max(0, battleState.playerAp - cost); else battleState.enemyAp = Math.max(0, battleState.enemyAp - cost);
-        const mainTargets = resolveTargets(eff.targetType, eff.targetCond, actor, isPlayerActor, null, true);
+        const mainTargets = resolveTargets(eff.targetType, eff.targetCond, actor, isPlayerActor, battleState.reservedMagicTargetInstanceId || null, true);
         mainTargets.forEach(t => {
           targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
           if (t && !t.__playerTarget) targetEntities.push(t);
@@ -2762,7 +2916,7 @@
           if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
         });
         if (eff.hasSubEffect && eff.subEffect) {
-          const subTargets = resolveTargets(eff.subEffect.targetType || eff.targetType, eff.subEffect.targetCond || eff.targetCond, actor, isPlayerActor, eff.subEffect.targetInstanceId || null, true);
+          const subTargets = resolveTargets(eff.subEffect.targetType || eff.targetType, eff.subEffect.targetCond || eff.targetCond, actor, isPlayerActor, battleState.reservedMagicTargetInstanceId || eff.subEffect.targetInstanceId || null, true);
           subTargets.forEach(t => {
             targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
             const r = applyEffect(eff.subEffect, t, isPlayerActor, true, actor);
@@ -2785,6 +2939,14 @@
     async function executeUnitAction(unit) {
       const isPlayer = unit.side === 'player';
       const act = unit.reservedAction;
+      const frozen=(unit.statuses||[]).some(x=>x.type==='freeze'&&x.duration>0);
+      const paralyzed=(unit.statuses||[]).some(x=>x.type==='paralysis'&&x.duration>0);
+      if(frozen || (paralyzed && Math.random()<0.5)){
+        const st=frozen?'凍結':'麻痺';
+        logBattle(`🚫 ${unit.name} は${st}で行動失敗！`);
+        await showActionPopup(unit,act.type==='skill'?(unit.skills[act.skillIndex]?.name||'スキル'):'通常攻撃',{cardType:'unit',name:unit.name,image:getCardImage(unit)||unit.image,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit)},{target:'自分',effect:`${st}で行動失敗`,result:`${st}で行動失敗`,description:`${st}：行動に失敗します。`});
+        return;
+      }
       if (act.type === 'attack') {
         const enemies = isPlayer ? getActiveUnits('enemy') : getActiveUnits('player');
         if (enemies.length === 0) return;
@@ -2918,13 +3080,17 @@
         }
         const baseAtk = actor ? getEffectiveAtk(actor) : 1000;
         const dmg = Math.round(baseAtk * (eff.val / 100));
-        dealDamage(target, dmg);
-        logBattle(`💥 ${target.name} に ${dmg} のダメージ！`);
+        const beforeHp=target.currentHp; dealDamage(target, dmg);
+        if(target.currentHp<beforeHp) triggerPassiveEvent('hp_decrease',target);
+        if(target.currentHp<=0&&beforeHp>0){ triggerPassiveEvent('death',target); [...getActiveUnits(target.side==='player'?'player':'enemy')].filter(u=>u!==target).forEach(u=>triggerPassiveEvent('ally_death',u)); }
+        logBattle(`💥 ${target.name} に ${beforeHp-target.currentHp} のダメージ！`);
         return {effect:`基礎攻撃力×${eff.val}%ダメージ`, result:`${target.name} に ${dmg} ダメージ`};
       }
 
       if (eff.type === "dmg_fixed") {
         const beforeHp = target.currentHp; dealDamage(target, eff.val); const actual = beforeHp - target.currentHp;
+        if(actual>0) triggerPassiveEvent('hp_decrease',target);
+        if(target.currentHp<=0&&beforeHp>0){ triggerPassiveEvent('death',target); [...getActiveUnits(target.side==='player'?'player':'enemy')].filter(u=>u!==target).forEach(u=>triggerPassiveEvent('ally_death',u)); }
         logBattle(`💥 ${target.name} に ${actual} の固定ダメージ！`);
         return {effect:`${eff.val}の固定ダメージ`, result:`${target.name} に ${actual} ダメージ${target.currentHp<=0?'／撃破！':''}`};
       }
@@ -2941,7 +3107,7 @@
         const beforeHp = target.currentHp;
 
         target.currentHp = Math.min(target.maxHp, target.currentHp + healVal);
-        const actualHeal = target.currentHp - beforeHp; logBattle(`💚 ${target.name} のHPが ${actualHeal} 回復した！`);
+        const actualHeal = target.currentHp - beforeHp; if(actualHeal>0) triggerPassiveEvent('hp_increase',target); logBattle(`💚 ${target.name} のHPが ${actualHeal} 回復した！`);
         return {effect:`${healVal}回復`, result:`${target.name} のHP +${actualHeal}`};
       }
 
@@ -2983,6 +3149,17 @@
         logBattle(`✨ ${target.name} のデバフを解除した！`);
         return {effect:'デバフを全解除', result:`${target.name} のデバフ解除`};
       }
+
+      if (eff.type === "status_apply") {
+        target.statuses = target.statuses || [];
+        const status=eff.status||'poison';
+        if(target.statuses.some(x=>x.type===status&&x.duration>0)){ logBattle(`⚠️ ${target.name} は${statusName(status)}中のため重ねがけできません。`); return {effect:`${statusName(status)}を付与`,result:`${statusName(status)}は既に継続中`}; }
+        target.statuses.push({type:status,duration:duration,appliedTurn:battleState.turn});
+        logBattle(`🌀 ${target.name} に${statusName(status)}を${duration}ターン付与！`);
+        return {effect:`${statusName(status)}を付与`,result:`${target.name} に${duration}ターン適用`};
+      }
+      if (eff.type === "status_remove") { target.statuses=(target.statuses||[]).filter(x=>x.type!==(eff.status||'poison')); return {effect:`${statusName(eff.status||'poison')}を解除`,result:`${target.name} の状態異常解除`}; }
+      if (eff.type === "clear_statuses") { target.statuses=[]; return {effect:'全ての状態異常を解除',result:`${target.name} の状態異常解除`}; }
 
       if (eff.type === "heal_block") {
         target.debuffs = target.debuffs || [];
@@ -3032,6 +3209,14 @@
         const alive = enemies.filter(u => u.currentHp > 0);
         return alive.length > 0 && alive.every(u => u.mainAttr === cond.attr || u.subAttrs.includes(cond.attr));
       }
+      if (cond.type === "turn_lte") return battleState.turn <= Number(cond.val);
+      if (cond.type === "turn_gte") return battleState.turn >= Number(cond.val);
+      if (cond.type === "self_status") return (actor.statuses||[]).some(x=>x.type===cond.status&&x.duration>0);
+      if (cond.type === "self_any_status") return (actor.statuses||[]).some(x=>x.duration>0);
+      if (cond.type === "ally_has_status") return allies.some(u=>u!==actor&&(u.statuses||[]).some(x=>x.type===cond.status&&x.duration>0));
+      if (cond.type === "ally_has_any_status") return allies.some(u=>u!==actor&&(u.statuses||[]).some(x=>x.duration>0));
+      if (cond.type === "enemy_has_status") return enemies.some(u=>(u.statuses||[]).some(x=>x.type===cond.status&&x.duration>0));
+      if (cond.type === "enemy_has_any_status") return enemies.some(u=>(u.statuses||[]).some(x=>x.duration>0));
       return true;
     }
 
@@ -3045,33 +3230,55 @@
         if (b.type === 'atk_ratio') atk += Math.round(unit.atk * (b.val / 100));
         if (b.type === 'atk_val') atk += b.val;
       });
-      return Math.max(100, atk);
+      return atk;
     }
 
     function getEffectiveSpeed(unit) {
       let spd = unit.priority;
       (unit.buffs || []).forEach(b => { if (b.type === 'speed') spd += b.val; });
       (unit.debuffs || []).forEach(b => { if (b.type === 'speed') spd += b.val; });
-      return spd;
+      // 状態異常の鈍足は buffs/debuffs ではなく statuses に格納される。
+      // オンライン（サーバー側）と同じく、継続中の鈍足だけ行動値を半減する。
+      const slow = (unit.statuses || []).some(s => s.type === 'slow' && Number(s.duration) > 0);
+      return slow ? Math.floor(spd / 2) : spd;
     }
 
+    let passiveTriggerDepth = 0;
     function runPassiveSkills(timing, onlyUnit=null) {
       const units=onlyUnit?[onlyUnit]:[...getActiveUnits('player'),...getActiveUnits('enemy')];
       units.forEach(u=>{
-        if(u.currentHp<=0 || !u.isActive)return;
+        if((u.currentHp<=0 && timing!=='death') || !u.isActive)return;
         (u.skills||[]).forEach(sk=>{
           if(sk.type==='passive' && sk.timing===timing && evalCond(sk.selfCond,u,u.side==='player')){
-            logBattle(`🌀 ${u.name} のパッシブ【${sk.name}】発動！`); const isPlayer=u.side==='player';
+            logBattle(`🌀 ${u.name} のパッシブ【${sk.name}】発動！`);
+            const isPlayer=u.side==='player';
             const previousTiming = battleState._statusApplicationTiming;
             battleState._statusApplicationTiming = timing;
+            const effectLines=[]; let firstTarget=null;
             try {
-              resolveTargets(sk.targetType,sk.targetCond,u,isPlayer).forEach(t=>applyEffect(sk.mainEffect,t,isPlayer,false,u));
-              if(sk.hasSubEffect&&sk.subEffect) resolveTargets(sk.subEffect.targetType||sk.targetType,sk.subEffect.targetCond||sk.targetCond,u,isPlayer).forEach(t=>applyEffect(sk.subEffect,t,isPlayer,false,u));
-            } finally {
-              battleState._statusApplicationTiming = previousTiming;
-            }
+              resolveTargets(sk.targetType,sk.targetCond,u,isPlayer,sk.targetInstanceId).forEach(t=>{ if(!firstTarget&&!t.__playerTarget)firstTarget=t; const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
+              if(sk.hasSubEffect&&sk.subEffect) resolveTargets(sk.subEffect.targetType||sk.targetType,sk.subEffect.targetCond||sk.targetCond,u,isPlayer).forEach(t=>{ const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
+            } finally { battleState._statusApplicationTiming = previousTiming; }
+            showActionPopup(u, sk.name, {cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)}, {target:firstTarget?.name||'対象なし',effect:effectLines.join('\n')||'効果なし',result:effectLines.join('\n')||'発動',targetEntity:firstTarget||null,description:sk.desc||sk.description||buildAutoSkillDescriptionFromData(sk),actorHpBefore:{current:u.currentHp,max:u.maxHp},actorHpAfter:{current:u.currentHp,max:u.maxHp}});
           }
         });
+      });
+    }
+    function triggerPassiveEvent(timing, subject) {
+      if(!subject || passiveTriggerDepth>=10) return;
+      passiveTriggerDepth++; try { runPassiveSkills(timing,subject); } finally { passiveTriggerDepth--; }
+    }
+
+    async function processEndTurnAbnormalitiesOffline() {
+      [...battleState.playerUnits,...battleState.enemyUnits].forEach(u=>{
+        if(u.currentHp<=0||!u.isActive)return;
+        if((u.statuses||[]).some(x=>x.type==='poison'&&x.duration>0)){
+          const before=u.currentHp; dealDamage(u,Math.round(u.maxHp*0.10)); const dmg=before-u.currentHp;
+          logBattle(`☠️ ${u.name} は毒で ${dmg} ダメージ！`);
+          showActionPopup(u,'毒',{cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)},{target:u.name,effect:'最大HPの10%ダメージ',result:`${dmg} ダメージ${u.currentHp<=0?'／撃破！':''}`,targetEntity:u,targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp},description:'毒：ターン終了間際に最大HPの10%のダメージ。'});
+          if(dmg>0) triggerPassiveEvent('hp_decrease',u);
+          if(u.currentHp<=0&&before>0){triggerPassiveEvent('death',u);[...getActiveUnits(u.side==='player'?'player':'enemy')].filter(x=>x!==u).forEach(x=>triggerPassiveEvent('ally_death',x));}
+        }
       });
     }
 
@@ -3087,103 +3294,137 @@
           .filter(b => b.duration > 0);
         u.buffs = tick(u.buffs);
         u.debuffs = tick(u.debuffs);
+        u.statuses = tick(u.statuses);
       });
     }
 
-    function checkBattleEnd() {
-      const playerAlive=battleState.playerUnits.some(u=>u.currentHp>0), enemyAlive=battleState.enemyUnits.some(u=>u.currentHp>0);
-      if(!playerAlive||!enemyAlive){
-        if(playerAlive&&!enemyAlive){logBattle('🎉 VICTORIA! あなたの勝利です！');alert('🎉 勝利しました！');}
-        else if(!playerAlive&&enemyAlive){logBattle('💀 DEFEAT... 敗北しました。');alert('💀 敗北しました...');}
+    function checkBattleEnd(includeTurnLimit=false) {
+      const playerAliveCount=battleState.playerUnits.filter(u=>u.currentHp>0).length;
+      const enemyAliveCount=battleState.enemyUnits.filter(u=>u.currentHp>0).length;
+      const playerAlive=playerAliveCount>0, enemyAlive=enemyAliveCount>0;
+      let winner=null;
+      if(!playerAlive||!enemyAlive) winner=playerAlive&&!enemyAlive?'player':(!playerAlive&&enemyAlive?'enemy':'draw');
+      else if(includeTurnLimit && battleState.turn>=20 && battleState.phase==='execution') winner=playerAliveCount>enemyAliveCount?'player':(enemyAliveCount>playerAliveCount?'enemy':'draw');
+      if(winner){
+        if(winner==='player'){logBattle('🎉 VICTORIA! あなたの勝利です！');alert('🎉 勝利しました！');}
+        else if(winner==='enemy'){logBattle('💀 DEFEAT... 敗北しました。');alert('💀 敗北しました...');}
         else {logBattle('🤝 DRAW... 引き分けです。');alert('🤝 引き分けです。');}
         return true;
       } return false;
     }
 
-    async function showActionPopup(actor, actionName, cardData, info = {}) {
+    async function showActionPopupNow(actor, actionName, cardData, info = {}) {
       const modal = document.getElementById("action-popup-modal");
-      const actorIsPlayer = actor?.side === 'player' || !actor?.side;
-      const target = info.targetEntity || null;
-      const targetIsPlayer = target?.side === 'player' || target?.__playerTarget === 'self';
+      if (!modal) return;
 
-      const actorPanel = document.getElementById("popup-actor-panel");
-      const actorSide = document.getElementById("popup-actor-side");
-      const targetPanel = document.getElementById("popup-target-panel");
-      const targetSide = document.getElementById("popup-target-side");
-      actorPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${actorIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
-      actorSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${actorIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
-      actorSide.innerText = actorIsPlayer ? '味方' : '敵';
-      targetPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${targetIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
-      targetSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${targetIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
-      targetSide.innerText = target ? (targetIsPlayer ? '味方' : '敵') : '対象';
-
-      document.getElementById("popup-actor-name").innerText = actor?.name || "プレイヤー";
-      const popupActorImg = document.getElementById("popup-actor-img");
-      const actorDead = (info.actorHpAfter?.current ?? actor?.currentHp ?? 1) <= 0;
-      popupActorImg.classList.toggle('popup-dead-image', actorDead);
-      popupActorImg.onerror = () => { popupActorImg.onerror = null; popupActorImg.src = createDummyCardImage("👤", actorIsPlayer ? "#075985" : "#9f1239"); };
-      popupActorImg.src = actor?.image || actor?.iconImage || createDummyCardImage(actorIsPlayer ? "👤" : "👹", actorIsPlayer ? "#075985" : "#9f1239");
-
-      document.getElementById("popup-action-name").innerText = actionName;
-      const descriptionEl = document.getElementById("popup-action-description");
-      if (info.description) {
-        descriptionEl.innerText = info.description;
-        descriptionEl.classList.remove('hidden');
-      } else {
-        descriptionEl.innerText = '';
-        descriptionEl.classList.add('hidden');
-      }
-      document.getElementById("popup-target").innerText = info.target || (target?.name || '対象なし');
-      document.getElementById("popup-effect").innerText = info.effect || '効果なし';
-      document.getElementById("popup-result").innerText = info.result || '変化なし';
-
-      const setHp = (prefix, before, after, fallbackEntity) => {
-        const wrap = document.getElementById(`popup-${prefix}-hp-wrap`);
-        const text = document.getElementById(`popup-${prefix}-hp-text`);
-        const fill = document.getElementById(`popup-${prefix}-hp-fill`);
-        const snapBefore = before || (fallbackEntity && Number.isFinite(fallbackEntity.currentHp) ? { current: fallbackEntity.currentHp, max: fallbackEntity.maxHp } : null);
-        const snapAfter = after || (fallbackEntity && Number.isFinite(fallbackEntity.currentHp) ? { current: fallbackEntity.currentHp, max: fallbackEntity.maxHp } : null);
-        if (!snapAfter || !Number.isFinite(Number(snapAfter.max))) {
-          wrap.classList.add('hidden');
-          return;
-        }
-        wrap.classList.remove('hidden');
-        const max = Math.max(1, Number(snapAfter.max));
-        const current = Math.max(0, Math.min(max, Number(snapAfter.current)));
-        const beforeText = snapBefore ? `${Math.max(0, Number(snapBefore.current))}/${Math.max(1, Number(snapBefore.max))}` : '';
-        text.innerText = `${beforeText ? beforeText + ' → ' : ''}${current}/${max}`;
-        fill.style.width = `${Math.max(0, Math.min(100, current / max * 100))}%`;
-        fill.classList.toggle('hp-dead', current <= 0);
-        fill.classList.toggle('hp-alive', current > 0);
-      };
-      setHp('actor', info.actorHpBefore, info.actorHpAfter, actor);
-
-      const targetImg = document.getElementById("popup-target-img");
-      const targetPlaceholder = document.getElementById("popup-target-placeholder");
-      if (target) {
-        targetPlaceholder.classList.add('hidden');
-        targetPlaceholder.classList.remove('flex');
-        targetImg.classList.remove('hidden');
-        const targetDead = (info.targetHpAfter?.current ?? target.currentHp ?? 1) <= 0;
-        targetImg.classList.toggle('popup-dead-image', targetDead);
-        targetImg.onerror = () => { targetImg.onerror = null; targetImg.classList.add('hidden'); targetPlaceholder.classList.remove('hidden'); targetPlaceholder.classList.add('flex'); };
-        targetImg.src = target.image || target.iconImage || getCardImage(target) || createDummyCardImage(targetIsPlayer ? "👤" : "👹", targetIsPlayer ? "#075985" : "#9f1239");
-        document.getElementById("popup-target-name").innerText = target.name || (targetIsPlayer ? 'プレイヤー' : '対象');
-        setHp('target', info.targetHpBefore, info.targetHpAfter, target);
-      } else {
-        targetImg.classList.add('hidden');
-        targetPlaceholder.classList.remove('hidden');
-        targetPlaceholder.classList.add('flex');
-        document.getElementById("popup-target-name").innerText = info.target || '対象なし';
-        document.getElementById('popup-target-hp-wrap').classList.add('hidden');
-      }
-
-      const cardContainer = document.getElementById("popup-card-container");
-      if (cardContainer) cardContainer.innerHTML = '';
-
+      // 先に最低限の表示を出してから詳細UIを埋める。
+      // 詳細UIの一部で例外が出ても、ポップアップ自体が消えたり
+      // confirmPlayerActions() がrejectしてターン進行が止まったりしないようにする。
       modal.classList.remove("hidden");
-      await sleep(3000);
-      modal.classList.add("hidden");
+      const actionTitle = document.getElementById("popup-action-name");
+      if (actionTitle) actionTitle.innerText = actionName || "行動";
+
+      try {
+              const actorIsPlayer = actor?.side === 'player' || !actor?.side;
+              const target = info.targetEntity || null;
+              const targetIsPlayer = target?.side === 'player' || target?.__playerTarget === 'self';
+
+              const actorPanel = document.getElementById("popup-actor-panel");
+              const actorSide = document.getElementById("popup-actor-side");
+              const targetPanel = document.getElementById("popup-target-panel");
+              const targetSide = document.getElementById("popup-target-side");
+              actorPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${actorIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
+              actorSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${actorIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
+              actorSide.innerText = actorIsPlayer ? '味方' : '敵';
+              targetPanel.className = `rounded-2xl border-4 p-3 sm:p-5 min-w-0 ${targetIsPlayer ? 'border-cyan-500 bg-cyan-950/30' : 'border-rose-500 bg-rose-950/30'}`;
+              targetSide.className = `inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${targetIsPlayer ? 'bg-cyan-600' : 'bg-rose-600'}`;
+              targetSide.innerText = target ? (targetIsPlayer ? '味方' : '敵') : '対象';
+
+              document.getElementById("popup-actor-name").innerText = actor?.name || "プレイヤー";
+              const popupActorImg = document.getElementById("popup-actor-img");
+              const actorDead = (info.actorHpAfter?.current ?? actor?.currentHp ?? 1) <= 0;
+              popupActorImg.classList.toggle('popup-dead-image', actorDead);
+              popupActorImg.onerror = () => { popupActorImg.onerror = null; popupActorImg.src = createDummyCardImage("👤", actorIsPlayer ? "#075985" : "#9f1239"); };
+              popupActorImg.src = actor?.image || actor?.iconImage || createDummyCardImage(actorIsPlayer ? "👤" : "👹", actorIsPlayer ? "#075985" : "#9f1239");
+
+              document.getElementById("popup-action-name").innerText = actionName;
+              const descriptionEl = document.getElementById("popup-action-description");
+              if (info.description) {
+                descriptionEl.innerText = info.description;
+                descriptionEl.classList.remove('hidden');
+              } else {
+                descriptionEl.innerText = '';
+                descriptionEl.classList.add('hidden');
+              }
+              document.getElementById("popup-target").innerText = info.target || (target?.name || '対象なし');
+              document.getElementById("popup-effect").innerText = info.effect || '効果なし';
+              document.getElementById("popup-result").innerText = info.result || '変化なし';
+
+              const setHp = (prefix, before, after, fallbackEntity) => {
+                const wrap = document.getElementById(`popup-${prefix}-hp-wrap`);
+                const text = document.getElementById(`popup-${prefix}-hp-text`);
+                const fill = document.getElementById(`popup-${prefix}-hp-fill`);
+                const snapBefore = before || (fallbackEntity && Number.isFinite(fallbackEntity.currentHp) ? { current: fallbackEntity.currentHp, max: fallbackEntity.maxHp } : null);
+                const snapAfter = after || (fallbackEntity && Number.isFinite(fallbackEntity.currentHp) ? { current: fallbackEntity.currentHp, max: fallbackEntity.maxHp } : null);
+                if (!snapAfter || !Number.isFinite(Number(snapAfter.max))) {
+                  wrap.classList.add('hidden');
+                  return;
+                }
+                wrap.classList.remove('hidden');
+                const max = Math.max(1, Number(snapAfter.max));
+                const current = Math.max(0, Math.min(max, Number(snapAfter.current)));
+                const beforeText = snapBefore ? `${Math.max(0, Number(snapBefore.current))}/${Math.max(1, Number(snapBefore.max))}` : '';
+                text.innerText = `${beforeText ? beforeText + ' → ' : ''}${current}/${max}`;
+                fill.style.width = `${Math.max(0, Math.min(100, current / max * 100))}%`;
+                fill.classList.toggle('hp-dead', current <= 0);
+                fill.classList.toggle('hp-alive', current > 0);
+              };
+              setHp('actor', info.actorHpBefore, info.actorHpAfter, actor);
+
+              const targetImg = document.getElementById("popup-target-img");
+              const targetPlaceholder = document.getElementById("popup-target-placeholder");
+              if (target) {
+                targetPlaceholder.classList.add('hidden');
+                targetPlaceholder.classList.remove('flex');
+                targetImg.classList.remove('hidden');
+                const targetDead = (info.targetHpAfter?.current ?? target.currentHp ?? 1) <= 0;
+                targetImg.classList.toggle('popup-dead-image', targetDead);
+                targetImg.onerror = () => { targetImg.onerror = null; targetImg.classList.add('hidden'); targetPlaceholder.classList.remove('hidden'); targetPlaceholder.classList.add('flex'); };
+                targetImg.src = target.image || target.iconImage || getCardImage(target) || createDummyCardImage(targetIsPlayer ? "👤" : "👹", targetIsPlayer ? "#075985" : "#9f1239");
+                document.getElementById("popup-target-name").innerText = target.name || (targetIsPlayer ? 'プレイヤー' : '対象');
+                setHp('target', info.targetHpBefore, info.targetHpAfter, target);
+              } else {
+                targetImg.classList.add('hidden');
+                targetPlaceholder.classList.remove('hidden');
+                targetPlaceholder.classList.add('flex');
+                document.getElementById("popup-target-name").innerText = info.target || '対象なし';
+                document.getElementById('popup-target-hp-wrap').classList.add('hidden');
+              }
+
+              const cardContainer = document.getElementById("popup-card-container");
+              if (cardContainer) cardContainer.innerHTML = '';
+
+              await sleep(3000);
+              modal.classList.add("hidden");
+      } catch (popupError) {
+        console.error('Action popup error:', popupError);
+        try {
+          if (actionTitle) actionTitle.innerText = actionName || "行動";
+          const effectEl = document.getElementById("popup-effect");
+          const resultEl = document.getElementById("popup-result");
+          if (effectEl) effectEl.innerText = info.effect || "効果なし";
+          if (resultEl) resultEl.innerText = info.result || "変化なし";
+        } catch (_) {}
+        await sleep(1200);
+        modal.classList.add("hidden");
+      }
+    }
+
+    let actionPopupQueue = Promise.resolve();
+    function showActionPopup(actor, actionName, cardData, info = {}) {
+      const job = actionPopupQueue.then(() => showActionPopupNow(actor, actionName, cardData, info));
+      actionPopupQueue = job.catch(err => console.error('popup queue error',err));
+      return job;
     }
 
     function logBattle(msg) {
@@ -3203,278 +3444,573 @@
 
 <script>
 (function(){
-  const waitForAppReady = async () => { for(let i=0;i<200 && !window.__cardBattleAppReady;i++) await new Promise(r=>setTimeout(r,50)); };
-  let onlineWS=null, onlineSessionId=localStorage.getItem('cardBattleOnlineSession')||null;
-  let onlineRoom=null, onlineSlot=null, onlineReady=false, onlineSpectating=false, onlinePool=null, onlineSelection=null;
-  var onlineMode=false, onlinePending={units:{},magicId:null}, onlineSelectedUnitId=null, onlineTimerHandle=null, onlineDeadline=0, onlineSubmitted=false, onlineLastTurn=0, onlineLastState=null;
-  const $=id=>document.getElementById(id);
-  const ruleName={unlimited:'無制限',rental:'レンタル',super_rental:'超レンタル',random_pot:'闇鍋'};
-  function serverUrl(){return (location.protocol==='https:'?'wss://':'ws://')+location.host;}
-  const onlineSendQueue=[];
-  function sendOnline(type,payload={}){
-    const msg=JSON.stringify({type,...payload});
-    if(onlineWS&&onlineWS.readyState===1){onlineWS.send(msg);return true;}
-    onlineSendQueue.push(msg);
+  const $ = id => document.getElementById(id);
+  const ruleName = {unlimited:'無制限',rental:'レンタル',super_rental:'超レンタル',random_pot:'闇鍋'};
+  const waitForAppReady = async (timeoutMs=10000) => {
+    const until = Date.now() + timeoutMs;
+    while (!window.__cardBattleAppReady && Date.now() < until) await new Promise(r=>setTimeout(r,50));
+    return !!window.__cardBattleAppReady;
+  };
+
+  let onlineWS = null;
+  let onlineAuthenticated = false;
+  let onlineConnectionState = 'disconnected';
+  let onlineReconnectTimer = null;
+  let onlineReconnectDelay = 1000;
+  let onlineCreateInFlight = false;
+  let onlineSessionId = localStorage.getItem('cardBattleOnlineSession') || null;
+  let onlineRoom = null;
+  let onlineSlot = null;
+  let onlineReady = false;
+  let onlineSpectating = false;
+  let onlinePool = null;
+  let onlineRentalDecks = [];
+  let onlineDeckOptions = null;
+  let onlineSelection = null;
+  let onlineTimerHandle = null;
+  let onlineDeadline = 0;
+  let onlineSubmitted = false;
+  let onlineLastTurn = 0;
+  let onlineLastState = null;
+  let onlineEventQueue = [];
+  let onlineEventProcessing = false;
+  let onlineDeferredDecisionState = null;
+  let onlineDeferredEnd = null;
+
+  var onlineMode = false;
+  var onlinePending = {units:{},magicId:null};
+  var onlineSelectedUnitId = null;
+
+  const onlineSendQueue = [];
+
+  function updateConnectionBadge(state, textLabel=null){
+    onlineConnectionState = state;
+    const el = $('online-connection-badge');
+    if (!el) return;
+    const labels = {connecting:'接続中…',connected:'接続済み',disconnected:'未接続',error:'接続エラー'};
+    el.innerText = textLabel || labels[state] || state;
+    el.className = 'text-[10px] px-2 py-1 rounded ' + (
+      state==='connected' ? 'bg-emerald-900/60 text-emerald-300' :
+      state==='connecting' ? 'bg-amber-900/60 text-amber-300' :
+      state==='error' ? 'bg-rose-900/60 text-rose-300' :
+      'bg-slate-800 text-slate-400'
+    );
+  }
+  function setOnlineStatus(text){ if ($('online-status')) $('online-status').innerText = text || ''; }
+  function ensureOnlineSession(){
+    if (!onlineSessionId) {
+      onlineSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      localStorage.setItem('cardBattleOnlineSession', onlineSessionId);
+    }
+    return onlineSessionId;
+  }
+  function serverUrl(){
+    if (window.CARD_AI_ONLINE_SERVER_URL) return String(window.CARD_AI_ONLINE_SERVER_URL).replace(/\/$/,'');
+    if (location.protocol === 'https:') return 'wss://' + location.host;
+    if (location.protocol === 'http:') return 'ws://' + location.host;
+    return null;
+  }
+
+  function showOnlineError(msg){
+    const e = $('online-error');
+    if (e) { e.innerText = msg; e.classList.remove('hidden'); setTimeout(()=>e.classList.add('hidden'),6000); }
+    setOnlineStatus(msg);
+  }
+  function rawSend(type,payload={}){
+    if (!onlineWS || onlineWS.readyState !== WebSocket.OPEN) return false;
+    try { onlineWS.send(JSON.stringify({type,...payload})); return true; } catch { return false; }
+  }
+  function sendOnline(type,payload={}, options={}){
+    ensureOnlineSession();
+    const item={type,payload,critical:options.critical!==false,createdAt:Date.now()};
+    if (onlineAuthenticated && onlineWS?.readyState===WebSocket.OPEN) return rawSend(type,payload);
+    onlineSendQueue.push(item);
     connectOnline();
     return false;
   }
   function flushOnlineQueue(){
-    if(!onlineWS||onlineWS.readyState!==1)return;
-    while(onlineSendQueue.length) onlineWS.send(onlineSendQueue.shift());
+    if (!onlineAuthenticated || !onlineWS || onlineWS.readyState!==WebSocket.OPEN) return;
+    while (onlineSendQueue.length) {
+      const item=onlineSendQueue.shift();
+      if (!item) continue;
+      rawSend(item.type,item.payload);
+    }
   }
-  function stripCard(c){if(!c)return null;const x=JSON.parse(JSON.stringify(c,(k,v)=>{if((k==='image'||k==='img'||k==='imageUrl')&&typeof v!=='string')return undefined;return v;}));if(typeof c.image==='string')x.image=c.image;else if(typeof c.img==='string')x.image=c.img;if(typeof c.imageUrl==='string')x.imageUrl=c.imageUrl;return x;}
-  function syncProfile(){sendOnline('profile_sync',{cards:allCards.map(stripCard),decks:allDecks,name:playerName});}
-  let onlineReconnectTimer=null,onlineReconnectDelay=1000;
+  function stripCard(c){
+    if(!c)return null;
+    const x=JSON.parse(JSON.stringify(c,(k,v)=>{
+      if((k==='image'||k==='img'||k==='imageUrl')&&typeof v!=='string')return undefined;
+      return v;
+    }));
+    if(typeof c.image==='string')x.image=c.image;
+    else if(typeof c.img==='string')x.image=c.img;
+    if(typeof c.imageUrl==='string')x.imageUrl=c.imageUrl;
+    return x;
+  }
+  function onlineProfilePayload(){
+    return {name:playerName,cards:(allCards||[]).map(stripCard).filter(Boolean),decks:allDecks||[]};
+  }
+  async function syncProfileAfterHello(){
+    const ready = await waitForAppReady();
+    if (!ready) { showOnlineError('カードデータの読み込みが完了していないため、オンライン同期を待っています。'); return; }
+    if (onlineAuthenticated) rawSend('profile_sync',{cards:(allCards||[]).map(stripCard).filter(Boolean),decks:allDecks||[],name:playerName});
+  }
+
   function connectOnline(){
-    if(onlineWS&&onlineWS.readyState<=1)return;
+    const url=serverUrl();
+    if(!url){
+      updateConnectionBadge('error','サーバーURLなし');
+      showOnlineError('オンライン対戦はゲームをWebサーバーから開いてください。HTMLファイルを直接開く場合はオンライン接続できません。');
+      return;
+    }
+    if (onlineWS && (onlineWS.readyState===WebSocket.OPEN || onlineWS.readyState===WebSocket.CONNECTING)) return;
     clearTimeout(onlineReconnectTimer);
-    onlineWS=new WebSocket(serverUrl());
-    onlineWS.onopen=async()=>{
+    updateConnectionBadge('connecting');
+    setOnlineStatus('オンラインサーバーへ接続中…');
+    try { onlineWS=new WebSocket(url); } catch(e){ updateConnectionBadge('error'); showOnlineError('WebSocket接続を開始できませんでした。'); return; }
+    onlineAuthenticated=false;
+    onlineWS.onopen=()=>{
       onlineReconnectDelay=1000;
-      await waitForAppReady();
-      sendOnline('hello',{sessionId:onlineSessionId,name:playerName});
-      syncProfile();
-      flushOnlineQueue();
+      updateConnectionBadge('connected');
+      setOnlineStatus('サーバー接続済み。認証中…');
+      rawSend('hello',{sessionId:ensureOnlineSession(),name:playerName});
+    };
+    onlineWS.onmessage=e=>{
+      let m; try{m=JSON.parse(e.data)}catch{return;}
+      handleOnlineMessage(m);
+    };
+    onlineWS.onerror=()=>{
+      updateConnectionBadge('error');
+      showOnlineError('オンラインサーバーへ接続できません。サーバーURL・Renderの起動状態・WebSocket接続を確認してください。');
     };
     onlineWS.onclose=()=>{
-      $('online-status').innerText='サーバーから切断されました。再接続を試みています。';
-      if(onlineRoom&&onlineSessionId){
+      onlineAuthenticated=false;
+      updateConnectionBadge('disconnected');
+      if (onlineRoom && onlineSessionId) {
+        setOnlineStatus('サーバーから切断されました。再接続を試みています。');
         clearTimeout(onlineReconnectTimer);
         onlineReconnectTimer=setTimeout(connectOnline,onlineReconnectDelay);
         onlineReconnectDelay=Math.min(10000,onlineReconnectDelay*2);
+      } else {
+        setOnlineStatus('サーバー未接続');
       }
+      onlineWS=null;
     };
-    onlineWS.onerror=()=>{$('online-status').innerText='オンライン接続に失敗しました。';showOnlineError('オンラインサーバーへ接続できません。RenderのURLとWebSocket接続を確認してください。');};
-    onlineWS.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch{return;}handleOnlineMessage(m)};
   }
-  function showOnlineError(msg){const e=$('online-error');e.innerText=msg;e.classList.remove('hidden');setTimeout(()=>e.classList.add('hidden'),5000);}
-  function openOnlineView(){ensureOnlineSession();switchView('online');connectOnline();setTimeout(()=>{syncProfile();requestRoomList();},150);}
-  window.openOnlineView=openOnlineView;
-  function requestRoomList(){ensureOnlineSession();connectOnline();sendOnline('room_list');}
-  window.requestRoomList=requestRoomList;
-  function onlineProfilePayload(){return {name:playerName,cards:allCards.map(stripCard),decks:allDecks};}
-  function ensureOnlineSession(){
-    if(!onlineSessionId){
-      onlineSessionId='session_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-      localStorage.setItem('cardBattleOnlineSession',onlineSessionId);
-    }
-    return onlineSessionId;
+
+  function onlineProfileAndReady(){
+    return waitForAppReady(10000).then(ready=>{
+      if(!ready){showOnlineError('カードデータの読み込みが完了していません。ページの読み込み完了後にもう一度実行してください。');return null;}
+      return onlineProfilePayload();
+    });
   }
-  function createOnlineRoom(){
+
+  async function createOnlineRoom(){
+    if(onlineCreateInFlight)return;
     ensureOnlineSession();
-    connectOnline();
-    sendOnline('room_create',{roomName:$('online-room-name').value.trim()||'カード勝負',password:$('online-room-password').value,rule:$('online-room-rule').value,allowSpectators:$('online-allow-spectators').checked,maxSpectators:Number($('online-max-spectators').value)||10,profile:onlineProfilePayload()});
+    onlineCreateInFlight=true;
+    const profile=await onlineProfileAndReady();
+    if(!profile){onlineCreateInFlight=false;return;}
+    const payload={
+      roomName:$('online-room-name')?.value.trim()||'カード勝負',
+      password:$('online-room-password')?.value||'',
+      rule:$('online-room-rule')?.value||'unlimited',
+      allowSpectators:!!$('online-allow-spectators')?.checked,
+      maxSpectators:Number($('online-max-spectators')?.value)||10,
+      profile
+    };
+    setOnlineStatus('部屋作成要求を送信しています…');
+    sendOnline('room_create',payload);
   }
   window.createOnlineRoom=createOnlineRoom;
-  function renderRooms(list){$('online-room-list').innerHTML='';if(!list.length){$('online-room-list').innerHTML='<div class="text-xs text-slate-500">募集中の部屋はありません。</div>';return;}for(const r of list){const d=document.createElement('div');d.className='bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center gap-2';d.innerHTML=`<div class="flex-1 min-w-[180px]"><div class="font-bold text-xs text-white">${esc(r.roomName)} ${r.password?'🔒':''}</div><div class="text-[10px] text-slate-400">${esc(r.ownerName)} / ${ruleName[r.rule]} / ${r.players}/2 / 観戦 ${r.spectators}/${r.maxSpectators} / ${r.status==='battle'?'対戦中':'募集中'}</div></div>`;if(r.players<2&&r.status!=='finished'){const b=document.createElement('button');b.className='px-3 py-1.5 bg-cyan-700 rounded text-[10px] font-bold';b.innerText='入室';b.onclick=()=>joinOnlineRoom(r);d.appendChild(b);}if(r.status==='battle'&&r.spectators<r.maxSpectators){const b=document.createElement('button');b.className='px-3 py-1.5 bg-purple-700 rounded text-[10px] font-bold';b.innerText='観戦';b.onclick=()=>spectateRoom(r);d.appendChild(b);} $('online-room-list').appendChild(d);}}
-  function joinOnlineRoom(r){ensureOnlineSession();connectOnline();const pw=r.password?prompt('部屋のパスワードを入力してください。')||'':'';sendOnline('room_join',{roomId:r.roomId,password:pw,profile:onlineProfilePayload()});}
-  function spectateRoom(r){ensureOnlineSession();connectOnline();const pw=r.password?prompt('観戦パスワードを入力してください。')||'':'';sendOnline('spectate_join',{roomId:r.roomId,password:pw});}
-  function leaveOnlineRoom(){sendOnline('room_leave');onlineRoom=null;onlinePool=null;onlineSelection=null;onlineReady=false;onlineSpectating=false;onlineRentalDecks=[];$('online-room-panel').classList.add('hidden');$('online-pool-area').classList.add('hidden');$('online-lobby').classList.remove('hidden');clearInterval(onlineTimerHandle);if(onlineMode){onlineMode=false;$('online-controls').classList.add('hidden');}}
+
+  function requestRoomList(){ensureOnlineSession();connectOnline();setOnlineStatus('部屋一覧を更新しています…');sendOnline('room_list');}
+  window.requestRoomList=requestRoomList;
+
+  function openOnlineView(){ensureOnlineSession();switchView('online');connectOnline();requestRoomList();}
+  window.openOnlineView=openOnlineView;
+
+  function renderRooms(list){
+    const area=$('online-room-list'); if(!area)return;
+    area.innerHTML='';
+    if(!list.length){area.innerHTML='<div class="text-xs text-slate-500">募集中の部屋はありません。</div>';return;}
+    for(const r of list){
+      const d=document.createElement('div');
+      d.className='bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center gap-2';
+      d.innerHTML=`<div class="flex-1 min-w-[180px]"><div class="font-bold text-xs text-white">${esc(r.roomName)} ${r.password?'🔒':''}</div><div class="text-[10px] text-slate-400">${esc(r.ownerName)} / ${ruleName[r.rule]||r.rule} / ${r.players}/2 / 観戦 ${r.spectators}/${r.maxSpectators} / 状態：${esc(roomStatusText(r.status))}</div></div>`;
+      if(r.players<2 && (r.status==='waiting'||r.status==='preparing')){
+        const b=document.createElement('button');b.className='px-3 py-1.5 bg-cyan-700 rounded text-[10px] font-bold';b.innerText='入室';b.onclick=()=>joinOnlineRoom(r);d.appendChild(b);
+      }
+      if(r.status==='battle' && r.allowSpectators!==false && r.spectators<r.maxSpectators){
+        const b=document.createElement('button');b.className='px-3 py-1.5 bg-purple-700 rounded text-[10px] font-bold';b.innerText='観戦';b.onclick=()=>spectateRoom(r);d.appendChild(b);
+      }
+      area.appendChild(d);
+    }
+  }
+  function roomStatusText(s){return ({waiting:'待機中',preparing:'準備中',battle:'対戦中',finished:'終了',closed:'終了'})[s]||s||'';}
+
+  async function joinOnlineRoom(r){
+    const profile=await onlineProfileAndReady();if(!profile)return;
+    ensureOnlineSession();connectOnline();
+    const pw=r.password?prompt('部屋のパスワードを入力してください。')||'':'';
+    setOnlineStatus('部屋へ入室しています…');
+    sendOnline('room_join',{roomId:r.roomId,password:pw,profile});
+  }
+  function spectateRoom(r){
+    ensureOnlineSession();connectOnline();
+    const pw=r.password?prompt('観戦パスワードを入力してください。')||'':'';
+    setOnlineStatus('観戦参加しています…');
+    sendOnline('spectate_join',{roomId:r.roomId,password:pw});
+  }
+
+  function resetOnlineRoomLocal(){
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckOptions=null;onlineSelection=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastState=null;onlineEventQueue=[];onlineDeferredDecisionState=null;onlineDeferredEnd=null;
+    clearInterval(onlineTimerHandle);onlineDeadline=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
+    $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
+    onlineMode=false;$('online-controls')?.classList.add('hidden');
+  }
+  function leaveOnlineRoom(){sendOnline('room_leave');resetOnlineRoomLocal();}
   window.leaveOnlineRoom=leaveOnlineRoom;
+
+  function renderPlayerList(players){
+    const area=$('online-players');if(!area)return;
+    area.innerHTML=(players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div>${p?.deckName?`<div class="text-[10px] text-cyan-300">使用デッキ：${esc(p.deckName)}</div>`:''}<div class="text-[10px] ${p?.online?'text-cyan-300':'text-slate-500'}">${p?(p.online?'接続中':'切断中'):''}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');
+  }
+  function renderRoomPanel(){
+    if(!onlineRoom)return;
+    $('online-lobby')?.classList.add('hidden');$('online-room-panel')?.classList.remove('hidden');
+    $('online-current-room').innerText='部屋：'+onlineRoom.roomName;
+    $('online-current-rule').innerText='ルール：'+(ruleName[onlineRoom.rule]||onlineRoom.rule);
+    $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
+  }
+
   function selectOnlineDeck(deckId){
     if(!onlineRoom||onlineSpectating)return;
-    onlineSelection={...(onlineSelection||{}),deckId:String(deckId||'')};
-    if(onlineReady){onlineReady=false;$('online-ready-btn').innerText='準備完了';}
-    sendOnline('deck_select',{deckId:String(deckId||'')});
+    onlineSelection=onlineSelection||{};
+    onlineSelection.deckId=String(deckId||'');onlineSelection.deployConfirmed=false;onlineDeckOptions=null;
+    onlineReady=false;
     renderOnlineSelection();
+    sendOnline('deck_select',{deckId:onlineSelection.deckId});
   }
   window.selectOnlineDeck=selectOnlineDeck;
+
   function toggleOnlineReady(){
     if(!onlineRoom||onlineSpectating)return;
     if(!onlineReady){
-      const deckId=onlineSelection?.deckId;
-      if(!deckId){showOnlineError('先にオンライン対戦で使用するデッキを選択してください。');return;}
-      onlineReady=true;
-      $('online-ready-btn').innerText='準備を解除';
-      sendOnline('deck_select',{deckId});
-      sendOnline('room_ready',{ready:true});
+      if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && !onlineSelection?.deployConfirmed){showOnlineError('先にデッキを選び、出撃する3体と控えの順番を確定してください。');return;}
+      onlineReady=true;$('online-ready-btn').innerText='準備を解除';sendOnline('room_ready',{ready:true});
     }else{
-      onlineReady=false;
-      $('online-ready-btn').innerText='準備完了';
-      sendOnline('room_ready',{ready:false});
+      onlineReady=false;$('online-ready-btn').innerText='準備完了';sendOnline('room_ready',{ready:false});
     }
   }
   window.toggleOnlineReady=toggleOnlineReady;
-  function submitSelection(){
-    if(!onlineRoom||onlineRoom.rule!=='super_rental'&&onlineRoom.rule!=='random_pot')return;
-    if((onlineSelection?.unitIds||[]).length<3){showOnlineError('候補からキャラクターを3枚以上選択してください。');return;}
-    sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:onlineSelection.unitIds.slice(3,5)}});
+
+  function rebuildReserveOrder(){
+    if(!onlineDeckOptions||!onlineSelection)return;
+    const active=new Set(onlineSelection.active||[]);
+    const current=(onlineSelection.reserve||[]).filter(id=>onlineDeckOptions.units.some(c=>c.id===id&&!active.has(id)));
+    const rest=onlineDeckOptions.units.map(c=>String(c.id)).filter(id=>!active.has(id)&&!current.includes(id));
+    onlineSelection.reserve=[...current,...rest].slice(0,2);
   }
-  function buildLocalSelection(){
-    const deckId=onlineSelection?.deckId;
-    if(!deckId)return null;
-    if(onlineRoom.rule==='rental'){
-      const deck=onlineRentalDecks.find(d=>d.id===deckId);
-      if(!deck)return null;
-      return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};
+  function toggleOnlineDeploymentUnit(id){
+    onlineSelection=onlineSelection||{};
+    onlineSelection.active=onlineSelection.active||[];
+    const i=onlineSelection.active.indexOf(id);
+    if(i>=0) onlineSelection.active.splice(i,1);
+    else {
+      if(onlineSelection.active.length>=3){showOnlineError('出撃キャラクターは3体までです。');return;}
+      onlineSelection.active.push(id);
     }
-    const deck=allDecks.find(d=>d.id===deckId);
-    if(!deck)return null;
-    return {deckId:deck.id,unitIds:[...(deck.unitIds||[])],magicIds:[...(deck.magicIds||[])],active:(deck.unitIds||[]).slice(0,3),reserve:(deck.unitIds||[]).slice(3,5)};
+    onlineSelection.deployConfirmed=false;onlineReady=false;rebuildReserveOrder();renderOnlineSelection();
   }
-  let onlineRentalDecks=[];
-  function renderRentalDecks(decks){
-    onlineRentalDecks=decks||[];
-    const area=$('online-selection-area');
-    if(!onlineRentalDecks.length){area.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}
-    const current=onlineSelection?.deckId&&onlineRentalDecks.some(d=>d.id===onlineSelection.deckId)?onlineSelection.deckId:onlineRentalDecks[0].id;
-    onlineSelection={...(onlineSelection||{}),deckId:current};
-    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">使用するデッキ</div><select id="online-rental-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${onlineRentalDecks.map(d=>`<option value="${d.id}" ${d.id===current?'selected':''}>${esc(d.name)}</option>`).join('')}</select><div class="text-[10px] text-slate-500">部屋作成者が公開したデッキから選択します。</div>`;
+  window.toggleOnlineDeploymentUnit=toggleOnlineDeploymentUnit;
+  function moveOnlineReserve(id,dir){
+    if(!onlineSelection?.reserve)return;
+    const i=onlineSelection.reserve.indexOf(id);if(i<0)return;
+    const j=i+dir;if(j<0||j>=onlineSelection.reserve.length)return;
+    [onlineSelection.reserve[i],onlineSelection.reserve[j]]=[onlineSelection.reserve[j],onlineSelection.reserve[i]];onlineSelection.deployConfirmed=false;renderOnlineSelection();
   }
+  window.moveOnlineReserve=moveOnlineReserve;
+  function confirmOnlineDeployment(){
+    if(!onlineDeckOptions||!onlineSelection)return;
+    const active=[...(onlineSelection.active||[])];if(active.length!==3){showOnlineError('出撃キャラクターを3体選択してください。');return;}
+    rebuildReserveOrder();
+    const unitIds=onlineDeckOptions.units.map(c=>String(c.id));
+    const magicIds=onlineDeckOptions.magics.map(c=>String(c.id));
+    onlineSelection={...onlineSelection,unitIds,magicIds,active, reserve:(onlineSelection.reserve||[]).slice(0,2),deployConfirmed:false};
+    sendOnline('battle_select',{selection:onlineSelection});
+  }
+  window.confirmOnlineDeployment=confirmOnlineDeployment;
+
   function renderOwnOnlineDeckSelector(){
-    const area=$('online-selection-area');
+    const area=$('online-selection-area');if(!area)return;
     const decks=allDecks||[];
     if(!decks.length){area.innerHTML='<div class="text-xs text-amber-300">使用できるデッキがありません。先に「デッキ編成」でデッキを作成してください。</div>';return;}
     const current=onlineSelection?.deckId&&decks.some(d=>d.id===onlineSelection.deckId)?onlineSelection.deckId:decks[0].id;
-    onlineSelection={...(onlineSelection||{}),deckId:current};
-    const deck=decks.find(d=>d.id===current);
-    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">オンライン対戦で使用するデッキ</div><select id="online-own-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${decks.map(d=>`<option value="${d.id}" ${d.id===current?'selected':''}>${esc(d.name)}（キャラ${(d.unitIds||[]).length} / マジック${(d.magicIds||[]).length}）</option>`).join('')}</select><div class="text-[10px] text-slate-500">ここで選ぶデッキがオンライン対戦専用の使用デッキです。「対戦準備」のデッキ設定とは別です。</div><div class="text-[10px] text-slate-400">現在：${esc(deck?.name||'未選択')} / キャラ ${(deck?.unitIds||[]).length}枚 / マジック ${(deck?.magicIds||[]).length}枚</div>`;
+    onlineSelection=onlineSelection||{};if(!onlineSelection.deckId)onlineSelection.deckId=current;
+    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">オンライン対戦で使用するデッキ</div><select id="online-own-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${decks.map(d=>`<option value="${esc(d.id)}" ${d.id===current?'selected':''}>${esc(d.name)}（キャラ${(d.unitIds||[]).length} / マジック${(d.magicIds||[]).length}）</option>`).join('')}</select><div class="text-[10px] text-slate-500">デッキ選択後、出撃3体と控え順を決定します。</div>`;
+    if(onlineDeckOptions)renderDeploymentBuilder(area);
   }
+  function renderRentalDecks(){
+    const area=$('online-selection-area');if(!area)return;
+    if(!onlineRentalDecks.length){area.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}
+    const current=onlineSelection?.deckId&&onlineRentalDecks.some(d=>d.id===onlineSelection.deckId)?onlineSelection.deckId:onlineRentalDecks[0].id;
+    onlineSelection=onlineSelection||{};if(!onlineSelection.deckId)onlineSelection.deckId=current;
+    area.innerHTML=`<div class="text-xs text-slate-300 font-bold">部屋作成者の公開デッキから選択</div><select id="online-rental-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${onlineRentalDecks.map(d=>`<option value="${esc(d.id)}" ${d.id===current?'selected':''}>${esc(d.name)}</option>`).join('')}</select><div class="text-[10px] text-slate-500">選択したデッキだけがオンライン対戦で使用されます。</div>`;
+    if(onlineDeckOptions)renderDeploymentBuilder(area);
+  }
+  function renderDeploymentBuilder(area=$('online-selection-area')){
+    if(!area||!onlineDeckOptions)return;
+    onlineSelection=onlineSelection||{};
+    onlineSelection.active=onlineSelection.active||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));
+    rebuildReserveOrder();
+    const active=new Set(onlineSelection.active||[]);
+    const reserve=onlineSelection.reserve||[];
+    const unitCard=c=>`<button type="button" onclick='toggleOnlineDeploymentUnit(${JSON.stringify(String(c.id))})' class="text-left p-1 rounded border ${active.has(String(c.id))?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div><div class="text-[9px] ${active.has(String(c.id))?'text-emerald-300':'text-slate-500'}">${active.has(String(c.id))?'出撃':'控え候補'}</div></button>`;
+    const reserveRow=reserve.map((id,i)=>{const c=onlineDeckOptions.units.find(x=>String(x.id)===id);if(!c)return '';return `<div class="flex items-center gap-2 p-2 rounded border border-slate-800 bg-slate-950"><div class="flex-1 text-xs font-bold">控え${i+1}：${esc(c.name)}</div><button onclick='moveOnlineReserve(${JSON.stringify(id)},-1)' class="px-2 py-1 bg-slate-800 rounded text-xs">▲</button><button onclick='moveOnlineReserve(${JSON.stringify(id)},1)' class="px-2 py-1 bg-slate-800 rounded text-xs">▼</button></div>`;}).join('');
+    area.insertAdjacentHTML('beforeend',`<div class="border-t border-slate-800 mt-3 pt-3 space-y-2"><div class="text-xs font-black text-emerald-300">出撃メンバーを決定</div><div class="text-[10px] text-slate-400">キャラクターを3体選択。残り（最大2体）が控えになります。控えの▲▼で登場順を変更できます。</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${onlineDeckOptions.units.map(unitCard).join('')}</div><div class="space-y-1 mt-2">${reserveRow||'<div class="text-[10px] text-slate-500">控えなし</div>'}</div><button onclick="confirmOnlineDeployment()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-black text-xs">${onlineSelection.deployConfirmed?'出撃設定確定済み':'この出撃設定で確定'}</button></div>`);
+  }
+
+  function renderPoolBuilder(){
+    const p=onlinePool; if(!p)return;
+    onlineSelection=onlineSelection||{unitIds:[],magicIds:[],deployConfirmed:false};
+    const selectedUnits=onlineSelection.unitIds||[],selectedMagic=onlineSelection.magicIds||[];
+    $('online-pool-area').classList.remove('hidden');
+    const card=(c,sel,kind)=>`<button onclick='toggleOnlinePoolCard(${JSON.stringify(kind)},${JSON.stringify(String(c.id))})' class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;
+    const canConfirm=selectedUnits.length>=3&&selectedUnits.length<=5&&selectedMagic.length<=10;
+    $('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラは3～5枚。選択順の1～3番目が初期出撃、4～5番目が控え順。マジックは0～10枚です。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/5</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(String(c.id)),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(String(c.id)),'magic')).join('')}</div><button onclick="confirmOnlinePoolSelection()" ${canConfirm?'':'disabled'} class="w-full mt-3 py-2.5 ${canConfirm?'bg-purple-600 hover:bg-purple-500':'bg-slate-700 opacity-50'} rounded-lg font-black text-xs">${onlineSelection.deployConfirmed?'候補選択確定済み':'候補からデッキを確定'}</button>`;
+  }
+  window.toggleOnlinePoolCard=function(kind,id){
+    onlineSelection=onlineSelection||{unitIds:[],magicIds:[],deployConfirmed:false};
+    const key=kind==='unit'?'unitIds':'magicIds',max=kind==='unit'?5:10;
+    onlineSelection[key]=onlineSelection[key]||[];
+    const i=onlineSelection[key].indexOf(String(id));
+    if(i>=0)onlineSelection[key].splice(i,1);
+    else { if(onlineSelection[key].length>=max){showOnlineError(kind==='unit'?'キャラクターは5枚までです。':'マジックは10枚までです。');return;} onlineSelection[key].push(String(id)); }
+    onlineSelection.deployConfirmed=false;onlineReady=false;renderPoolBuilder();
+  };
+  function confirmOnlinePoolSelection(){
+    const units=onlineSelection?.unitIds||[],magics=onlineSelection?.magicIds||[];
+    if(units.length<3||units.length>5){showOnlineError('キャラクターは3～5枚選択してください。');return;}
+    sendOnline('battle_select',{selection:{unitIds:[...units],magicIds:[...magics],active:units.slice(0,3),reserve:units.slice(3,5),deployConfirmed:false}});
+  }
+  window.confirmOnlinePoolSelection=confirmOnlinePoolSelection;
+
   function renderOnlineSelection(){
-    const a=$('online-selection-area');
-    if(onlineRoom.rule==='rental'){if(onlineRentalDecks.length)renderRentalDecks(onlineRentalDecks);else a.innerHTML='<div class="text-xs text-amber-300">部屋作成者のデッキ一覧を待っています…</div>';return;}
-    if(onlinePool){renderPoolBuilder();return;}
-    renderOwnOnlineDeckSelector();
+    if(!onlineRoom||onlineSpectating)return;
+    const area=$('online-selection-area');if(!area)return;
+    $('online-pool-area').classList.add('hidden');
     if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot'){
-      const note=document.createElement('div');note.className='text-[10px] text-purple-300';note.innerText='両者がこの部屋でデッキを選び、準備完了するとサーバーが候補カードを抽選します。';a.appendChild(note);
+      area.innerHTML=onlinePool?'<div class="text-xs text-purple-300 font-bold">候補カードから即席デッキを作成してください。</div>':'<div class="text-xs text-slate-400">両者が準備完了すると、サーバーから独立した候補カードが配布されます。</div>';
+      if(onlinePool)renderPoolBuilder();
+      return;
     }
+    if(onlineRoom.rule==='rental')renderRentalDecks();
+    else renderOwnOnlineDeckSelector();
   }
-  function renderPoolBuilder(){const p=onlinePool;let selectedUnits=onlineSelection?.unitIds||[],selectedMagic=onlineSelection?.magicIds||[];const card=(c,sel,kind)=>`<button onclick="toggleOnlinePoolCard('${kind}','${c.id}')" class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;$('online-pool-area').classList.remove('hidden');$('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラ3枚・マジック10枚を選択してください。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/3</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(c.id),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(c.id),'magic')).join('')}</div>`;}
-  window.toggleOnlinePoolCard=function(kind,id){onlineSelection=onlineSelection||{unitIds:[],magicIds:[]};const key=kind==='unit'?'unitIds':'magicIds',max=kind==='unit'?3:10;onlineSelection[key]=onlineSelection[key]||[];if(onlineSelection[key].includes(id))onlineSelection[key]=onlineSelection[key].filter(x=>x!==id);else if(onlineSelection[key].length<max)onlineSelection[key].push(id);renderPoolBuilder();if(onlineSelection.unitIds.length===3&&onlineSelection.magicIds.length===10)sendOnline('battle_select',{selection:{...onlineSelection,active:onlineSelection.unitIds.slice(0,3),reserve:[]}});};
+
   function applyOnlineState(st){
     if(!st)return;
-    onlineMode=true;
-    onlineLastState=st;
-    const isSpectator=st.yourSide==='spectator' || onlineSpectating;
+    onlineMode=true;onlineLastState=st;
+    const isSpectator=st.yourSide==='spectator'||onlineSpectating;
     const mySide=st.yourSide==='player2'?'player2':'player1';
     const me=isSpectator?st.p1:(mySide==='player1'?st.p1:st.p2);
     const opp=isSpectator?st.p2:(mySide==='player1'?st.p2:st.p1);
-    const ownCards=new Map((allCards||[]).map(c=>[c.id,c]));
-    const mapU=(u,side)=>{
-      const local=ownCards.get(u.cardId);
-      const image=getCardImage(local)||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155');
-      const skills=u.skills||local?.skills||[];
-      return {...u,side:(side===mySide&&!isSpectator)?'player':'enemy',image,skills};
-    };
+    const localCards=new Map((allCards||[]).map(c=>[c.id,c]));
+    const mapU=(u,side)=>({
+      ...u,
+      side:(side===mySide&&!isSpectator)?'player':'enemy',
+      image:getCardImage(localCards.get(u.cardId))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
+      skills:Array.isArray(u.skills)?u.skills:[]
+    });
     const myUnits=(me?.units||[]).map(u=>mapU(u,mySide));
     const oppUnits=(opp?.units||[]).map(u=>mapU(u,mySide==='player1'?'player2':'player1'));
+    const magicCards=(me?.magicCards||[]).length?me.magicCards.map(c=>({...c})):((me?.magicIds||[]).map(id=>localCards.get(id)).filter(Boolean));
     battleState={
-      phase:st.phase,turn:st.turn,playerAp:me?.ap??0,enemyAp:opp?.ap??0,
-      playerUnits:myUnits,enemyUnits:oppUnits,
-      magicHand:(me?.magicIds||[]).map(id=>ownCards.get(id)).filter(Boolean),
-      usedMagicCardIds:new Set(),reservedMagic:null,
+      battleId:st.battleId,phase:st.phase,turn:st.turn,playerAp:me?.ap??0,enemyAp:opp?.ap??0,
+      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,usedMagicCardIds:new Set(me?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
       selectedPlayerInstanceId:onlineSelectedUnitId||(myUnits.find(u=>u.isActive&&u.currentHp>0)?.instanceId||null),
       playerName:me?.name||'プレイヤー',enemyName:opp?.name||'ライバル',playerIconUrl:playerIcon,enemyIconUrl:null,
       playerReserveQueue:[],enemyReserveQueue:[],yourSide:st.yourSide
     };
-    // オンラインではサーバー状態が唯一の正本。UIは状態受信のたびに即時再描画する。
-    switchView('battle');
-    initBattleUI();
-    renderBattleState();
-    renderOnlineBattleLog(st.events||[]);
+    switchView('battle');initBattleUI();renderBattleState();renderOnlineBattleLog(st.events||[]);
     const decision=st.phase==='decision'&&!isSpectator;
-    const panel=$('decision-command-panel');
-    if(panel)panel.classList.toggle('hidden',!decision);
-    $('online-controls').classList.toggle('hidden',!onlineMode||isSpectator);
-    $('online-battle-timer').classList.toggle('hidden',!onlineMode||isSpectator);
+    const panel=$('decision-command-panel');if(panel)panel.classList.toggle('hidden',!decision);
+    $('online-controls')?.classList.toggle('hidden',!onlineMode||isSpectator);
+    $('online-battle-timer')?.classList.toggle('hidden',!onlineMode||isSpectator);
     if(decision){
-      // skills が欠落した古い同期状態でもローカルカードから即時復元する。
-      if(battleState.playerUnits.some(u=>!Array.isArray(u.skills)||u.skills.length===0)){
-        battleState.playerUnits.forEach(u=>{const c=ownCards.get(u.cardId);if(c?.skills)u.skills=JSON.parse(JSON.stringify(c.skills));});
-      }
-      renderCommandPanel();
-      renderMagicHand();
-      updateReservationSummary();
-      renderOnlineControls();
+      renderCommandPanel();renderMagicHand();updateReservationSummary();renderOnlineControls();
       if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();
-    } else {
-      $('online-confirmed-status').innerText=st.phase==='execution'?'行動を実行中です。':'対戦状態を同期しています.';
+    }else{
+      $('online-confirmed-status').innerText=st.phase==='execution'?'行動を実行中です。':st.phase==='paused'?'接続待ちです。':'対戦状態を同期しています。';
       $('online-battle-timer').classList.add('hidden');
     }
   }
+
   function renderOnlineBattleLog(events){
-    const log=$('battle-log'); if(!log)return;
+    const log=$('battle-log');if(!log)return;
     log.innerHTML='<div class="text-slate-500">--- オンライン戦闘ログ ---</div>';
-    for(const ev of (events||[])){
-      const who=ev.actor?.name||'プレイヤー';
-      const name=ev.actionName||ev.type||'行動';
-      const result=ev.result||ev.effect||'';
-      const div=document.createElement('div'); div.innerText=`${who}：${name}${result?` → ${result}`:''}`; log.appendChild(div);
-    }
+    for(const ev of events||[]){const who=ev.actor?.name||'プレイヤー',name=ev.actionName||ev.type||'行動',result=ev.result||ev.effect||'';const d=document.createElement('div');d.innerText=`${who}：${name}${result?` → ${result}`:''}`;log.appendChild(d);}
     log.scrollTop=log.scrollHeight;
   }
-  function renderOnlineControls(){if(onlineSpectating||!onlineMode)return;const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;$('online-timer').innerText=String(left);$('online-confirmed-status').innerText=onlineSubmitted?'行動送信済み。相手の入力を待っています。':'行動を選択して「行動決定」を押してください。';const btn=$('btn-confirm-actions');if(btn){btn.innerText=onlineSubmitted?'送信済み':'🌐 行動決定（送信）';btn.disabled=onlineSubmitted;btn.classList.toggle('opacity-50',onlineSubmitted);btn.classList.toggle('cursor-not-allowed',onlineSubmitted);}}
-  function renderOnlineTargets(u,act){const sk=act.type==='skill'?u.skills?.[act.skillIndex]:null;let targets=[];if(act.type==='attack')targets=battleState.enemyUnits.filter(x=>x.isActive&&x.currentHp>0);else if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType))targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0);if(!targets.length){$('online-target-buttons').innerHTML=act.type==='attack'?'<span class="text-[10px] text-slate-500">対象は実行時にサーバーがランダム決定</span>':'';return;}$('online-target-buttons').innerHTML=targets.map(t=>`<button onclick="setOnlineTarget('${t.instanceId}')" class="px-2 py-1 rounded border ${act.targetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-900'} text-[10px]">${esc(t.name)} HP:${t.currentHp}</button>`).join('');}
-  window.setOnlineTarget=id=>{const u=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u)return;onlinePending.units[u.instanceId].targetInstanceId=id;renderOnlineControls();};
-  function submitOnlineActions(){if(onlineSubmitted||!onlineMode||onlineSpectating)return;const units=battleState.playerUnits.filter(u=>u.isActive&&u.currentHp>0).map(u=>({unitInstanceId:u.instanceId,...(u.reservedAction||{type:'attack',targetInstanceId:null})}));const actionId='act_'+Date.now()+'_'+Math.random().toString(36).slice(2);onlineSubmitted=true;sendOnline('submit_actions',{actionId,actions:{actionId,units,magicId:battleState.reservedMagic?.id||null}});renderOnlineControls();}
+  function renderOnlineControls(){
+    if(onlineSpectating||!onlineMode)return;
+    const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;
+    $('online-timer').innerText=String(left);
+    $('online-confirmed-status').innerText=onlineSubmitted?'行動送信済み。相手の入力を待っています。':'行動を選択して「行動決定」を押してください。';
+    const btn=$('btn-confirm-actions');if(btn){btn.innerText=onlineSubmitted?'送信済み':'🌐 行動決定（送信）';btn.disabled=onlineSubmitted||battleState?.phase!=='decision';btn.classList.toggle('opacity-50',btn.disabled);btn.classList.toggle('cursor-not-allowed',btn.disabled);}
+  }
+  function renderOnlineMagicTargets(){
+    const box=$('online-magic-targets');if(!box)return;
+    box.innerHTML='';box.classList.add('hidden');
+    const m=battleState?.reservedMagic;if(!onlineMode||!m||!m.effect)return;
+    const eff=m.effect;if(!['select_enemy_1','select_ally_1'].includes(eff.targetType))return;
+    const actor={side:'player',currentHp:1,maxHp:1};
+    const pool=(getTargetPool(eff.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,eff.targetCond));
+    if(!pool.length)return;
+    box.classList.remove('hidden');
+    box.innerHTML='<div class="text-[10px] font-black text-amber-300 mb-2">マジック対象を選択</div><div class="flex flex-wrap gap-2"></div>';
+    const row=box.firstElementChild.nextElementSibling;
+    for(const t of pool){const b=document.createElement('button');b.className='px-2 py-1 rounded border text-[10px] '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950');b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{battleState.reservedMagicTargetInstanceId=t.instanceId;renderMagicHand();updateReservationSummary();};row.appendChild(b);}
+  }
+  function renderOnlineTargets(u,act){
+    const targetBox=$('online-target-buttons');if(!targetBox)return;
+    const sk=act.type==='skill'?u.skills?.[act.skillIndex]:null;let targets=[];
+    if(act.type==='attack')targets=(battleState.enemyUnits||[]).filter(x=>x.isActive&&x.currentHp>0);
+    else if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType))targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0);
+    targetBox.innerHTML='';
+    if(!targets.length){targetBox.innerHTML=act.type==='attack'?'<span class="text-[10px] text-slate-500">対象は実行時にサーバーがランダム決定</span>':'';return;}
+    for(const t of targets){const b=document.createElement('button');b.className='px-2 py-1 rounded border '+(act.targetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-900')+' text-[10px]';b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{const u2=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u2)return;u2.reservedAction=u2.reservedAction||{type:'attack',targetInstanceId:null};u2.reservedAction.targetInstanceId=t.instanceId;renderCommandPanel();updateReservationSummary();};targetBox.appendChild(b);}
+  }
+  window.setOnlineTarget=id=>{const u=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u)return;u.reservedAction=u.reservedAction||{type:'attack',targetInstanceId:null};u.reservedAction.targetInstanceId=id;renderCommandPanel();updateReservationSummary();};
+
+  function submitOnlineActions(){
+    if(onlineSubmitted||!onlineMode||onlineSpectating||battleState?.phase!=='decision')return;
+    // 手動対象が未選択ならクライアントでも先に止める。最終判定は必ずサーバー。
+    for(const u of battleState.playerUnits.filter(u=>u.isActive&&u.currentHp>0)){
+      if(u.reservedAction?.type==='skill'){
+        const sk=u.skills?.[u.reservedAction.skillIndex];
+        if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType)&&!u.reservedAction.targetInstanceId){showOnlineError(`「${sk.name}」の対象を選択してください。`);return;}
+      }
+    }
+    if(battleState.reservedMagic?.effect?.targetType && ['select_enemy_1','select_ally_1'].includes(battleState.reservedMagic.effect.targetType) && !battleState.reservedMagicTargetInstanceId){showOnlineError(`「${battleState.reservedMagic.name}」の対象を選択してください。`);return;}
+    const units=battleState.playerUnits.filter(u=>u.isActive&&u.currentHp>0).map(u=>({unitInstanceId:u.instanceId,...(u.reservedAction||{type:'attack',targetInstanceId:null})}));
+    const actionId='act_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+    onlineSubmitted=true;renderOnlineControls();
+    sendOnline('submit_actions',{actionId,battleId:battleState.battleId,turn:battleState.turn,actions:{actionId,units,magicId:battleState.reservedMagic?.id||null,magicTargetInstanceId:battleState.reservedMagicTargetInstanceId||null}});
+  }
   window.submitOnlineActions=submitOnlineActions;
-  function startOnlineTimer(deadline){clearInterval(onlineTimerHandle);onlineDeadline=Number(deadline)||0;const tick=()=>{const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;$('online-timer').innerText=String(left);$('online-battle-timer-value').innerText=String(left);$('online-timer').classList.toggle('text-rose-400',left<=10);$('online-battle-timer').classList.toggle('text-rose-300',left<=10);if(left<=0)clearInterval(onlineTimerHandle);};tick();onlineTimerHandle=setInterval(tick,250);}
-  function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);$('online-timer').innerText='⏸';$('online-battle-timer-value').innerText='⏸';$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
-  function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;}
+  function startOnlineTimer(deadline){
+    clearInterval(onlineTimerHandle);onlineDeadline=Number(deadline)||0;
+    const tick=()=>{const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;if($('online-timer'))$('online-timer').innerText=String(left);if($('online-battle-timer-value'))$('online-battle-timer-value').innerText=String(left);if($('online-timer'))$('online-timer').classList.toggle('text-rose-400',left<=10);if($('online-battle-timer'))$('online-battle-timer').classList.toggle('text-rose-300',left<=10);if(left<=0)clearInterval(onlineTimerHandle);};tick();onlineTimerHandle=setInterval(tick,250);
+  }
+  function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineDeadline=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
+  function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;} }
+
   async function playOnlineEvent(ev){
     if(!ev)return;
-    logBattle(`${ev.actor?.name||'プレイヤー'}：${ev.actionName||ev.type||'行動'}${ev.result?` → ${ev.result}`:''}`);
-    const mySide=battleState.yourSide||'player1';
-    const mapSide=s=>s===(mySide==='player1'?'player1':'player2')?'player':'enemy';
-    const target=ev.target?{...ev.target,side:mapSide(ev.target.side),image:ev.target.image||getCardImage(allCards.find(c=>c.id===ev.target.cardId))}:null;
-    let actor=ev.actor?.side?{...ev.actor,side:mapSide(ev.actor.side),image:ev.actor.image||getCardImage(allCards.find(c=>c.id===ev.actor.cardId))}:ev.actor;
-    const card=ev.card||allCards.find(c=>c.id===ev.cardId);
-    let cardData;
-    if(ev.type==='MAGIC_USE'){
-      cardData=card||{cardType:'magic',name:ev.actionName,image:ev.actor?.image||null,desc:ev.description||''};
-      actor={...(actor||{}),side:'player',name:ev.actor?.name||battleState.playerName,image:cardData.image||ev.actor?.image||null};
-    } else {
-      cardData=card||{cardType:'unit',name:ev.actor?.name,image:actor?.image};
-    }
-    try{await showActionPopup(actor,ev.actionName,cardData,{target:target?.name||'対象なし',effect:ev.effect||'効果なし',result:ev.result||'変化なし',targetEntity:target,description:ev.description||'',actorHpBefore:ev.actorHpBefore,actorHpAfter:ev.actorHpAfter,targetHpBefore:ev.targetHpBefore,targetHpAfter:ev.targetHpAfter});}catch(e){console.error('Online popup error:',e);}
+    try{
+      logBattle(`${ev.actor?.name||'プレイヤー'}：${ev.actionName||ev.type||'行動'}${ev.result?` → ${ev.result}`:''}`);
+      const mySide=battleState.yourSide||'player1';
+      const mapSide=s=>s===(mySide==='player1'?'player1':'player2')?'player':'enemy';
+      const target=ev.target?{...ev.target,side:mapSide(ev.target.side),image:ev.target.image||null}:null;
+      let actor=ev.actor?.side?{...ev.actor,side:mapSide(ev.actor.side),image:ev.actor.image||null}:ev.actor;
+      const card=ev.card||((allCards||[]).find(c=>c.id===ev.cardId)||null);
+      let cardData;
+      if(ev.type==='MAGIC_USE'){
+        cardData=card||{cardType:'magic',name:ev.actionName,image:ev.actor?.image||null,desc:ev.description||''};
+        actor={...(actor||{}),side:mapSide(ev.actor?.side||'player1'),name:ev.actor?.name||'プレイヤー',image:cardData.image||ev.actor?.image||null};
+      }else cardData=card||{cardType:'unit',name:ev.actor?.name,image:actor?.image};
+      await showActionPopup(actor,ev.actionName,cardData,{target:target?.name||'対象なし',effect:ev.effect||'効果なし',result:ev.result||'変化なし',targetEntity:target,description:ev.description||'',actorHpBefore:ev.actorHpBefore,actorHpAfter:ev.actorHpAfter,targetHpBefore:ev.targetHpBefore,targetHpAfter:ev.targetHpAfter});
+    }catch(e){console.error('Online popup error:',e);await new Promise(r=>setTimeout(r,500));}
   }
+  async function processOnlineEventQueue(){
+    if(onlineEventProcessing)return;
+    onlineEventProcessing=true;
+    try{
+      while(onlineEventQueue.length){const ev=onlineEventQueue.shift();await playOnlineEvent(ev);}
+      if(onlineDeferredEnd){const end=onlineDeferredEnd;onlineDeferredEnd=null;applyOnlineState(end.state);$('online-controls')?.classList.add('hidden');const st=end.state;alert((end.winner==='player1'&&st.yourSide==='player1')||(end.winner==='player2'&&st.yourSide==='player2')?'勝利！':end.winner==='draw'?'引き分け':'敗北…');}
+      else if(onlineDeferredDecisionState){const st=onlineDeferredDecisionState;onlineDeferredDecisionState=null;applyOnlineState(st);}
+    }finally{onlineEventProcessing=false;}
+  }
+
   function handleOnlineMessage(m){
     if(m.type==='hello'){
-      onlineSessionId=m.sessionId;localStorage.setItem('cardBattleOnlineSession',onlineSessionId);return;
-    }
-    if(m.type==='room_recovered'){
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;
-      $('online-lobby').classList.add('hidden');$('online-room-panel').classList.remove('hidden');
-      $('online-current-room').innerText='部屋：'+onlineRoom.roomName;
-      $('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];
-      $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
-      $('online-players').innerHTML=(m.players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div><div class="text-[10px] text-cyan-300">${p?.deckName?`使用デッキ：${esc(p.deckName)}`:'デッキ未選択'}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');
-      renderOnlineSelection();
-      return;
-    }
-    if(m.type==='spectate_recovered'){
-      onlineRoom=m.room;onlineSpectating=true;
-      $('online-lobby').classList.add('hidden');$('online-room-panel').classList.remove('hidden');
-      $('online-current-room').innerText='部屋：'+onlineRoom.roomName;
-      $('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];
-      $('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。操作はできません。</div>';
-      return;
+      onlineAuthenticated=true;onlineSessionId=m.sessionId||onlineSessionId;localStorage.setItem('cardBattleOnlineSession',onlineSessionId);updateConnectionBadge('connected','接続済み');setOnlineStatus('オンライン接続済み。');syncProfileAfterHello();flushOnlineQueue();return;
     }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
-    if(m.type==='room_joined'){onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;$('online-lobby').classList.add('hidden');$('online-room-panel').classList.remove('hidden');$('online-current-room').innerText='部屋：'+onlineRoom.roomName;$('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];renderOnlineSelection();return;}
-    if(m.type==='rental_decks'){renderRentalDecks(m.decks||[]);return;}
-    if(m.type==='room_update'){if(m.room){onlineRoom=m.room;$('online-current-room').innerText='部屋：'+onlineRoom.roomName;$('online-current-rule').innerText='ルール：'+ruleName[onlineRoom.rule];}$('online-players').innerHTML=(m.players||[]).map((p,i)=>`<div class="bg-slate-950 border border-slate-800 rounded p-3 text-xs"><b>${i===0?'PLAYER 1':'PLAYER 2'}</b><div>${p?esc(p.name):'待機中'}</div><div class="text-[10px] text-cyan-300">${p?.deckName?`使用デッキ：${esc(p.deckName)}`:'デッキ未選択'}</div><div class="text-[10px] ${p?.ready?'text-emerald-400':'text-slate-500'}">${p?.ready?'準備完了':'準備中'}</div></div>`).join('');return;}
-    if(m.type==='pool_ready'){onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={...(onlineSelection||{}),unitIds:[],magicIds:[]};renderPoolBuilder();return;}
-    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineSpectating=false;applyOnlineState(m.state);if(m.state.deadline)startOnlineTimer(m.state.deadline);return;}
-    if(m.type==='battle_state'||m.type==='turn_start'){if(m.type==='turn_start'||(m.state?.phase==='decision'&&Number(m.state?.turn||0)>Number(onlineLastTurn||0)))resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||onlineLastTurn||0);applyOnlineState(m.state);if(m.state.phase==='decision'){if(m.state.deadline)startOnlineTimer(m.state.deadline);else showOnlinePausedTimer();}return;}
-    if(m.type==='battle_paused'){showOnlinePausedTimer();$('online-confirmed-status').innerText='対戦相手の接続待ちです。タイマーは停止しています。';return;}
-    if(m.type==='battle_resumed'){$('online-confirmed-status').innerText='接続が復帰しました。';return;}
+    if(m.type==='room_joined'){
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineRentalDecks=m.rentalDecks||[];renderRoomPanel();renderPlayerList([]);renderOnlineSelection();onlineCreateInFlight=false;setOnlineStatus('部屋に参加しました。');
+      // 通常ルールは最初のデッキ候補をサーバーへ同期して、出撃設定まで進められるようにする。
+      if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && onlineSelection?.deckId) sendOnline('deck_select',{deckId:String(onlineSelection.deckId)});
+      return;
+    }
+    if(m.type==='room_recovered'){
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineSelection=m.selection||{};onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;renderRoomPanel();renderPlayerList(m.players||[]);if(m.deploymentOptions)onlineDeckOptions=m.deploymentOptions;renderOnlineSelection();setOnlineStatus('部屋・対戦状態を復元しました。');return;
+    }
+    if(m.type==='spectate_joined'){
+      onlineRoom=m.room;onlineSpectating=true;onlineReady=false;renderRoomPanel();$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。プレイヤー操作はできません。</div>';setOnlineStatus('観戦中です。');return;
+    }
+    if(m.type==='spectate_recovered'){
+      onlineRoom=m.room;onlineSpectating=true;renderRoomPanel();$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。プレイヤー操作はできません。</div>';setOnlineStatus('観戦状態を復元しました。');return;
+    }
+    if(m.type==='rental_decks'){onlineRentalDecks=m.decks||[];if(onlineRoom?.rule==='rental')renderOnlineSelection();return;}
+    if(m.type==='deployment_options'){
+      onlineDeckOptions={units:m.units||[],magics:m.magics||[],deckId:m.deckId,deckName:m.deckName};
+      onlineSelection=onlineSelection||{};onlineSelection.deckId=m.deckId;onlineSelection.unitIds=onlineDeckOptions.units.map(c=>String(c.id));onlineSelection.magicIds=onlineDeckOptions.magics.map(c=>String(c.id));onlineSelection.active=onlineSelection.active?.filter(id=>onlineSelection.unitIds.includes(id))||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));onlineSelection.reserve=(onlineSelection.reserve||[]).filter(id=>onlineSelection.unitIds.includes(id));onlineSelection.deployConfirmed=false;onlineReady=false;renderOnlineSelection();return;
+    }
+    if(m.type==='battle_selection_confirmed'){
+      onlineSelection={...(onlineSelection||{}),...(m.selection||{}),deployConfirmed:true};setOnlineStatus('出撃設定をサーバーに確定しました。準備完了できます。');renderOnlineSelection();return;
+    }
+    if(m.type==='room_update'){
+      if(m.room){onlineRoom=m.room;renderRoomPanel();}const ps=m.players||[];onlineReady=!!ps[onlineSlot||0]?.ready;renderPlayerList(ps);return;
+    }
+    if(m.type==='pool_ready'){
+      onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={unitIds:[],magicIds:[],deployConfirmed:false};onlineReady=true;renderOnlineSelection();setOnlineStatus('サーバー抽選候補が届きました。');return;
+    }
+    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);applyOnlineState(m.state);if(m.state?.deadline)startOnlineTimer(m.state.deadline);return;}
+    if(m.type==='battle_event'){
+      applyOnlineState(m.state);onlineEventQueue.push(m.event);processOnlineEventQueue();return;
+    }
+    if(m.type==='turn_start'||m.type==='battle_state'){
+      const st=m.state;if(!st)return;
+      const nextTurn=Number(st.turn||0);if(m.type==='turn_start'&&nextTurn>Number(onlineLastTurn||0))resetOnlineTurn();onlineLastTurn=nextTurn||onlineLastTurn;
+      if(onlineEventQueue.length||onlineEventProcessing){if(st.phase==='decision')onlineDeferredDecisionState=st;else applyOnlineState(st);return;}
+      applyOnlineState(st);if(st.phase==='decision'){if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();}return;
+    }
+    if(m.type==='battle_paused'){showOnlinePausedTimer();setOnlineStatus(m.reason||'対戦相手の接続待ちです。');return;}
+    if(m.type==='battle_resumed'){setOnlineStatus('接続が復帰しました。対戦を再開します。');return;}
+    if(m.type==='action_confirmed'){if(m.playerId===onlineSessionId) setOnlineStatus('行動をサーバーに確定しました。相手の入力を待っています。');else setOnlineStatus('相手の行動が確定しました。');return;}
     if(m.type==='battle_error'){onlineSubmitted=false;showOnlineError(m.message||'戦闘処理エラー');if(battleState?.phase==='decision'){$('decision-command-panel')?.classList.remove('hidden');renderOnlineControls();}return;}
-    if(m.type==='action_confirmed'){if(m.playerId!==onlineSessionId)$('online-confirmed-status').innerText='相手の行動が確定しました。';return;}
-    if(m.type==='battle_event'){applyOnlineState(m.state);playOnlineEvent(m.event);return;}
-    if(m.type==='battle_end'){applyOnlineState(m.state);$('online-controls').classList.add('hidden');alert(m.winner==='player1'&&m.state.yourSide==='player1'||m.winner==='player2'&&m.state.yourSide==='player2'?'勝利！':m.winner==='draw'?'引き分け':'敗北…');return;}
-    if(m.type==='player_disconnected'){showOnlinePausedTimer();$('online-status').innerText='対戦相手との接続が切断されました。再接続を待っています。';return;}
-    if(m.type==='error'){showOnlineError(m.message||'エラー');return;}
-    if(m.type==='room_closed'){showOnlineError(m.reason||'部屋が終了しました。');leaveOnlineRoom();return;}
-    if(m.type==='left_room'){onlineRoom=null;onlineMode=false;$('online-room-panel').classList.add('hidden');$('online-lobby').classList.remove('hidden');}
-    if(m.type==='spectate_joined'){onlineRoom=m.room;onlineSpectating=true;$('online-lobby').classList.add('hidden');$('online-room-panel').classList.remove('hidden');$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。操作はできません。</div>';}
+    if(m.type==='player_disconnected'){showOnlinePausedTimer();setOnlineStatus('対戦プレイヤーの接続が切断されました。再接続を待っています。');return;}
+    if(m.type==='battle_end'){
+      if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredEnd={winner:m.winner,state:m.state};return;}
+      applyOnlineState(m.state);$('online-controls')?.classList.add('hidden');const st=m.state;alert((m.winner==='player1'&&st.yourSide==='player1')||(m.winner==='player2'&&st.yourSide==='player2')?'勝利！':m.winner==='draw'?'引き分け':'敗北…');return;
+    }
+    if(m.type==='room_closed'){showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();return;}
+    if(m.type==='left_room'){resetOnlineRoomLocal();setOnlineStatus('部屋から退出しました。');return;}
+    if(m.type==='error'){
+      onlineCreateInFlight=false;
+      if(m.code==='INVALID_ACTION')onlineSubmitted=false;
+      showOnlineError(m.message||'オンライン処理でエラーが発生しました。');
+      return;
+    }
   }
+
   function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
-  // ページ更新時も保存済みセッションを自動再接続し、進行中の部屋・対戦を復元する
-  setTimeout(async()=>{ await waitForAppReady(); if(onlineSessionId) connectOnline(); },0);
-  // オンライン版では既存のオフライン確定処理を使わない
+
+  // オンライン版では既存のオフライン確定処理を使わない。
   const originalConfirmPlayerActions=window.confirmPlayerActions;
   window.confirmPlayerActions=function(){if(onlineMode){submitOnlineActions();return;}return originalConfirmPlayerActions.apply(this,arguments);};
+
+  // ページ更新時に保存済みセッションだけ自動復帰。新規セッションはユーザー操作時に接続する。
+  setTimeout(()=>{if(onlineSessionId){connectOnline();}},0);
+
+  // battle-state更新後にオンライン魔法ターゲットUIも同期するため、既存renderMagicHandをラップする。
+  const originalRenderMagicHand=window.renderMagicHand;
+  if(typeof originalRenderMagicHand==='function'){
+    window.renderMagicHand=function(){originalRenderMagicHand.apply(this,arguments);renderOnlineMagicTargets();};
+  }
 })();
 </script>
 </body>
