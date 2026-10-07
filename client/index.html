@@ -3561,7 +3561,7 @@
     return x;
   }
   function onlineProfilePayload(){
-    return {name:playerName,cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[]};
+    return {name:playerName,cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],assetIds:(allCards||[]).filter(c=>typeof c?.image==='string' || typeof c?.img==='string' || typeof c?.imageUrl==='string').map(c=>String(c.id)).filter(Boolean)};
   }
   function buildCardAssetBatches(){
     const assets=[]; const MAX_BATCH_BYTES=256*1024;
@@ -3599,7 +3599,7 @@
     if (!ready) { showOnlineError('カードデータの読み込みが完了していないため、オンライン同期を待っています。'); return; }
     if (onlineAuthenticated) {
       onlineAssetsReady=!onlineRoom;
-      rawSend('profile_sync',{cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],name:playerName});
+      rawSend('profile_sync',{cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],name:playerName,assetIds:(allCards||[]).filter(c=>typeof c?.image==='string' || typeof c?.img==='string' || typeof c?.imageUrl==='string').map(c=>String(c.id)).filter(Boolean)});
       // 画像は部屋作成/入室/復帰後にだけ同期する。
       // ロビー接続時に全画像を先送りすると、部屋作成要求が画像通信の後ろで待たされるため。
       if (onlineRoom) sendCardAssets();
@@ -3898,7 +3898,8 @@
       ...u,
       side:(side===mySide&&!isSpectator)?'player':'enemy',
       image:getCardImage(localCards.get(u.cardId))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
-      skills:Array.isArray(u.skills)?u.skills:[]
+      skills:Array.isArray(u.skills)?u.skills:[],
+      reservedAction:{type:'attack',targetInstanceId:null}
     });
     const myUnits=(me?.units||[]).map(u=>mapU(u,mySide));
     const oppUnits=(opp?.units||[]).map(u=>mapU(u,mySide==='player1'?'player2':'player1'));
@@ -3908,7 +3909,7 @@
       playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,usedMagicCardIds:new Set(me?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
       selectedPlayerInstanceId:onlineSelectedUnitId||(myUnits.find(u=>u.isActive&&u.currentHp>0)?.instanceId||null),
       playerName:me?.name||'プレイヤー',enemyName:opp?.name||'ライバル',playerIconUrl:playerIcon,enemyIconUrl:null,
-      playerReserveQueue:[],enemyReserveQueue:[],yourSide:st.yourSide
+      playerReserveQueue:[...(me?.reserveQueue||[])].map(String),enemyReserveQueue:[...(opp?.reserveQueue||[])].map(String),yourSide:st.yourSide
     };
     switchView('battle');initBattleUI();renderBattleState();renderOnlineBattleLog(st.events||[]);
     const decision=st.phase==='decision'&&!isSpectator;
@@ -4051,6 +4052,7 @@
     if(m.type==='pool_ready'){
       onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={unitIds:[],magicIds:[],deployConfirmed:false};onlineReady=true;renderOnlineSelection();setOnlineStatus('サーバー抽選候補が届きました。');return;
     }
+    if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
     if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);applyOnlineState(m.state);if(m.state?.deadline)startOnlineTimer(m.state.deadline);return;}
     if(m.type==='battle_event'){
       applyOnlineState(m.state);onlineEventQueue.push(m.event);processOnlineEventQueue();return;
