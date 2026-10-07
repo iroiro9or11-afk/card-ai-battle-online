@@ -3554,6 +3554,7 @@
   let onlineRentalDecks = [];
   let onlineDeckOptions = null;
   let onlineSelection = null;
+  let onlineDeckRequestId = null;
   let onlineTimerHandle = null;
   let onlineDeadline = 0;
   let onlineSubmitted = false;
@@ -3824,7 +3825,7 @@
   }
 
   function resetOnlineRoomLocal(){
-    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckOptions=null;onlineSelection=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastState=null;onlineEventQueue=[];onlineDeferredDecisionState=null;onlineDeferredEnd=null;
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastState=null;onlineEventQueue=[];onlineDeferredDecisionState=null;onlineDeferredEnd=null;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
     onlineMode=false;$('online-controls')?.classList.add('hidden');
@@ -3844,15 +3845,28 @@
     $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
   }
 
+  function requestOnlineDeckOptions(){
+    if(!onlineRoom || onlineSpectating) return;
+    if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot') return;
+    if(onlineDeckOptions) return;
+    const deckId=String(onlineSelection?.deckId||'');
+    if(!deckId) return;
+    if(onlineDeckRequestId===deckId) return;
+    onlineDeckRequestId=deckId;
+    setOnlineStatus('デッキのキャラクターカードを読み込んでいます…');
+    sendOnline('deck_select',{deckId});
+  }
+
   function selectOnlineDeck(deckId){
     if(!onlineRoom||onlineSpectating)return;
     onlineSelection=onlineSelection||{};
-    onlineSelection.deckId=String(deckId||'');onlineSelection.deployConfirmed=false;onlineDeckOptions=null;
+    onlineSelection.deckId=String(deckId||'');onlineSelection.deployConfirmed=false;onlineDeckOptions=null;onlineDeckRequestId=null;
     onlineReady=false;
     renderOnlineSelection();
-    sendOnline('deck_select',{deckId:onlineSelection.deckId});
+    requestOnlineDeckOptions();
   }
   window.selectOnlineDeck=selectOnlineDeck;
+  window.requestOnlineDeckOptions=requestOnlineDeckOptions;
 
   function toggleOnlineReady(){
     if(!onlineRoom||onlineSpectating)return;
@@ -3911,6 +3925,7 @@
     onlineSelection=onlineSelection||{};if(!onlineSelection.deckId)onlineSelection.deckId=current;
     area.innerHTML=`<div class="text-xs text-slate-300 font-bold">オンライン対戦で使用するデッキ</div><select id="online-own-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${decks.map(d=>`<option value="${esc(d.id)}" ${d.id===current?'selected':''}>${esc(d.name)}（キャラ${(d.unitIds||[]).length} / マジック${(d.magicIds||[]).length}）</option>`).join('')}</select><div class="text-[10px] text-slate-500">デッキ選択後、出撃3体と控え順を決定します。</div>`;
     if(onlineDeckOptions)renderDeploymentBuilder(area);
+    else requestOnlineDeckOptions();
   }
   function renderRentalDecks(){
     const area=$('online-selection-area');if(!area)return;
@@ -3919,6 +3934,7 @@
     onlineSelection=onlineSelection||{};if(!onlineSelection.deckId)onlineSelection.deckId=current;
     area.innerHTML=`<div class="text-xs text-slate-300 font-bold">部屋作成者の公開デッキから選択</div><select id="online-rental-deck" onchange="selectOnlineDeck(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">${onlineRentalDecks.map(d=>`<option value="${esc(d.id)}" ${d.id===current?'selected':''}>${esc(d.name)}</option>`).join('')}</select><div class="text-[10px] text-slate-500">選択したデッキだけがオンライン対戦で使用されます。</div>`;
     if(onlineDeckOptions)renderDeploymentBuilder(area);
+    else requestOnlineDeckOptions();
   }
   function renderDeploymentBuilder(area=$('online-selection-area')){
     if(!area||!onlineDeckOptions)return;
@@ -4145,7 +4161,7 @@
       return;
     }
     if(m.type==='room_recovered'){
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineAssetsReady=false;onlineSelection=m.selection||{};onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;renderRoomPanel();renderPlayerList(m.players||[]);if(m.deploymentOptions)onlineDeckOptions=m.deploymentOptions;renderOnlineSelection();sendCardAssets();setOnlineStatus('部屋・対戦状態を復元しました。');return;
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineAssetsReady=false;onlineSelection=m.selection||{};onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;onlineDeckRequestId=null;renderRoomPanel();renderPlayerList(m.players||[]);if(m.deploymentOptions)onlineDeckOptions=m.deploymentOptions;renderOnlineSelection();sendCardAssets();setOnlineStatus('部屋・対戦状態を復元しました。');return;
     }
     if(m.type==='spectate_joined'){
       onlineRoom=m.room;onlineSpectating=true;onlineReady=false;renderRoomPanel();$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。プレイヤー操作はできません。</div>';setOnlineStatus('観戦中です。');return;
@@ -4157,7 +4173,8 @@
     if(m.type==='deployment_options'){
       (m.units||[]).forEach(registerPublicCard);(m.magics||[]).forEach(registerPublicCard);
       onlineDeckOptions={units:m.units||[],magics:m.magics||[],deckId:m.deckId,deckName:m.deckName};
-      onlineSelection=onlineSelection||{};onlineSelection.deckId=m.deckId;onlineSelection.unitIds=onlineDeckOptions.units.map(c=>String(c.id));onlineSelection.magicIds=onlineDeckOptions.magics.map(c=>String(c.id));onlineSelection.active=onlineSelection.active?.filter(id=>onlineSelection.unitIds.includes(id))||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));onlineSelection.reserve=(onlineSelection.reserve||[]).filter(id=>onlineSelection.unitIds.includes(id));onlineSelection.deployConfirmed=false;onlineReady=false;renderOnlineSelection();return;
+      onlineDeckRequestId=String(m.deckId||onlineSelection?.deckId||'');
+      onlineSelection=onlineSelection||{};onlineSelection.deckId=m.deckId;onlineSelection.unitIds=onlineDeckOptions.units.map(c=>String(c.id));onlineSelection.magicIds=onlineDeckOptions.magics.map(c=>String(c.id));onlineSelection.active=onlineSelection.active?.filter(id=>onlineSelection.unitIds.includes(id))||onlineDeckOptions.units.slice(0,3).map(c=>String(c.id));onlineSelection.reserve=(onlineSelection.reserve||[]).filter(id=>onlineSelection.unitIds.includes(id));onlineSelection.deployConfirmed=false;onlineReady=false;setOnlineStatus(`「${onlineDeckOptions.deckName||'選択したデッキ'}」のキャラクターカードを読み込みました。出撃3体を選択してください。`);renderOnlineSelection();return;
     }
     if(m.type==='battle_selection_confirmed'){
       onlineSelection={...(onlineSelection||{}),...(m.selection||{}),deployConfirmed:true};setOnlineStatus('出撃設定をサーバーに確定しました。準備完了できます。');renderOnlineSelection();return;
