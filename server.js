@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.17.0';
+const SERVER_VERSION = '3.18.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -1196,8 +1196,14 @@ function playerRoomRecovery(r, sid, ws) {
   const p = r.players[slot]; p.ws = ws; p.online = true; p.lastSeen = Date.now();
   const s = sessions.get(sid); if (s) s.roomId = r.roomId;
   send(ws, 'room_recovered', {
-    room:publicRoom(r), slot, ready:!!p.ready, players:playerSummaries(r),
-    selection:clone(r.selected[sid] || null), deckSelection:clone(r.deckSelections[sid] || null),
+    room:publicRoom(r),
+    slot,
+    ready:!!p.ready,
+    assetsReady:!!p.assetsReady,
+    players:playerSummaries(r),
+    myDecks:clone(r.profiles[sid]?.decks || []),
+    selection:clone(r.selected[sid] || null),
+    deckSelection:clone(r.deckSelections[sid] || null),
     rentalDecks:r.rule==='rental' ? (r.profiles[r.ownerId]?.decks || []) : [],
     deploymentOptions:deploymentOptionsForPlayer(r,sid)
   });
