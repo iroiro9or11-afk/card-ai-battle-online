@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.10.0';
+const SERVER_VERSION = '3.11.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -159,16 +159,38 @@ function acceptWebSocket(socket) {
   socket._wsOpen = true;
   socket._wsClosed = false;
   socket._wsBuffer = Buffer.alloc(0);
+  socket._wsMessageOpcode = 0;
+  socket._wsMessageChunks = [];
+  socket._wsMessageLength = 0;
+  try { socket.setNoDelay(true); socket.setKeepAlive(true, 30000); } catch {}
+
+  const closeWithCode = (code=1002) => {
+    if (!socket._wsOpen) return;
+    const p = Buffer.alloc(2);
+    p.writeUInt16BE(code, 0);
+    wsControl(socket, 0x8, p);
+    socket.end();
+  };
+  const resetMessage = () => {
+    socket._wsMessageOpcode = 0;
+    socket._wsMessageChunks = [];
+    socket._wsMessageLength = 0;
+  };
+  const emitTextMessage = (payload) => {
+    try { socket.emit('wsmessage', payload.toString('utf8')); }
+    catch { closeWithCode(1007); }
+  };
+
   socket.on('error', () => {});
   socket.on('data', chunk => {
     if (!socket._wsOpen) return;
     socket._wsBuffer = Buffer.concat([socket._wsBuffer, chunk]);
     if (socket._wsBuffer.length > MAX_WS_PAYLOAD + 64 * 1024) {
-      wsControl(socket, 0x8, Buffer.from([1009, 0]));
-      socket.end();
+      closeWithCode(1009);
       return;
     }
-    while (socket._wsBuffer.length >= 2) {
+
+    while (socket._wsBuffer.length >= 2 && socket._wsOpen) {
       const b0 = socket._wsBuffer[0];
       const b1 = socket._wsBuffer[1];
       const fin = !!(b0 & 0x80);
@@ -177,34 +199,74 @@ function acceptWebSocket(socket) {
       const masked = !!(b1 & 0x80);
       let len = b1 & 0x7f;
       let off = 2;
-      if (rsv !== 0 || !fin) { socket.end(); return; }
+
+      if (rsv !== 0 || !masked) { closeWithCode(1002); return; }
       if (len === 126) {
         if (socket._wsBuffer.length < 4) return;
         len = socket._wsBuffer.readUInt16BE(2); off = 4;
       } else if (len === 127) {
         if (socket._wsBuffer.length < 10) return;
         const n = socket._wsBuffer.readBigUInt64BE(2);
-        if (n > BigInt(MAX_WS_PAYLOAD)) { socket.end(); return; }
+        if (n > BigInt(MAX_WS_PAYLOAD)) { closeWithCode(1009); return; }
         len = Number(n); off = 10;
       }
-      const need = off + (masked ? 4 : 0) + len;
+
+      const isControl = opcode >= 0x8;
+      if (isControl && (!fin || len > 125)) { closeWithCode(1002); return; }
+      const need = off + 4 + len;
       if (socket._wsBuffer.length < need) return;
-      let mask = null;
-      if (masked) { mask = socket._wsBuffer.subarray(off, off + 4); off += 4; }
+
+      const mask = socket._wsBuffer.subarray(off, off + 4);
+      off += 4;
       const payload = Buffer.from(socket._wsBuffer.subarray(off, off + len));
       socket._wsBuffer = socket._wsBuffer.subarray(need);
-      if (masked) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
-      if (opcode === 0x8) { wsControl(socket, 0x8, payload.subarray(0, 125)); socket.end(); return; }
+      for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+
+      if (opcode === 0x8) {
+        wsControl(socket, 0x8, payload.subarray(0, 125));
+        socket.end();
+        return;
+      }
       if (opcode === 0x9) { wsControl(socket, 0xA, payload); continue; }
       if (opcode === 0xA) continue;
-      if (opcode !== 0x1) { socket.end(); return; }
-      socket.emit('wsmessage', payload.toString('utf8'));
+
+      if (len > MAX_WS_PAYLOAD || socket._wsMessageLength + len > MAX_WS_PAYLOAD) {
+        closeWithCode(1009);
+        return;
+      }
+
+      if (opcode === 0x1) {
+        if (socket._wsMessageOpcode !== 0) { closeWithCode(1002); return; }
+        if (fin) {
+          emitTextMessage(payload);
+        } else {
+          socket._wsMessageOpcode = 0x1;
+          socket._wsMessageChunks = [payload];
+          socket._wsMessageLength = len;
+        }
+        continue;
+      }
+
+      if (opcode === 0x0) {
+        if (socket._wsMessageOpcode !== 0x1) { closeWithCode(1002); return; }
+        if (len) socket._wsMessageChunks.push(payload);
+        socket._wsMessageLength += len;
+        if (fin) {
+          const full = Buffer.concat(socket._wsMessageChunks, socket._wsMessageLength);
+          resetMessage();
+          emitTextMessage(full);
+        }
+        continue;
+      }
+
+      // Binary frames are not used by this application.
+      closeWithCode(1003);
+      return;
     }
   });
-  socket.on('close', () => { socket._wsOpen = false; socket._wsClosed = true; });
+  socket.on('close', () => { socket._wsOpen = false; socket._wsClosed = true; resetMessage(); });
   return socket;
 }
-
 function roomBySession(sid) {
   const s = sessions.get(sid);
   return s?.roomId ? rooms.get(s.roomId) || null : null;
