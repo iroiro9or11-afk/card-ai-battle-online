@@ -117,7 +117,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.18.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.19.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -424,7 +424,7 @@
           </div>
           <div>
             <div id="battle-player-name-display" class="text-xs font-black text-cyan-300">プレイヤー</div>
-            <div class="text-[10px] text-amber-400 font-bold">AP: <span id="battle-ap" class="text-white text-xs">0</span>/100 <span id="battle-reserved-ap" class="text-slate-400 text-[9px]">(予約合計: 0)</span></div>
+            <div class="text-[10px] text-amber-400 font-bold">AP: <span id="battle-ap" class="text-white text-xs">0</span>/100 <span id="battle-reserved-ap" class="text-slate-400 text-[9px]">(AP予約合計: 0)</span></div>
           </div>
         </div>
 
@@ -444,6 +444,15 @@
             <div class="text-[10px] text-rose-400 font-bold">AP: <span id="battle-enemy-ap" class="text-white text-xs">0</span>/100</div>
           </div>
         </div>
+      </div>
+
+      <!-- 相手の公開マジックカード：戦闘ヘッダー直下、敵キャラカードの上に常時表示 -->
+      <div id="enemy-magic-public-panel" class="bg-slate-900 p-3 rounded-xl border border-rose-900/70 space-y-2 shadow-xl">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-rose-300">📜 相手の公開マジックカード</span>
+          <span id="enemy-magic-public-status" class="text-[10px] text-slate-500">戦闘開始時から全て公開</span>
+        </div>
+        <div id="enemy-magic-hand-grid" class="flex gap-3 overflow-x-auto custom-scrollbar p-2 min-h-[150px]"></div>
       </div>
 
       <!-- フィールド -->
@@ -483,8 +492,8 @@
         
         <div class="border-t border-slate-800 pt-2 flex flex-col sm:flex-row justify-between items-center gap-2">
           <div id="reservation-summary" class="text-[11px] text-slate-300 space-y-0.5 w-full sm:w-auto"></div>
-          <button id="btn-confirm-actions" onclick="confirmPlayerActions()" class="w-full sm:w-auto px-8 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm rounded-xl shadow-lg transition flex-shrink-0">
-            行動決定 (確定して実行フェーズへ)
+          <button id="btn-confirm-actions" type="button" onclick="confirmPlayerActions()" class="w-full sm:w-auto px-8 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm rounded-xl shadow-lg transition flex-shrink-0">
+            ▶ 行動開始（予約を確定して実行）
           </button>
         </div>
       </div>
@@ -497,14 +506,6 @@
         </div>
         <div id="magic-hand-grid" class="flex gap-3 overflow-x-auto custom-scrollbar p-2 min-h-[160px]"></div>
         <div id="online-magic-targets" class="hidden border-t border-slate-800 pt-2"></div>
-      </div>
-
-      <div id="enemy-magic-public-panel" class="bg-slate-900 p-3 rounded-xl border border-rose-900/70 space-y-2 shadow-xl">
-        <div class="flex justify-between items-center">
-          <span class="text-xs font-bold text-rose-300">📜 相手の公開マジックカード</span>
-          <span id="enemy-magic-public-status" class="text-[10px] text-slate-500">戦闘開始時に公開</span>
-        </div>
-        <div id="enemy-magic-hand-grid" class="flex gap-3 overflow-x-auto custom-scrollbar p-2 min-h-[150px]"></div>
       </div>
 
       <!-- 戦闘ログ -->
@@ -2577,6 +2578,7 @@
       atkBtn.onclick = () => {
         activeUnit.reservedAction = { type: 'attack', targetInstanceId: null };
         renderBattleState();
+        updateReservationSummary();
       };
       optContainer.appendChild(atkBtn);
 
@@ -2604,6 +2606,7 @@
           };
           activeUnit.reservedAction = nextAction;
           renderBattleState();
+          updateReservationSummary();
         };
         optContainer.appendChild(skBtn);
 
@@ -2645,6 +2648,7 @@
               targetBtn.onclick = () => {
                 activeUnit.reservedAction.targetInstanceId = target.instanceId;
                 renderBattleState();
+                updateReservationSummary();
               };
               targetRow.appendChild(targetBtn);
             });
@@ -2730,15 +2734,16 @@
         wrap.onclick = () => {
           if (isUsed) return;
           battleState.reservedMagic = isReserved ? null : m;
-          battleState.reservedMagicTargetInstanceId = isReserved ? null : null;
+          battleState.reservedMagicTargetInstanceId = null;
           renderBattleState();
+          updateReservationSummary();
         };
         grid.appendChild(wrap);
         if(isReserved && ['select_enemy_1','select_ally_1'].includes(m.effect?.targetType)){
           const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-purple-500/40 bg-purple-950/20 text-[9px]';
           const actor={side:'player',currentHp:1,maxHp:1}; const pool=(getTargetPool(m.effect.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,m.effect.targetCond));
           box.innerHTML='<div class="font-black text-purple-300 mb-1">🎯 マジック対象</div>';
-          pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicTargetInstanceId=t.instanceId;renderBattleState();};box.appendChild(b);});
+          pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicTargetInstanceId=t.instanceId;renderBattleState();updateReservationSummary();};box.appendChild(b);});
           wrap.appendChild(box);
         }
       });
@@ -2749,13 +2754,14 @@
       const status=document.getElementById('enemy-magic-public-status');
       if(!grid)return;
       grid.innerHTML='';
-      const cards=battleState.enemyMagicHand||[];
-      if(!onlineMode || !cards.length){
-        grid.innerHTML='<div class="text-[10px] text-slate-500 p-2">公開マジックカードはありません。</div>';
-        if(status)status.innerText='公開マジックなし';
+      const cards = Array.isArray(battleState.enemyMagicHand) ? battleState.enemyMagicHand : [];
+      if(!cards.length){
+        grid.innerHTML='<div class="text-[10px] text-slate-500 p-2">相手のマジックカードはありません。</div>';
+        if(status) status.innerText='マジックカードなし';
         return;
       }
-      if(status)status.innerText=`${cards.length}枚公開中`;
+      // オフラインでも戦闘開始時から相手のマジックカードを全て公開する。
+      if(status) status.innerText=`${cards.length}枚公開中（戦闘開始時から全公開）`;
       const used=battleState.enemyUsedMagicCardIds||new Set();
       cards.forEach(m=>{
         const isUsed=used.has(m.id);
@@ -2769,31 +2775,58 @@
 
     window.renderEnemyMagicHand = renderEnemyMagicHand;
 
-    function updateReservationSummary() {
+    function getPlayerReservedApCost() {
       let totalCost = 0;
-      battleState.playerUnits.forEach(u => {
-        if (u.currentHp > 0 && u.reservedAction.type === 'skill') {
-          const sk = u.skills[u.reservedAction.skillIndex];
-          if (sk) totalCost += (sk.cost || 0);
-        }
+      for (const u of (battleState.playerUnits || [])) {
+        if (!u || u.currentHp <= 0 || !u.reservedAction || u.reservedAction.type !== 'skill') continue;
+        const sk = u.skills?.[u.reservedAction.skillIndex];
+        if (sk) totalCost += Math.max(0, Number(sk.cost) || 0);
+      }
+      if (battleState.reservedMagic?.effect) {
+        totalCost += Math.max(0, Number(battleState.reservedMagic.effect.cost) || 0);
+      }
+      return totalCost;
+    }
+
+    function getPlayerReservationValidation() {
+      const totalCost = getPlayerReservedApCost();
+      const currentAp = Math.max(0, Number(battleState.playerAp) || 0);
+      const hasUnselectedTarget = (battleState.playerUnits || []).some(u => {
+        if (!u || u.currentHp <= 0 || u.reservedAction?.type !== 'skill') return false;
+        const sk = u.skills?.[u.reservedAction.skillIndex];
+        return !!sk && skillNeedsManualTarget(sk) && !u.reservedAction.targetInstanceId;
       });
-      if (battleState.reservedMagic?.effect) totalCost += (battleState.reservedMagic.effect.cost || 0);
+      return { totalCost, currentAp, hasUnselectedTarget, apShortage: totalCost > currentAp };
+    }
 
-      document.getElementById("battle-reserved-ap").innerText = `(予約消費: ${totalCost})`;
+    function updateReservationSummary() {
+      const {totalCost, currentAp, hasUnselectedTarget, apShortage} = getPlayerReservationValidation();
+      const apEl = document.getElementById("battle-reserved-ap");
+      if (apEl) {
+        apEl.innerText = `(AP予約合計: ${totalCost} / 現在AP: ${currentAp})`;
+        apEl.classList.toggle('text-rose-300', apShortage);
+        apEl.classList.toggle('text-slate-400', !apShortage);
+      }
 
-      const hasUnselectedTarget = battleState.playerUnits.some(u => {
-        if (u.currentHp <= 0 || u.reservedAction.type !== 'skill') return false;
-        const sk = u.skills[u.reservedAction.skillIndex];
-        return skillNeedsManualTarget(sk) && !u.reservedAction.targetInstanceId;
-      });
+      const summary = document.getElementById('reservation-summary');
+      if (summary) {
+        const parts = [`AP予約合計: <b>${totalCost}</b> / 現在AP: <b>${currentAp}</b>`];
+        if (apShortage) parts.push(`<span class="text-rose-300">⚠ APが ${totalCost-currentAp} 足りません</span>`);
+        else if (hasUnselectedTarget) parts.push('<span class="text-amber-300">⚠ 対象を選択してください</span>');
+        else parts.push('<span class="text-emerald-300">✓ この内容で行動開始できます</span>');
+        summary.innerHTML = parts.join('<br>');
+      }
 
+      // 「押せない」状態を作らない。入力エラーはクリック後に明示し、ユーザーが内容を修正できるようにする。
       const btn = document.getElementById("btn-confirm-actions");
-      if (totalCost > battleState.playerAp || hasUnselectedTarget) {
-        btn.disabled = true;
-        btn.classList.add("opacity-50", "cursor-not-allowed");
-      } else {
+      if (btn) {
         btn.disabled = false;
         btn.classList.remove("opacity-50", "cursor-not-allowed");
+        btn.classList.toggle('bg-amber-400', apShortage || hasUnselectedTarget);
+        btn.classList.toggle('hover:bg-amber-300', apShortage || hasUnselectedTarget);
+        btn.classList.toggle('bg-emerald-500', !apShortage && !hasUnselectedTarget);
+        btn.classList.toggle('hover:bg-emerald-400', !apShortage && !hasUnselectedTarget);
+        btn.title = apShortage ? `AP不足: 予約${totalCost} / 現在${currentAp}` : (hasUnselectedTarget ? '対象未選択の行動があります' : '予約した行動を開始します');
       }
     }
 
@@ -2936,6 +2969,24 @@
     async function confirmPlayerActions() {
       // 二重クリックで同じターンを2重実行しない。
       if (battleExecutionRunning || battleState.phase !== "decision") return;
+
+      const validation = getPlayerReservationValidation();
+      updateReservationSummary();
+      if (validation.apShortage) {
+        logBattle(`⚠️ APが足りません。AP予約合計 ${validation.totalCost} / 現在AP ${validation.currentAp}`);
+        const btn = document.getElementById('btn-confirm-actions');
+        if (btn) { btn.focus(); btn.scrollIntoView({behavior:'smooth', block:'center'}); }
+        return;
+      }
+      if (validation.hasUnselectedTarget) {
+        logBattle('⚠️ 対象を選択していない指定対象スキルがあります。');
+        const btn = document.getElementById('btn-confirm-actions');
+        if (btn) { btn.focus(); btn.scrollIntoView({behavior:'smooth', block:'center'}); }
+        return;
+      }
+
+      // 念のため行動開始時に決定パネルを可視状態へ戻せるようにする。
+      document.getElementById('decision-command-panel')?.classList.remove('hidden');
       battleExecutionRunning = true;
       let turnAdvanceHandled = false;
 
