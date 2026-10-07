@@ -543,9 +543,7 @@ function damage(u, amount) {
 }
 function addStatus(t, s, isBuff) {
   const arr = isBuff ? (t.buffs || (t.buffs = [])) : (t.debuffs || (t.debuffs = []));
-  const idx = s.stackable === false ? arr.findIndex(x => x.type === s.type) : -1;
-  if (idx >= 0) arr[idx] = { ...arr[idx], ...s };
-  else arr.push({ ...s, appliedTurn: s.appliedTurn ?? null });
+  arr.push({ ...s, appliedTurn: s.appliedTurn ?? null });
 }
 function addAbnormality(t, status, duration, appliedTurn) {
   if (!t) return false;
@@ -633,6 +631,7 @@ function evalCond(b, cond, actor) {
   return true;
 }
 function targets(b, actor, type, cond, selected, isMagic=false) {
+  if (type === 'same_main_target') return selected ? targets(b, actor, actor.__sameMainTargetType || 'self', cond, selected, isMagic) : [];
   if (type === 'player_self') return [{ __playerTarget: 'self', name: actor.side === 'player1' ? b.p1.name : b.p2.name }];
   if (type === 'player_opp') return [{ __playerTarget: 'opp', name: actor.side === 'player1' ? b.p2.name : b.p1.name }];
   if (type === 'self') return [actor];
@@ -679,15 +678,15 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
     return `${target.name}のHP +${target.currentHp - before}`;
   }
   if (eff.type === 'damage_cut_ratio') {
-    addStatus(target, { type:'dmg_cut', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', stackable:eff.stackable!==false, appliedTurn }, Number(eff.val)>=0);
+    addStatus(target, { type:'dmg_cut', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
     return `被ダメージ${eff.val}%カット`;
   }
   if (eff.type === 'mod_atk_ratio' || eff.type === 'mod_atk_val') {
-    addStatus(target, { type:eff.type==='mod_atk_ratio'?'atk_ratio':'atk_val', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', stackable:eff.stackable!==false, appliedTurn }, Number(eff.val)>=0);
+    addStatus(target, { type:eff.type==='mod_atk_ratio'?'atk_ratio':'atk_val', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
     return `攻撃力 ${eff.val>=0?'+':''}${eff.val}${eff.type==='mod_atk_ratio'?'%':''}`;
   }
   if (eff.type === 'mod_speed') {
-    addStatus(target, { type:'speed', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', stackable:eff.stackable!==false, appliedTurn }, Number(eff.val)>=0);
+    addStatus(target, { type:'speed', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
     return `行動値 ${eff.val>=0?'+':''}${eff.val}`;
   }
   if (eff.type === 'clear_buffs') { target.buffs = []; return 'バフ全解除'; }
@@ -703,7 +702,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   }
   if (eff.type === 'clear_statuses') { target.statuses = []; return `${target.name}の全状態異常を解除`; }
   if (eff.type === 'heal_block' || eff.type === 'skill_block') {
-    addStatus(target, { type:eff.type, duration, source:'debuff', stackable:eff.stackable!==false, appliedTurn }, false);
+    addStatus(target, { type:eff.type, duration, source:'debuff', appliedTurn }, false);
     return eff.type === 'heal_block' ? `回復禁止${duration}ターン` : `スキル使用禁止${duration}ターン`;
   }
   return null;
@@ -1024,7 +1023,7 @@ function validateActionSet(b, side, actions) {
   const units = activeUnits(b, side);
   const byId = new Map(units.map(u => [u.instanceId, u]));
   const rawUnits = Array.isArray(actions.units) ? actions.units : [];
-  const out = {units:[], magicId:null, magicTargetInstanceId:actions.magicTargetInstanceId || actions.magic?.targetInstanceId || null, actionId:actions.actionId || uid('action')};
+  const out = {units:[], magicId:null, magicTargetInstanceId:actions.magicTargetInstanceId || actions.magic?.targetInstanceId || null, magicSubTargetInstanceId:actions.magicSubTargetInstanceId || actions.magic?.subTargetInstanceId || null, actionId:actions.actionId || uid('action')};
   const seen = new Set();
   let totalCost = 0;
   for (const a of rawUnits) {
@@ -1048,10 +1047,15 @@ function validateActionSet(b, side, actions) {
     totalCost += cost;
     const pool = targetPool(b, u, sk.targetType).filter(t => matchesTarget(t, sk.targetCond));
     if (sk.targetType === 'select_enemy_1' || sk.targetType === 'select_ally_1') {
-      if (!a.targetInstanceId || !pool.some(t => t.instanceId === a.targetInstanceId)) throw new Error(`「${sk.name}」の対象が不正です。`);
+      if (!a.targetInstanceId || !pool.some(t => t.instanceId === a.targetInstanceId)) throw new Error(`「${sk.name}」のメイン効果対象が不正です。`);
     }
     if (!pool.length && !['self','player_self','player_opp'].includes(sk.targetType)) throw new Error(`「${sk.name}」の対象が存在しません。`);
-    out.units.push({unitInstanceId:u.instanceId,type:'skill',skillIndex:Number(a.skillIndex),targetInstanceId:a.targetInstanceId || null});
+    if (sk.hasSubEffect && sk.subEffect && sk.subEffect.targetType !== 'same_main_target') {
+      const sp = targetPool(b,u,sk.subEffect.targetType).filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}));
+      if ((sk.subEffect.targetType === 'select_enemy_1' || sk.subEffect.targetType === 'select_ally_1') && (!a.subTargetInstanceId || !sp.some(t => t.instanceId === a.subTargetInstanceId))) throw new Error(`「${sk.name}」の追加効果対象が不正です。`);
+      if (!sp.length && !['self','player_self','player_opp'].includes(sk.subEffect.targetType)) throw new Error(`「${sk.name}」の追加効果対象が存在しません。`);
+    }
+    out.units.push({unitInstanceId:u.instanceId,type:'skill',skillIndex:Number(a.skillIndex),targetInstanceId:a.targetInstanceId || null,subTargetInstanceId:a.subTargetInstanceId || null});
   }
   const magicId = actions.magicId || actions.magic?.id || null;
   if (magicId) {
@@ -1066,6 +1070,11 @@ function validateActionSet(b, side, actions) {
     if ((eff.targetType === 'select_enemy_1' || eff.targetType === 'select_ally_1') && !out.magicTargetInstanceId) throw new Error(`「${card.name}」の対象を選択してください。`);
     if (out.magicTargetInstanceId && !pool.some(t => t.instanceId === out.magicTargetInstanceId)) throw new Error(`「${card.name}」の対象が不正です。`);
     if (!pool.length && !['player_self','player_opp','self'].includes(eff.targetType)) throw new Error(`「${card.name}」の対象が存在しません。`);
+    if (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target') {
+      const sp=targetPool(b,actor,eff.subEffect.targetType).filter(t=>matchesTarget(t,eff.subEffect.targetCond||{type:'none'}));
+      if ((eff.subEffect.targetType==='select_enemy_1'||eff.subEffect.targetType==='select_ally_1') && (!out.magicSubTargetInstanceId || !sp.some(t=>t.instanceId===out.magicSubTargetInstanceId))) throw new Error(`「${card.name}」の追加効果対象が不正です。`);
+      if (!sp.length && !['player_self','player_opp','self'].includes(eff.subEffect.targetType)) throw new Error(`「${card.name}」の追加効果対象が存在しません。`);
+    }
     out.magicId = magicId;
   } else if (out.magicTargetInstanceId) {
     throw new Error('マジック対象だけが指定されています。');
@@ -1073,7 +1082,7 @@ function validateActionSet(b, side, actions) {
   if (totalCost > pl.ap) throw new Error('APが不足しています。');
   return out;
 }
-function executeMagic(b, side, card, selectedTargetId=null) {
+function executeMagic(b, side, card, selectedTargetId=null, selectedSubTargetId=null) {
   const resource = side === 'player1' ? b.p1 : b.p2;
   const cost = Number(card.effect?.cost || 0);
   if (resource.ap < cost) return {type:'MAGIC_USE',actor:{side,name:resource.name},actionName:card.name,effect:'AP不足',result:'不発',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
@@ -1084,9 +1093,11 @@ function executeMagic(b, side, card, selectedTargetId=null) {
   resource.ap -= cost;
   const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines = [];
-  for (const t of main) { const r = applyEffect(b, eff.mainEffect, t, actor, true); if (r) lines.push(r); }
-  if (eff.hasSubEffect && eff.subEffect) {
-    const sub = targets(b, actor, eff.subEffect.targetType || eff.targetType, eff.subEffect.targetCond || eff.targetCond, selectedTargetId, true);
+  let mainEffectSucceeded=false;
+  for (const t of main) { const r = applyEffect(b, eff.mainEffect, t, actor, true); if (r) { mainEffectSucceeded=true; lines.push(r); } }
+  if (mainEffectSucceeded && eff.hasSubEffect && eff.subEffect) {
+    const subType=eff.subEffect.targetType||'same_main_target';
+    const sub = subType==='same_main_target' ? main : targets(b, actor, subType, eff.subEffect.targetCond || {type:'none'}, selectedSubTargetId, true);
     for (const t of sub) { const r = applyEffect(b, eff.subEffect, t, actor, true); if (r) lines.push(r); }
   }
   const tar = main[0];
@@ -1156,7 +1167,7 @@ function executeTurn(r) {
     }
     if (actions.magicId) {
       const card = pl.magicCards[actions.magicId];
-      if (card) pending.set('magic_'+side, {side,magic:card,magicTargetInstanceId:actions.magicTargetInstanceId || null});
+      if (card) pending.set('magic_'+side, {side,magic:card,magicTargetInstanceId:actions.magicTargetInstanceId || null,magicSubTargetInstanceId:actions.magicSubTargetInstanceId || null});
     }
   }
   while (pending.size && !b.winner) {
@@ -1169,7 +1180,7 @@ function executeTurn(r) {
     });
     const x = arr[0];
     pending.delete(x.u ? x.u.instanceId : 'magic_'+x.side);
-    const ev = x.magic ? executeMagic(b,x.side,x.magic,x.magicTargetInstanceId) : executeAction(b,x.side,x.u,x.a);
+    const ev = x.magic ? executeMagic(b,x.side,x.magic,x.magicTargetInstanceId,x.magicSubTargetInstanceId) : executeAction(b,x.side,x.u,x.a);
     if (x.magic) battlePlayer(b,x.side).usedMagic.push(x.magic.id);
     if (ev) { b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev}); }
     flushPendingEvents(r);
