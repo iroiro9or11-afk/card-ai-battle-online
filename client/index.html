@@ -3458,6 +3458,8 @@
   let onlineReconnectTimer = null;
   let onlineReconnectDelay = 1000;
   let onlineCreateInFlight = false;
+  let onlineAssetsReady = false;
+  let onlineAssetsSyncing = false;
   let onlineSessionId = localStorage.getItem('cardBattleOnlineSession') || null;
   let onlineRoom = null;
   let onlineSlot = null;
@@ -3547,13 +3549,58 @@
     if(typeof c.imageUrl==='string')x.imageUrl=c.imageUrl;
     return x;
   }
+  function transportCard(c){
+    if(!c)return null;
+    const x=stripCard(c);
+    if(!x)return null;
+    // 画像は別メッセージで分割送信する。カード本体には巨大なbase64画像を含めない。
+    delete x.image;
+    delete x.img;
+    delete x.imageUrl;
+    return x;
+  }
   function onlineProfilePayload(){
-    return {name:playerName,cards:(allCards||[]).map(stripCard).filter(Boolean),decks:allDecks||[]};
+    return {name:playerName,cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[]};
+  }
+  function buildCardAssetBatches(){
+    const assets=[]; const MAX_BATCH_BYTES=700*1024;
+    let batch=[]; let size=2;
+    for(const c of (allCards||[])){
+      const image=typeof c?.image==='string'?c.image:(typeof c?.img==='string'?c.img:(typeof c?.imageUrl==='string'?c.imageUrl:null));
+      if(!image)continue;
+      const item={id:String(c.id),image};
+      const itemSize=JSON.stringify(item).length;
+      if(batch.length && size+itemSize+32>MAX_BATCH_BYTES){assets.push(batch);batch=[];size=2;}
+      batch.push(item);size+=itemSize+1;
+    }
+    if(batch.length)assets.push(batch);
+    return assets;
+  }
+  function sendCardAssets(){
+    if(!onlineAuthenticated||!onlineWS||onlineWS.readyState!==WebSocket.OPEN)return;
+    const batches=buildCardAssetBatches();
+    onlineAssetsSyncing=true;
+    onlineAssetsReady=batches.length===0;
+    if(onlineAssetsReady){setOnlineStatus(onlineRoom?'カード画像の同期完了。':'オンライン接続済み。');return;}
+    let index=0;
+    const sendNext=()=>{
+      if(index>=batches.length){onlineAssetsSyncing=false;return;}
+      rawSend('profile_assets',{assets:batches[index],batch:index,total:batches.length});
+      index++;
+      if(index>=batches.length){onlineAssetsSyncing=false;}
+    };
+    // 1回のWebSocketフレームを小さく保ち、ブラウザ/Render側で切断されないようにする。
+    sendNext();
+    window.__cardBattleAssetNext=sendNext;
   }
   async function syncProfileAfterHello(){
     const ready = await waitForAppReady();
     if (!ready) { showOnlineError('カードデータの読み込みが完了していないため、オンライン同期を待っています。'); return; }
-    if (onlineAuthenticated) rawSend('profile_sync',{cards:(allCards||[]).map(stripCard).filter(Boolean),decks:allDecks||[],name:playerName});
+    if (onlineAuthenticated) {
+      onlineAssetsReady=false;
+      rawSend('profile_sync',{cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],name:playerName});
+      sendCardAssets();
+    }
   }
 
   function connectOnline(){
@@ -3712,6 +3759,7 @@
 
   function toggleOnlineReady(){
     if(!onlineRoom||onlineSpectating)return;
+    if(!onlineAssetsReady){showOnlineError('カード画像の同期がまだ完了していません。少し待ってから「準備完了」を押してください。');return;}
     if(!onlineReady){
       if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && !onlineSelection?.deployConfirmed){showOnlineError('先にデッキを選び、出撃する3体と控えの順番を確定してください。');return;}
       onlineReady=true;$('online-ready-btn').innerText='準備を解除';sendOnline('room_ready',{ready:true});
@@ -3954,16 +4002,21 @@
     if(m.type==='hello'){
       onlineAuthenticated=true;onlineSessionId=m.sessionId||onlineSessionId;localStorage.setItem('cardBattleOnlineSession',onlineSessionId);updateConnectionBadge('connected','接続済み');setOnlineStatus('オンライン接続済み。');syncProfileAfterHello();flushOnlineQueue();return;
     }
+    if(m.type==='profile_assets_ack'){
+      if(m.done){onlineAssetsReady=true;onlineAssetsSyncing=false;setOnlineStatus(onlineRoom?'カード画像の同期が完了しました。':'オンライン接続済み。');}
+      else if(window.__cardBattleAssetNext) window.__cardBattleAssetNext();
+      return;
+    }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
       onlineCreateInFlight=false; const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineRentalDecks=m.rentalDecks||[];renderRoomPanel();renderPlayerList([]);renderOnlineSelection();onlineCreateInFlight=false;setOnlineStatus('部屋に参加しました。');
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineRentalDecks=m.rentalDecks||[];renderRoomPanel();renderPlayerList([]);renderOnlineSelection();onlineCreateInFlight=false;setOnlineStatus('部屋に参加しました。カード画像を同期しています…');sendCardAssets();
       // 通常ルールは最初のデッキ候補をサーバーへ同期して、出撃設定まで進められるようにする。
       if((onlineRoom.rule==='unlimited'||onlineRoom.rule==='rental') && onlineSelection?.deckId) sendOnline('deck_select',{deckId:String(onlineSelection.deckId)});
       return;
     }
     if(m.type==='room_recovered'){
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineSelection=m.selection||{};onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;renderRoomPanel();renderPlayerList(m.players||[]);if(m.deploymentOptions)onlineDeckOptions=m.deploymentOptions;renderOnlineSelection();setOnlineStatus('部屋・対戦状態を復元しました。');return;
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=!!m.ready;onlineAssetsReady=false;onlineSelection=m.selection||{};onlinePool=null;onlineRentalDecks=m.rentalDecks||[];onlineDeckOptions=null;renderRoomPanel();renderPlayerList(m.players||[]);if(m.deploymentOptions)onlineDeckOptions=m.deploymentOptions;renderOnlineSelection();sendCardAssets();setOnlineStatus('部屋・対戦状態を復元しました。');return;
     }
     if(m.type==='spectate_joined'){
       onlineRoom=m.room;onlineSpectating=true;onlineReady=false;renderRoomPanel();$('online-selection-area').innerHTML='<div class="text-xs text-purple-300 font-bold">観戦中です。プレイヤー操作はできません。</div>';setOnlineStatus('観戦中です。');return;
