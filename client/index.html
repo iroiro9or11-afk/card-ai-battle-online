@@ -104,6 +104,18 @@
     </div>
   </div>
 
+  <!-- 戦闘終了結果ポップアップ -->
+  <div id="battle-result-modal" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 backdrop-blur-md hidden px-3">
+    <div class="bg-slate-950 border-4 border-amber-500 rounded-3xl p-6 sm:p-8 w-[94%] max-w-xl text-center shadow-[0_0_80px_rgba(245,158,11,0.45)]">
+      <div id="battle-result-title" class="text-4xl sm:text-6xl font-black text-amber-300 leading-tight">勝利！</div>
+      <div id="battle-result-message" class="mt-3 text-base sm:text-xl font-bold text-slate-200">戦闘に勝利しました。</div>
+      <div class="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button type="button" id="battle-result-rematch" class="py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base shadow-lg">🔄 再戦</button>
+        <button type="button" id="battle-result-back" class="py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-black text-base">↩ 戻る</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ターン開始演出 -->
   <div id="turn-start-overlay" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm hidden pointer-events-none">
     <div class="text-center animate-pop">
@@ -117,7 +129,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.19.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.20.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -658,7 +670,8 @@
       playerName: "あなた",
       enemyName: "ライバル",
       playerIconUrl: null,
-      enemyIconUrl: null
+      enemyIconUrl: null,
+      resultWinner: null
     };
 
     const PRESET_ATTRIBUTES = ["人間", "亜人", "機械", "幻獣", "モンスター", "炎", "水", "風", "地", "光", "闇", "無", "物理", "魔法", "戦士", "回復", "重装"];
@@ -2308,6 +2321,7 @@
 
     // 戦闘エンジン
     function startBattle() {
+      hideBattleResultModal();
       const pDeckId=document.getElementById('select-player-deck').value, eDeckId=document.getElementById('select-enemy-deck').value;
       const pDeck=allDecks.find(d=>d.id===pDeckId), eDeck=allDecks.find(d=>d.id===eDeckId); if(!pDeck||!eDeck){alert('デッキを正しく選択してください。');return;}
       normalizeDeploymentForDeck(pDeck);
@@ -2322,7 +2336,7 @@
         enemyIntelligence:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.intelligence)||'normal',
         playerName:playerName,enemyName:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.name)||'ライバル',playerIconUrl:playerIcon,
         enemyIconUrl:(allRivals.find(r=>r.id===document.getElementById('select-rival-preset').value)?.iconImage)||null,
-        playerReserveQueue:[...deploymentSelection.player.reserve],enemyReserveQueue:[...enemyReserve]};
+        playerReserveQueue:[...deploymentSelection.player.reserve],enemyReserveQueue:[...enemyReserve],resultWinner:null};
       battleState.selectedPlayerInstanceId = getActiveUnits('player')[0]?.instanceId || null;
       runPassiveSkills('battle_start');
       // 開幕の出撃3体も「登場」扱い。戦闘開始時とは別に登場時パッシブを発動する。
@@ -2374,6 +2388,7 @@
 
     async function startTurnPhase() {
       battleState.phase = "decision";
+      document.getElementById("decision-command-panel")?.classList.remove("hidden");
 
       // 戦闘開始時APは0。毎ターン開始時に20回復するため、1ターン目の実質APは20。
       battleState.playerAp = Math.min(100, battleState.playerAp + 20);
@@ -3065,7 +3080,7 @@
         console.error('Battle execution error:', executionError);
         logBattle('⚠️ 戦闘処理でエラーが発生しました。行動選択を復旧します。');
 
-        if (!checkBattleEnd()) {
+        if (!checkBattleEnd() && !battleState.resultWinner) {
           battleState.turn++;
           turnAdvanceHandled = true;
           try {
@@ -3100,13 +3115,18 @@
       const resultLines = [];
       const targetNames = [];
       const targetEntities = [];
+      const actor = { side, currentHp: 1, maxHp: 1 };
+      const isPlayerActor = side === 'player';
+      const cost = Number(card.effect?.cost || 0);
+      if ((isPlayerActor ? battleState.playerAp : battleState.enemyAp) < cost) {
+        logBattle(`⚠️ ${isPlayerActor ? 'プレイヤー' : '敵'}はマジック【${card.name}】のAPが不足しています。`);
+        return;
+      }
+      if (isPlayerActor) battleState.playerAp = Math.max(0, battleState.playerAp - cost);
+      else battleState.enemyAp = Math.max(0, battleState.enemyAp - cost);
+
       if (card.effect) {
         const eff = card.effect;
-        const actor = { side, currentHp: 1, maxHp: 1 };
-        const isPlayerActor = side === 'player';
-        const cost = Number(eff.cost || 0);
-        if ((isPlayerActor ? battleState.playerAp : battleState.enemyAp) < cost) return;
-        if (isPlayerActor) battleState.playerAp = Math.max(0, battleState.playerAp - cost); else battleState.enemyAp = Math.max(0, battleState.enemyAp - cost);
         const mainTargets = resolveTargets(eff.targetType, eff.targetCond, actor, isPlayerActor, battleState.reservedMagicTargetInstanceId || null, true);
         mainTargets.forEach(t => {
           targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
@@ -3215,8 +3235,12 @@
     }
 
     function resolveTargets(targetType, targetCond, actor, isPlayer, selectedTargetInstanceId = null, isMagic = false) {
-      if (targetType === 'player_self') return isPlayer ? [{ __playerTarget: 'self' }] : [];
-      if (targetType === 'player_opp') return isPlayer ? [{ __playerTarget: 'opp' }] : [];
+      // プレイヤー対象は「発動者がプレイヤーかAIか」に関係なく、
+      // self=発動側プレイヤー、opp=相手プレイヤーとして解決する。
+      // 旧実装ではAI側の player_self / player_opp が [] になり、
+      // AP変更スキルなどが「対象なし」で不発になることがあった。
+      if (targetType === 'player_self') return [{ __playerTarget: 'self', __playerSide: isPlayer ? 'player' : 'enemy' }];
+      if (targetType === 'player_opp') return [{ __playerTarget: 'opp', __playerSide: isPlayer ? 'enemy' : 'player' }];
       if (targetType === 'self') return actor ? [actor] : [];
 
       let pool = getTargetPool(targetType, actor).filter(t => matchesTargetCondition(t, targetCond));
@@ -3497,7 +3521,52 @@
       });
     }
 
+    function showBattleResultModal(winner) {
+      const modal = document.getElementById('battle-result-modal');
+      const title = document.getElementById('battle-result-title');
+      const message = document.getElementById('battle-result-message');
+      const rematch = document.getElementById('battle-result-rematch');
+      const back = document.getElementById('battle-result-back');
+      if (!modal || !title || !message) return;
+
+      if (winner === 'player') {
+        title.innerText = '🎉 勝利！';
+        title.className = 'text-4xl sm:text-6xl font-black text-emerald-300 leading-tight';
+        message.innerText = 'おめでとうございます！あなたの勝利です。';
+      } else if (winner === 'enemy') {
+        title.innerText = '💀 敗北';
+        title.className = 'text-4xl sm:text-6xl font-black text-rose-300 leading-tight';
+        message.innerText = '今回は敗北しました。';
+      } else {
+        title.innerText = '🤝 引き分け';
+        title.className = 'text-4xl sm:text-6xl font-black text-amber-300 leading-tight';
+        message.innerText = '両者とも勝利条件を満たさなかったため引き分けです。';
+      }
+
+      if (rematch) {
+        rematch.onclick = () => {
+          hideBattleResultModal();
+          battleExecutionRunning = false;
+          startBattle();
+        };
+      }
+      if (back) {
+        back.onclick = () => {
+          hideBattleResultModal();
+          battleExecutionRunning = false;
+          battleState.phase = 'decision';
+          switchView('battle-setup');
+        };
+      }
+      modal.classList.remove('hidden');
+    }
+
+    function hideBattleResultModal() {
+      document.getElementById('battle-result-modal')?.classList.add('hidden');
+    }
+
     function checkBattleEnd(includeTurnLimit=false) {
+      if (battleState.resultWinner) return true;
       const playerAliveCount=battleState.playerUnits.filter(u=>u.currentHp>0).length;
       const enemyAliveCount=battleState.enemyUnits.filter(u=>u.currentHp>0).length;
       const playerAlive=playerAliveCount>0, enemyAlive=enemyAliveCount>0;
@@ -3505,11 +3574,16 @@
       if(!playerAlive||!enemyAlive) winner=playerAlive&&!enemyAlive?'player':(!playerAlive&&enemyAlive?'enemy':'draw');
       else if(includeTurnLimit && battleState.turn>=20 && battleState.phase==='execution') winner=playerAliveCount>enemyAliveCount?'player':(enemyAliveCount>playerAliveCount?'enemy':'draw');
       if(winner){
-        if(winner==='player'){logBattle('🎉 VICTORIA! あなたの勝利です！');alert('🎉 勝利しました！');}
-        else if(winner==='enemy'){logBattle('💀 DEFEAT... 敗北しました。');alert('💀 敗北しました...');}
-        else {logBattle('🤝 DRAW... 引き分けです。');alert('🤝 引き分けです。');}
+        battleState.resultWinner = winner;
+        battleState.phase = 'result';
+        document.getElementById('decision-command-panel')?.classList.add('hidden');
+        if(winner==='player') logBattle('🎉 VICTORIA! あなたの勝利です！');
+        else if(winner==='enemy') logBattle('💀 DEFEAT... 敗北しました。');
+        else logBattle('🤝 DRAW... 引き分けです。');
+        showBattleResultModal(winner);
         return true;
-      } return false;
+      }
+      return false;
     }
 
     async function showActionPopupNow(actor, actionName, cardData, info = {}) {
@@ -3521,6 +3595,8 @@
       // 詳細UIの一部で例外が起きても「演出なし→即次ターン」にならないよう、
       // 最低3秒は必ず表示する。
       modal.classList.remove("hidden");
+      const popupKind = document.getElementById("popup-title");
+      if (popupKind) popupKind.innerText = cardData?.cardType === 'magic' ? 'MAGIC CARD' : 'ACTION';
       const actionTitle = document.getElementById("popup-action-name");
       if (actionTitle) actionTitle.innerText = actionName || "行動";
 
@@ -3559,7 +3635,8 @@
         if(actionTitle)actionTitle.innerText=actionName||"行動";
         const descriptionEl=document.getElementById("popup-action-description");
         if(descriptionEl){
-          if(info.description){descriptionEl.innerText=info.description;descriptionEl.classList.remove('hidden');}
+          const popupDescription = info.description || cardData?.desc || cardData?.description || '';
+          if(popupDescription){descriptionEl.innerText=popupDescription;descriptionEl.classList.remove('hidden');}
           else{descriptionEl.innerText='';descriptionEl.classList.add('hidden');}
         }
         const targetText=document.getElementById("popup-target");if(targetText)targetText.innerText=info.target||(target?.name||'対象なし');
