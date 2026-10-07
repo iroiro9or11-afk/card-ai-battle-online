@@ -663,8 +663,31 @@
     const PRESET_ATTRIBUTES = ["人間", "亜人", "機械", "幻獣", "モンスター", "炎", "水", "風", "地", "光", "闇", "無", "物理", "魔法", "戦士", "回復", "重装"];
     let battleExecutionRunning = false;
 
+    function generateUuid() {
+      // カードの永久IDはブラウザ標準のUUIDを優先する。古い環境向けにgetRandomValuesへフォールバック。
+      if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+      if (globalThis.crypto?.getRandomValues) {
+        const bytes = new Uint8Array(16);
+        globalThis.crypto.getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+        return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+      }
+      // cryptoが使えない古い環境でも、既存データを救済できるよう最後のフォールバックを用意。
+      return `legacy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    }
+
     function generateUniqueId(prefix = "id") {
       return prefix + "_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    }
+
+    function generateCardId() {
+      return generateUuid();
+    }
+
+    function isUuidCardId(value) {
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
     }
 
     function clamp(val, min, max) {
@@ -989,7 +1012,21 @@
 
     async function loadAllData() {
       allCards = await getAllFromStore("cards");
+      allDecks = await getAllFromStore("decks");
+
+      if (allCards.length === 0) await seedDefaultCards();
+      allCards = await getAllFromStore("cards");
+      await ensureDefaultMagicCards();
+      allCards = await getAllFromStore("cards");
+      if (allDecks.length === 0) await seedDefaultDeck();
+      allDecks = await getAllFromStore("decks");
+      await ensureDefaultDeckMagicCards();
+      allCards = await getAllFromStore("cards");
+      allDecks = await getAllFromStore("decks");
+
+      // 初回起動時だけでなく、過去にブラウザへ保存したカードもここでUUIDへ移行する。
       await normalizeLoadedCards();
+      allCards = await getAllFromStore("cards");
       allDecks = await getAllFromStore("decks");
       allRivals = await getAllFromStore("rivals");
 
@@ -999,10 +1036,6 @@
       const pIconSetting = await getFromStore("settings", "player_icon");
       if (pIconSetting) playerIcon = pIconSetting.value;
 
-      if (allCards.length === 0) await seedDefaultCards();
-      await ensureDefaultMagicCards();
-      if (allDecks.length === 0) await seedDefaultDeck();
-      await ensureDefaultDeckMagicCards();
       if (allRivals.length === 0 && allDecks.length > 0) await seedDefaultRivals();
 
       refreshAttributeDatalist();
@@ -1076,6 +1109,8 @@
         { id:"card_mag_healing", cardType:"magic", name:"ヒーリング", image:createDummyCardImage("💚","#166534"), stats:{priority:999}, effect:{id:"msk_healing",type:"active",name:"ヒーリング",cost:0,selfCond:{type:"none"},targetType:"select_ally_1",targetCond:{type:"none"},mainEffect:{type:"heal_max_hp_ratio",val:50,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0}} }
       ];
       for (const c of defaults) {
+        c.systemKey = `builtin:${c.id}`;
+        c.id = generateCardId();
         if (c.skills) c.skills.forEach(s => s.desc = buildAutoSkillDescriptionFromData(s));
         if (c.effect) c.desc = buildAutoSkillDescriptionFromData(c.effect);
         await saveToStore("cards", c);
@@ -1093,8 +1128,9 @@
     async function ensureDefaultDeckMagicCards() {
       const deck = allDecks.find(d => d.id === 'deck_def_1');
       if (!deck) return;
-      const defaults = ['card_mag_fireball','card_mag_mini_thunder','card_mag_protection','card_mag_healing'];
-      const next = [...new Set([...(deck.magicIds||[]), ...defaults.filter(id=>allCards.some(c=>c.id===id))])].slice(0,10);
+      const defaults = ['builtin:card_mag_fireball','builtin:card_mag_mini_thunder','builtin:card_mag_protection','builtin:card_mag_healing'];
+      const defaultIds = defaults.map(key=>allCards.find(c=>c.systemKey===key)?.id).filter(Boolean);
+      const next = [...new Set([...(deck.magicIds||[]), ...defaultIds])].slice(0,10);
       if (JSON.stringify(next) !== JSON.stringify(deck.magicIds||[])) { deck.magicIds=next; await saveToStore('decks',deck); allDecks=await getAllFromStore('decks'); }
     }
 
@@ -1173,59 +1209,89 @@
       return null;
     }
 
-    // 読み込み時に旧形式の画像フィールドを現行形式へ統一する
-    async function normalizeLoadedCards() {
-      let changed = false;
-      for (const card of allCards) {
-        const image = getCardImage(card);
-        let cardChanged = false;
-
-        if (image && !card.image) {
-          card.image = image;
-          cardChanged = true;
+    // 読み込み時に旧形式を現行形式へ統一する。
+    // カードIDは一度だけUUIDへ移行し、同時にデッキ内の参照IDも書き換える。
+    function planCardIdMigration(cards, decks, idGenerator = generateCardId) {
+      const nextCards = (Array.isArray(cards) ? cards : []).map(c => ({...c}));
+      const nextDecks = (Array.isArray(decks) ? decks : []).map(d => ({...d, unitIds:Array.isArray(d?.unitIds)?[...d.unitIds]:[], magicIds:Array.isArray(d?.magicIds)?[...d.magicIds]:[]}));
+      const idMap = new Map();
+      const usedIds = new Set();
+      const builtinKeyByLegacyId = new Map([
+        ['card_def_1','builtin:card_def_1'], ['card_def_2','builtin:card_def_2'], ['card_def_3','builtin:card_def_3'],
+        ['card_mag_1','builtin:card_mag_1'], ['card_mag_fireball','builtin:card_mag_fireball'],
+        ['card_mag_mini_thunder','builtin:card_mag_mini_thunder'], ['card_mag_protection','builtin:card_mag_protection'],
+        ['card_mag_healing','builtin:card_mag_healing']
+      ]);
+      for (const card of nextCards) {
+        if (!card?.id) continue;
+        const oldId = String(card.id);
+        let nextId = oldId;
+        if (!isUuidCardId(oldId) || usedIds.has(oldId)) {
+          do { nextId = idGenerator(); } while (usedIds.has(nextId));
+          idMap.set(oldId, nextId);
+          card.id = nextId;
         }
-
-        // 保存済みの説明文が古い/効果設定と食い違っていても、
-        // 現在の実際の効果データから説明文を再生成する。
-        if (Array.isArray(card.skills)) {
-          card.skills.forEach(sk => {
-            const nextDesc = buildAutoSkillDescriptionFromData(sk);
-            if (sk.desc !== nextDesc) {
-              sk.desc = nextDesc;
-              cardChanged = true;
-            }
-          });
-        }
-        if (card.effect) {
-          const nextDesc = buildAutoSkillDescriptionFromData(card.effect);
-          if (card.desc !== nextDesc) {
-            card.desc = nextDesc;
-            cardChanged = true;
-          }
-        }
-
-        if (cardChanged) {
-          changed = true;
-          await saveToStore("cards", card);
-        }
+        usedIds.add(nextId);
+        const builtinKey = builtinKeyByLegacyId.get(oldId);
+        if (builtinKey) card.systemKey = builtinKey;
       }
-      if (changed) allCards = await getAllFromStore("cards");
+      for (const deck of nextDecks) {
+        deck.unitIds = deck.unitIds.map(id => idMap.get(String(id)) || String(id));
+        deck.magicIds = deck.magicIds.map(id => idMap.get(String(id)) || String(id));
+      }
+      return {cards:nextCards, decks:nextDecks, idMap};
+    }
+
+    async function normalizeLoadedCards() {
+      const beforeCards = allCards;
+      const beforeDecks = allDecks;
+      const migration = planCardIdMigration(beforeCards, beforeDecks);
+      let changed = migration.cards.some((c,i) => String(c.id)!==String(beforeCards[i]?.id) || c.systemKey!==beforeCards[i]?.systemKey);
+      changed = changed || migration.decks.some((d,i) => JSON.stringify(d.unitIds)!==JSON.stringify(beforeDecks[i]?.unitIds||[]) || JSON.stringify(d.magicIds)!==JSON.stringify(beforeDecks[i]?.magicIds||[]));
+
+      for (const card of migration.cards) {
+        const image = getCardImage(card);
+        if (image && !card.image) { card.image=image; changed=true; }
+        if (Array.isArray(card.skills)) card.skills.forEach(sk => { const nextDesc=buildAutoSkillDescriptionFromData(sk); if(sk.desc!==nextDesc){sk.desc=nextDesc;changed=true;} });
+        if (card.effect) { const nextDesc=buildAutoSkillDescriptionFromData(card.effect); if(card.desc!==nextDesc){card.desc=nextDesc;changed=true;} }
+      }
+      if (!changed) return;
+      // IndexedDBのkeyPathは変更できないため、新IDを書き込んだ後に旧キーを削除する。
+      // これをしないと、次回起動時に旧カードが再発見されて再移行される。
+      for (const card of migration.cards) await saveToStore('cards', card);
+      for (const [oldId, newId] of migration.idMap.entries()) {
+        if (String(oldId) !== String(newId)) await deleteFromStore('cards', oldId);
+      }
+      for (const deck of migration.decks) await saveToStore('decks', deck);
+      allCards = await getAllFromStore('cards');
+      allDecks = await getAllFromStore('decks');
     }
 
     async function ensureDefaultMagicCards() {
-      const existing = new Set(allCards.filter(c=>c.cardType==='magic').map(c=>String(c.id)));
       const defaults = [
-        { id:"card_mag_fireball", cardType:"magic", name:"ファイアボール", image:createDummyCardImage("🔥","#7f1d1d"), stats:{priority:999}, effect:{id:"msk_fireball",type:"active",name:"ファイアボール",cost:20,selfCond:{type:"none"},targetType:"select_enemy_1",targetCond:{type:"none"},mainEffect:{type:"dmg_fixed",val:2000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } },
-        { id:"card_mag_mini_thunder", cardType:"magic", name:"ミニサンダー", image:createDummyCardImage("⚡","#312e81"), stats:{priority:999}, effect:{id:"msk_mini_thunder",type:"active",name:"ミニサンダー",cost:20,selfCond:{type:"none"},targetType:"all_enemy",targetCond:{type:"none"},mainEffect:{type:"dmg_fixed",val:1000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } },
-        { id:"card_mag_protection", cardType:"magic", name:"プロテクション", image:createDummyCardImage("🛡️","#14532d"), stats:{priority:999}, effect:{id:"msk_protection",type:"active",name:"プロテクション",cost:20,selfCond:{type:"none"},targetType:"all_ally",targetCond:{type:"none"},mainEffect:{type:"damage_cut_ratio",val:20,duration:1,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } },
-        { id:"card_mag_healing", cardType:"magic", name:"ヒーリング", image:createDummyCardImage("💚","#166534"), stats:{priority:999}, effect:{id:"msk_healing",type:"active",name:"ヒーリング",cost:0,selfCond:{type:"none"},targetType:"select_ally_1",targetCond:{type:"none"},mainEffect:{type:"heal_max_hp_ratio",val:50,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:"none",val:0} } }
+        { systemKey:'builtin:card_mag_fireball', cardType:'magic', name:'ファイアボール', image:createDummyCardImage('🔥','#7f1d1d'), stats:{priority:999}, effect:{id:'msk_fireball',type:'active',name:'ファイアボール',cost:20,selfCond:{type:'none'},targetType:'select_enemy_1',targetCond:{type:'none'},mainEffect:{type:'dmg_fixed',val:2000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:'none',val:0} } },
+        { systemKey:'builtin:card_mag_mini_thunder', cardType:'magic', name:'ミニサンダー', image:createDummyCardImage('⚡','#312e81'), stats:{priority:999}, effect:{id:'msk_mini_thunder',type:'active',name:'ミニサンダー',cost:20,selfCond:{type:'none'},targetType:'all_enemy',targetCond:{type:'none'},mainEffect:{type:'dmg_fixed',val:1000,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:'none',val:0} } },
+        { systemKey:'builtin:card_mag_protection', cardType:'magic', name:'プロテクション', image:createDummyCardImage('🛡️','#14532d'), stats:{priority:999}, effect:{id:'msk_protection',type:'active',name:'プロテクション',cost:20,selfCond:{type:'none'},targetType:'all_ally',targetCond:{type:'none'},mainEffect:{type:'damage_cut_ratio',val:20,duration:1,stackable:false},hasSubEffect:false,subEffect:{type:'none',val:0} } },
+        { systemKey:'builtin:card_mag_healing', cardType:'magic', name:'ヒーリング', image:createDummyCardImage('💚','#166534'), stats:{priority:999}, effect:{id:'msk_healing',type:'active',name:'ヒーリング',cost:0,selfCond:{type:'none'},targetType:'select_ally_1',targetCond:{type:'none'},mainEffect:{type:'heal_max_hp_ratio',val:50,duration:0,stackable:false},hasSubEffect:false,subEffect:{type:'none',val:0} } }
       ];
-      for (const c of defaults) {
-        if (existing.has(c.id)) continue;
-        c.desc = buildAutoSkillDescriptionFromData(c.effect);
-        await saveToStore('cards', c);
+      let changed=false;
+      for(const c of defaults){
+        let existing=allCards.find(x=>x.systemKey===c.systemKey);
+        if(!existing){
+          // v3.15以前の固定IDが残っている場合は、重複作成せず既存カードを標準カードとして引き継ぐ。
+          const legacyId=c.systemKey.replace('builtin:','');
+          existing=allCards.find(x=>String(x.id)===legacyId);
+        }
+        if(existing){
+          if(existing.systemKey!==c.systemKey){existing.systemKey=c.systemKey;await saveToStore('cards',existing);changed=true;}
+          continue;
+        }
+        c.id=generateCardId();
+        c.desc=buildAutoSkillDescriptionFromData(c.effect);
+        await saveToStore('cards',c);
+        changed=true;
       }
-      allCards = await getAllFromStore('cards');
+      if(changed) allCards=await getAllFromStore('cards');
     }
 
     // カードHTMLレンダリング
@@ -1632,7 +1698,7 @@
       });
 
       const existing = editingCardId ? allCards.find(c => c.id === editingCardId && c.cardType === 'unit') : null;
-      const card = { id: existing?.id || generateUniqueId("card_unit"), cardType: "unit", name, mainAttr, subAttrs: [sub1, sub2].filter(Boolean), image: croppedImageData.unit || existing?.image || image, stats: { hp, atk, priority }, skills };
+      const card = { id: existing?.id || generateCardId(), cardType: "unit", name, mainAttr, subAttrs: [sub1, sub2].filter(Boolean), image: croppedImageData.unit || existing?.image || image, stats: { hp, atk, priority }, skills };
       await saveToStore("cards", card);
       allCards = await getAllFromStore("cards");
       refreshAttributeDatalist();
@@ -1650,7 +1716,7 @@
       effectData.name = name;
       effectData.desc = buildAutoSkillDescriptionFromData(effectData);
       const existing = editingCardId ? allCards.find(c => c.id === editingCardId && c.cardType === 'magic') : null;
-      const magicCard = { id: existing?.id || generateUniqueId("card_magic"), cardType: "magic", name, desc: effectData.desc, image: croppedImageData.magic || existing?.image || image, stats: { priority }, effect: effectData };
+      const magicCard = { id: existing?.id || generateCardId(), cardType: "magic", name, desc: effectData.desc, image: croppedImageData.magic || existing?.image || image, stats: { priority }, effect: effectData };
       await saveToStore("cards", magicCard);
       allCards = await getAllFromStore("cards");
       refreshAttributeDatalist();
