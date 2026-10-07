@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.13.0';
+const SERVER_VERSION = '3.14.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -71,6 +71,11 @@ function sanitizeCard(c, includePrivate=false) {
     base.description = base.desc;
   }
   return base;
+}
+function sanitizeCardNoImage(c, includePrivate=false) {
+  const x = sanitizeCard(c, includePrivate);
+  if (x) { delete x.image; delete x.imageUrl; }
+  return x;
 }
 function sanitizeDeck(d) {
   if (!d?.id) return null;
@@ -428,7 +433,12 @@ function deploymentOptionsForPlayer(r, sid) {
 }
 function sendDeploymentOptions(r, sid) {
   const s = sessions.get(sid); const opts = deploymentOptionsForPlayer(r, sid);
-  if (s?.ws && opts) send(s.ws, 'deployment_options', opts);
+  if (!s?.ws || !opts) return;
+  const stripImage = c => { const x=clone(c); if (x) { delete x.image; delete x.imageUrl; } return x; };
+  const light={...opts,units:(opts.units||[]).map(stripImage),magics:(opts.magics||[]).map(stripImage)};
+  send(s.ws, 'deployment_options', light);
+  const assets=[...(opts.units||[]),...(opts.magics||[])].filter(c=>typeof c?.image==='string' && c.image).map(c=>({id:String(c.id),image:c.image}));
+  sendChunkedJson(s.ws,'deployment_assets',assets,256*1024);
 }
 function prepareCandidatePools(r) {
   const p1 = r.players[0], p2 = r.players[1];
@@ -525,7 +535,7 @@ function hasStatus(t, status) { return !!(t?.statuses || []).some(x => x.type ==
 function hasAnyStatus(t) { return !!(t?.statuses || []).some(x => Number(x.duration) > 0); }
 function pushPassiveEvent(b, u, sk, result, target=null) {
   b.pendingEvents = b.pendingEvents || [];
-  b.pendingEvents.push({ type:'PASSIVE_USE', actor:pubUnit(u,true), target:target && !target.__playerTarget ? pubUnit(target,true) : null, actionName:sk.name, effect:result || 'パッシブ効果', result:result || '発動', description:sk.desc || sk.description || '', cardId:u.cardId });
+  b.pendingEvents.push({ type:'PASSIVE_USE', actor:pubUnit(u,false), target:target && !target.__playerTarget ? pubUnit(target,false) : null, actionName:sk.name, effect:result || 'パッシブ効果', result:result || '発動', description:sk.desc || sk.description || '', cardId:u.cardId });
 }
 function triggerPassiveTiming(b, timing, subject=null) {
   b._passiveTriggerDepth = Number(b._passiveTriggerDepth||0) + 1;
@@ -701,7 +711,7 @@ function processEndTurnAbnormalities(r) {
     if (u.currentHp <= 0 || !u.isActive) continue;
     if (hasStatus(u,'poison')) {
       const before=u.currentHp; const rmg=damage(u,Math.round(u.maxHp*0.10));
-      const ev={type:'STATUS_DAMAGE',actor:pubUnit(u,true),target:pubUnit(u,true),actionName:'毒',effect:'最大HPの10%ダメージ',result:`毒により${rmg.damage}ダメージ${u.currentHp<=0?'／撃破！':''}`,description:'毒：ターン終了間際に最大HPの10%のダメージ。',targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp}};
+      const ev={type:'STATUS_DAMAGE',actor:pubUnit(u,false),target:pubUnit(u,false),actionName:'毒',effect:'最大HPの10%ダメージ',result:`毒により${rmg.damage}ダメージ${u.currentHp<=0?'／撃破！':''}`,description:'毒：ターン終了間際に最大HPの10%のダメージ。',targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp}};
       b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev});
       if(rmg.damage>0) triggerPassiveTiming(b,'hp_decrease',u);
       if(u.currentHp<=0 && before>0){ triggerPassiveTiming(b,'death',u); triggerPassiveTiming(b,'ally_death',u); flushPendingEvents(r); }
@@ -722,26 +732,90 @@ function replaceDead(b) {
     }
   }
 }
-function pubUnit(u) {
+function pubUnit(u, includeImage=false) {
   const hp = hpSnapshot(u);
-  return {
+  const out = {
     instanceId:String(u.instanceId), cardId:String(u.cardId), name:String(u.name || ''), mainAttr:u.mainAttr || '', subAttrs:Array.isArray(u.subAttrs)?clone(u.subAttrs):[],
     maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0),
     effectiveAtk:finiteNumber(effAtk(u),0), effectiveSpeed:finiteNumber(effSpeed(u),0), side:u.side, isActive:!!u.isActive,
-    buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []), image:typeof u.image === 'string' ? u.image : null,
+    buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []),
     skills:clone(u.skills || [])
   };
+  if (includeImage) out.image = typeof u.image === 'string' ? u.image : null;
+  return out;
 }
-function publicMagicCards(pl) {
-  return (pl.magicIds || []).map(id => pl.magicCards?.[id]).filter(Boolean).map(c => sanitizeCard(c, true));
+function publicMagicCards(pl, includeImage=false) {
+  return (pl.magicIds || []).map(id => pl.magicCards?.[id]).filter(Boolean).map(c => {
+    const x = sanitizeCard(c, true);
+    if (!includeImage) { x.image = null; x.imageUrl = null; }
+    return x;
+  });
 }
 function publicBattle(b, viewerSide) {
   return {
     battleId:b.battleId, turn:b.turn, phase:b.phase, deadline:b.deadline,
-    p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(pubUnit),reserveQueue:[...b.p1.reserveQueue],magicIds:[...b.p1.magicIds],magicCards:publicMagicCards(b.p1),usedMagicIds:[...b.p1.usedMagic]},
-    p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(pubUnit),reserveQueue:[...b.p2.reserveQueue],magicIds:[...b.p2.magicIds],magicCards:publicMagicCards(b.p2),usedMagicIds:[...b.p2.usedMagic]},
+    p1:{name:b.p1.name,ap:finiteNumber(b.p1.ap,0),units:b.p1.units.map(u=>pubUnit(u,false)),reserveQueue:[...b.p1.reserveQueue],magicIds:[...b.p1.magicIds],magicCards:publicMagicCards(b.p1,false),usedMagicIds:[...b.p1.usedMagic]},
+    p2:{name:b.p2.name,ap:finiteNumber(b.p2.ap,0),units:b.p2.units.map(u=>pubUnit(u,false)),reserveQueue:[...b.p2.reserveQueue],magicIds:[...b.p2.magicIds],magicCards:publicMagicCards(b.p2,false),usedMagicIds:[...b.p2.usedMagic]},
     yourSide:viewerSide, winner:b.winner, events:(b.events || []).slice(-30)
   };
+}
+function publicBattleCards(b) {
+  const map = new Map();
+  for (const pl of [b?.p1,b?.p2]) {
+    if (!pl) continue;
+    for (const u of pl.units || []) {
+      if (!u.cardId || map.has(String(u.cardId))) continue;
+      map.set(String(u.cardId), sanitizeCard({
+        id:u.cardId, cardType:'unit', name:u.name, mainAttr:u.mainAttr, subAttrs:u.subAttrs,
+        stats:{hp:u.maxHp,atk:u.atk,priority:u.priority}, skills:u.skills || [], image:u.image || null
+      }, true));
+    }
+    for (const id of pl.magicIds || []) {
+      const c = pl.magicCards?.[id];
+      if (!c || map.has(String(c.id))) continue;
+      map.set(String(c.id), sanitizeCard(c, true));
+    }
+  }
+  return [...map.values()].map(c=>{ if (!c) return c; c=clone(c); delete c.image; delete c.imageUrl; return c; });
+}
+function publicBattleAssets(b) {
+  const map = new Map();
+  for (const pl of [b?.p1,b?.p2]) {
+    if (!pl) continue;
+    for (const u of pl.units || []) if (u.cardId && typeof u.image === 'string' && u.image) map.set(String(u.cardId), {id:String(u.cardId), image:u.image});
+    for (const id of pl.magicIds || []) { const c=pl.magicCards?.[id]; if (c?.id && typeof c.image==='string' && c.image) map.set(String(c.id), {id:String(c.id),image:c.image}); }
+  }
+  return [...map.values()];
+}
+function sendChunkedJson(ws, type, items, maxBytes=256*1024) {
+  const arr = Array.isArray(items) ? items : [];
+  if (!arr.length) { send(ws, type+'_end', {total:0}); return; }
+  let batch=[], size=2, batchNo=0;
+  const flush=()=>{
+    if (!batch.length) return;
+    send(ws,type,{items:batch,batch:batchNo,total:0});
+    batchNo++; batch=[]; size=2;
+  };
+  for (const item of arr) {
+    const n=Buffer.byteLength(JSON.stringify(item),'utf8');
+    if (batch.length && size+n+32>maxBytes) flush();
+    batch.push(item); size+=n+1;
+  }
+  flush();
+  // Send the actual total in a second lightweight message so clients know completion.
+  send(ws, type+'_end', {total:batchNo});
+}
+function sendBattleCards(r, ws, viewerSide) {
+  if (!r?.battle || !ws) return;
+  const cards=publicBattleCards(r.battle);
+  const assets=publicBattleAssets(r.battle);
+  send(ws,'battle_cards',{cards, viewerSide});
+  sendChunkedJson(ws,'battle_assets',assets,256*1024);
+}
+function sendBattleSnapshot(r, ws, viewerSide, type='battle_state', extra={}) {
+  if (!r?.battle || !ws) return;
+  sendBattleCards(r,ws,viewerSide);
+  send(ws,type,{...extra,state:publicBattle(r.battle,viewerSide)});
 }
 
 function buildBattleSide(r, sid, profile, selection, side) {
@@ -777,7 +851,13 @@ function startBattle(r) {
   r.battle = bstate;
   passive(bstate, 'battle_start');
   for (const u of [...activeUnits(bstate, 'player1'), ...activeUnits(bstate, 'player2')]) passiveOne(bstate, 'deploy', u);
-  broadcastBattle(r, 'battle_start');
+  for (const p of r.players.filter(Boolean)) {
+    const side = p === r.players[0] ? 'player1' : 'player2';
+    sendBattleSnapshot(r,p.ws,side,'battle_start');
+  }
+  for (const sid of r.spectators) {
+    const s = sessions.get(sid); if (s?.ws) sendBattleSnapshot(r,s.ws,'spectator','battle_start');
+  }
   scheduleDecision(r, DECISION_MS);
 }
 function broadcastBattle(r, type, extra={}) {
@@ -973,11 +1053,11 @@ function validateActionSet(b, side, actions) {
 function executeMagic(b, side, card, selectedTargetId=null) {
   const resource = side === 'player1' ? b.p1 : b.p2;
   const cost = Number(card.effect?.cost || 0);
-  if (resource.ap < cost) return {type:'MAGIC_USE',actor:{side,name:resource.name,image:card.image || null},actionName:card.name,effect:'AP不足',result:'不発',description:card.desc || '',card:sanitizeCard(card,true),cardId:card.id};
+  if (resource.ap < cost) return {type:'MAGIC_USE',actor:{side,name:resource.name},actionName:card.name,effect:'AP不足',result:'不発',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
   const actor = {side,name:resource.name,currentHp:1,maxHp:1};
   const eff = card.effect || {};
   const main = targets(b, actor, eff.targetType, eff.targetCond, selectedTargetId, true);
-  if (['select_enemy_1','select_ally_1'].includes(eff.targetType) && !main.length) return {type:'MAGIC_USE',actor:{side,name:resource.name,image:card.image || null},actionName:card.name,effect:'指定対象なし',result:'不発',description:card.desc || '',card:sanitizeCard(card,true),cardId:card.id};
+  if (['select_enemy_1','select_ally_1'].includes(eff.targetType) && !main.length) return {type:'MAGIC_USE',actor:{side,name:resource.name},actionName:card.name,effect:'指定対象なし',result:'不発',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
   resource.ap -= cost;
   const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines = [];
@@ -988,10 +1068,10 @@ function executeMagic(b, side, card, selectedTargetId=null) {
   }
   const tar = main[0];
   return {
-    type:'MAGIC_USE', actor:{side,name:resource.name,image:card.image || card.imageUrl || null},
-    target:tar?pubUnit(tar,true):null, actionName:card.name,
+    type:'MAGIC_USE', actor:{side,name:resource.name},
+    target:tar?pubUnit(tar,false):null, actionName:card.name,
     effect:lines.join('\n') || '効果なし', result:lines.join('\n') || '変化なし', description:card.desc || '',
-    card:sanitizeCard(card,true), targetHpBefore:tar?before.get(tar.instanceId):null,
+    card:sanitizeCardNoImage(card,true), targetHpBefore:tar?before.get(tar.instanceId):null,
     targetHpAfter:tar?hpSnapshot(tar):null, cardId:card.id
   };
 }
@@ -999,7 +1079,7 @@ function executeAction(b, side, u, action) {
   const resource = side === 'player1' ? b.p1 : b.p2;
   if (hasStatus(u,'freeze') || (hasStatus(u,'paralysis') && crypto.randomInt(100) < 50)) {
     const status = hasStatus(u,'freeze') ? '凍結' : '麻痺';
-    return {type:'STATUS_FAIL',actor:pubUnit(u,true),actionName:action.type==='skill' ? (u.skills?.[action.skillIndex]?.name || 'スキル') : '通常攻撃',effect:`${status}で行動失敗`,result:`${status}で行動失敗`,description:`${status}：行動に失敗します。`,cardId:u.cardId};
+    return {type:'STATUS_FAIL',actor:pubUnit(u,false),actionName:action.type==='skill' ? (u.skills?.[action.skillIndex]?.name || 'スキル') : '通常攻撃',effect:`${status}で行動失敗`,result:`${status}で行動失敗`,description:`${status}：行動に失敗します。`,cardId:u.cardId};
   }
   if (action.type === 'attack') {
     const enemies = activeUnits(b, side === 'player1' ? 'player2' : 'player1');
@@ -1008,7 +1088,7 @@ function executeAction(b, side, u, action) {
     const hp = hpSnapshot(t);
     const r = damage(t, finiteNumber(effAtk(u),0));
     return {
-      type:'CHARACTER_ATTACK', actor:pubUnit(u,true), target:pubUnit(t,true),
+      type:'CHARACTER_ATTACK', actor:pubUnit(u,false), target:pubUnit(t,false),
       actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
       targetHpBefore:hp, targetHpAfter:hpSnapshot(t),
       actionName:'通常攻撃', effect:`基礎攻撃力 ${effAtk(u)}`, result:`${r.damage} ダメージ${t.currentHp<=0?'／撃破！':''}`
@@ -1017,11 +1097,11 @@ function executeAction(b, side, u, action) {
   if (action.type !== 'skill') return null;
   const sk = u.skills?.[action.skillIndex];
   if (!sk) return null;
-  if ((u.debuffs || []).some(x => x.type === 'skill_block' && x.duration > 0)) return {type:'SKILL_USE',actor:pubUnit(u,true),actionName:sk.name,effect:'スキル使用禁止',result:'不発',description:sk.desc || ''};
+  if ((u.debuffs || []).some(x => x.type === 'skill_block' && x.duration > 0)) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'スキル使用禁止',result:'不発',description:sk.desc || ''};
   const cost = Number(sk.cost || 0);
-  if (resource.ap < cost) return {type:'SKILL_USE',actor:pubUnit(u,true),actionName:sk.name,effect:'AP不足',result:'不発',description:sk.desc || ''};
+  if (resource.ap < cost) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'AP不足',result:'不発',description:sk.desc || ''};
   const main = targets(b,u,sk.targetType,sk.targetCond,action.targetInstanceId,false);
-  if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !main.length) return {type:'SKILL_USE',actor:pubUnit(u,true),actionName:sk.name,effect:'指定対象なし',result:'不発',description:sk.desc || ''};
+  if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !main.length) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'指定対象なし',result:'不発',description:sk.desc || ''};
   resource.ap -= cost;
   const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines=[];
@@ -1032,7 +1112,7 @@ function executeAction(b, side, u, action) {
   }
   const tar=main[0];
   return {
-    type:'SKILL_USE', actor:pubUnit(u,true), target:tar?pubUnit(tar,true):null,
+    type:'SKILL_USE', actor:pubUnit(u,false), target:tar?pubUnit(tar,false):null,
     actionName:sk.name, effect:lines.join('\n')||'効果なし', result:lines.join('\n')||'変化なし', description:sk.desc || sk.description || '',
     actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
     targetHpBefore:tar?before.get(tar.instanceId):null, targetHpAfter:tar?hpSnapshot(tar):null,
@@ -1098,14 +1178,14 @@ function playerRoomRecovery(r, sid, ws) {
     rentalDecks:r.rule==='rental' ? (r.profiles[r.ownerId]?.decks || []) : [],
     deploymentOptions:deploymentOptionsForPlayer(r,sid)
   });
-  if (r.battle) send(ws, 'battle_state', {state:publicBattle(r.battle,slot===0?'player1':'player2')});
+  if (r.battle) sendBattleSnapshot(r, ws, slot===0?'player1':'player2', 'battle_state');
   return true;
 }
 function spectatorRecovery(r, sid, ws) {
   if (!r.spectators.has(sid)) return false;
   const s = sessions.get(sid); if (s) { s.ws = ws; s.online = true; s.lastSeen = Date.now(); s.roomId = r.roomId; }
   send(ws,'spectate_recovered',{room:publicRoom(r)});
-  if (r.battle) send(ws,'battle_state',{state:publicBattle(r.battle,'spectator')});
+  if (r.battle) sendBattleSnapshot(r, ws, 'spectator', 'battle_state');
   return true;
 }
 
@@ -1169,6 +1249,7 @@ server.on('upgrade',(req,socket) => {
       markAssetReadyForRoom(r, sid);
       if (r) r.profiles[sid] = clone(s.profile);
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
+      if (r) { for (const p of r.players.filter(Boolean)) if (r.deckSelections[p.sessionId]) sendDeploymentOptions(r,p.sessionId); }
       if (r) maybeStartBattle(r);
       return;
     }
@@ -1184,6 +1265,11 @@ server.on('upgrade',(req,socket) => {
       const done = ready || (Number(m.batch||0) + 1 >= Number(m.total||1));
       send(ws,'profile_assets_ack',{done,batch:Number(m.batch||0),total:Number(m.total||1),count,ready});
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
+      if (r) {
+        for (const p of r.players.filter(Boolean)) {
+          if (r.deckSelections[p.sessionId]) sendDeploymentOptions(r,p.sessionId);
+        }
+      }
       if (r && ready) maybeStartBattle(r);
       return;
     }
@@ -1236,7 +1322,7 @@ server.on('upgrade',(req,socket) => {
       if (r.passwordHash && hashPassword(m.password)!==r.passwordHash) return send(ws,'error',{code:'BAD_PASSWORD',message:'パスワードが違います。'});
       r.spectators.add(sid); setSessionRoom(sid,r.roomId); s.ws=ws; s.online=true; s.lastSeen=Date.now();
       send(ws,'spectate_joined',{room:publicRoom(r)});
-      if (r.battle) send(ws,'battle_state',{state:publicBattle(r.battle,'spectator')});
+      if (r.battle) sendBattleSnapshot(r, ws, 'spectator', 'battle_state');
       broadcastPlayers(r);
       return;
     }
@@ -1372,7 +1458,7 @@ server.on('upgrade',(req,socket) => {
       if (!r.battle) return;
       const p = r.players.find(x=>x?.sessionId===sid);
       const side = p===r.players[0] ? 'player1' : p===r.players[1] ? 'player2' : 'spectator';
-      send(ws,'battle_state',{state:publicBattle(r.battle,side)});
+      sendBattleSnapshot(r, ws, side, 'battle_state');
       return;
     }
   });

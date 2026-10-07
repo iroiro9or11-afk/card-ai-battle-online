@@ -1,8 +1,8 @@
 {
   "name": "card-ai-online",
-  "version": "3.13.0",
+  "version": "3.14.0",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.13",
+  "description": "カードAIバトル オンライン対戦 v3.14",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
