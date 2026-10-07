@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.15.0';
+const SERVER_VERSION = '3.16.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -152,10 +152,33 @@ function allBattlePrerequisitesReady(r) {
   }
   return true;
 }
+function findCrossPlayerCardIdCollision(r) {
+  if (!r?.players?.[0] || !r?.players?.[1]) return null;
+  // レンタル/超レンタルでは同一カードプールを意図的に共有するため、
+  // 「別プレイヤー由来の同一ID」が問題になるルールだけ検査する。
+  if (r.rule !== 'unlimited' && r.rule !== 'random_pot') return null;
+  const a = r.profiles[r.players[0].sessionId]?.cards || [];
+  const b = r.profiles[r.players[1].sessionId]?.cards || [];
+  const ids = new Set(a.map(c => String(c?.id || '')).filter(Boolean));
+  for (const c of b) {
+    const id = String(c?.id || '');
+    if (id && ids.has(id)) return id;
+  }
+  return null;
+}
+
 function maybeStartBattle(r) {
   if (!r || r.battle) return false;
   if (!r.players.every(Boolean) || !r.players.every(p => p.ready)) return false;
   if (!r.selected[r.players[0].sessionId] || !r.selected[r.players[1].sessionId]) return false;
+  const collision = findCrossPlayerCardIdCollision(r);
+  if (collision) {
+    r.status = 'waiting';
+    for (const q of r.players) if (q) q.ready = false;
+    broadcastRoom(r, 'error', {code:'CARD_ID_COLLISION', message:'プレイヤー間でカードIDが重複しています。カードデータを再同期してから再度準備してください。'});
+    broadcastPlayers(r);
+    return false;
+  }
   if (!allBattlePrerequisitesReady(r)) {
     r.status = 'preparing';
     broadcastRoom(r, 'battle_preparing', {message:'両プレイヤーのカード画像を同期しています…'});
