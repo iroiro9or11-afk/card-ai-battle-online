@@ -499,6 +499,14 @@
         <div id="online-magic-targets" class="hidden border-t border-slate-800 pt-2"></div>
       </div>
 
+      <div id="enemy-magic-public-panel" class="bg-slate-900 p-3 rounded-xl border border-rose-900/70 space-y-2 shadow-xl">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-rose-300">📜 相手の公開マジックカード</span>
+          <span id="enemy-magic-public-status" class="text-[10px] text-slate-500">戦闘開始時に公開</span>
+        </div>
+        <div id="enemy-magic-hand-grid" class="flex gap-3 overflow-x-auto custom-scrollbar p-2 min-h-[150px]"></div>
+      </div>
+
       <!-- 戦闘ログ -->
       <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 h-28 overflow-y-auto text-xs font-mono space-y-1 custom-scrollbar" id="battle-log">
         <div class="text-slate-500">--- 戦闘開始 ---</div>
@@ -625,6 +633,7 @@
     let editingDeck = { id: null, name: "", unitIds: [], magicIds: [] };
     let editingCardId = null;
     let currentDetailCardId = null;
+    window.__onlineBattleCards = window.__onlineBattleCards || {};
     let deploymentSelection = { player: { active: [], reserve: [] }, enemy: { active: [], reserve: [] } };
 
 
@@ -1734,7 +1743,7 @@
         document.getElementById("btn-edit-card")?.classList.add("hidden");
         document.getElementById("btn-delete-card")?.classList.add("hidden");
       }
-      const card = allCards.find(c => c.id === cardId); if (!card) return;
+      const card = allCards.find(c => String(c.id) === String(cardId)) || window.__onlineBattleCards?.[String(cardId)]; if (!card) return;
       currentDetailCardId = card.id;
       document.getElementById("detail-card-title").innerText = card.name;
       document.getElementById("detail-card-type").innerText = card.cardType === "magic" ? "マジック" : "キャラクター";
@@ -1846,8 +1855,7 @@
     function openBattleUnitDetail(instanceId) {
       const unit = battleState?.playerUnits?.concat(battleState.enemyUnits || []).find(u => u.instanceId === instanceId);
       if (!unit) return;
-      const base = allCards.find(c => c.id === unit.cardId);
-      if (!base) return;
+      const base = allCards.find(c => String(c.id) === String(unit.cardId)) || window.__onlineBattleCards?.[String(unit.cardId)] || unit;
       currentDetailCardId = base.id;
       document.getElementById("detail-card-title").innerText = `${unit.name}（戦闘中）`;
       document.getElementById("detail-card-type").innerText = base.cardType === 'magic' ? 'マジック' : 'キャラクター';
@@ -1859,7 +1867,8 @@
       document.getElementById("detail-prio").innerText = getEffectiveSpeed(unit);
       const statusLine = (arr, title, cls) => arr.length ? `<div class="mb-3"><div class="font-black ${cls} mb-1">${title}</div><div class="space-y-1">${arr.map(x=>`<div class="bg-slate-900 border border-slate-800 rounded px-2 py-1.5"><b>${x.type==='status'?statusName(x.status):x.type}</b>：${x.type==='status' ? '' : (x.val !== undefined ? (x.val>=0?'+':'')+x.val : '')}${x.duration ? ` ／ 残り${x.duration}ターン` : ''}</div>`).join('')}</div></div>` : `<div class="text-slate-500">${title}なし</div>`;
       const buffs = unit.buffs || [], debuffs = unit.debuffs || [];
-      const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}${statusLine((unit.statuses||[]).map(x=>({...x,val:statusName(x.type)})),'🟣 状態異常','text-purple-300')}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(base.skills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
+      const detailSkills = Array.isArray(unit.skills) && unit.skills.length ? unit.skills : (base.skills || []);
+      const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}${statusLine((unit.statuses||[]).map(x=>({...x,val:statusName(x.type)})),'🟣 状態異常','text-purple-300')}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(detailSkills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
       document.getElementById("detail-card-body").innerHTML = html;
       document.getElementById("btn-edit-card").classList.add('hidden');
       document.getElementById("btn-delete-card").classList.add('hidden');
@@ -2316,6 +2325,7 @@
       renderTimeline();
       renderCommandPanel();
       renderMagicHand();
+      if (typeof window.renderEnemyMagicHand === 'function') window.renderEnemyMagicHand();
       updateReservationSummary();
     }
 
@@ -2620,6 +2630,31 @@
         }
       });
     }
+
+    function renderEnemyMagicHand(){
+      const grid=document.getElementById('enemy-magic-hand-grid');
+      const status=document.getElementById('enemy-magic-public-status');
+      if(!grid)return;
+      grid.innerHTML='';
+      const cards=battleState.enemyMagicHand||[];
+      if(!onlineMode || !cards.length){
+        grid.innerHTML='<div class="text-[10px] text-slate-500 p-2">公開マジックカードはありません。</div>';
+        if(status)status.innerText='公開マジックなし';
+        return;
+      }
+      if(status)status.innerText=`${cards.length}枚公開中`;
+      const used=battleState.enemyUsedMagicCardIds||new Set();
+      cards.forEach(m=>{
+        const isUsed=used.has(m.id);
+        const wrap=document.createElement('div');
+        wrap.className=`flex-shrink-0 w-28 transition ${isUsed?'opacity-35 grayscale':'hover:scale-105'}`;
+        wrap.innerHTML=getCardHTML({id:m.id,cardType:'magic',name:m.name,desc:m.desc,prio:m.stats?.priority??999,img:getCardImage(m)});
+        if(isUsed){const badge=document.createElement('div');badge.className='text-[9px] text-slate-500 text-center mt-1';badge.innerText='使用済み';wrap.appendChild(badge);}
+        grid.appendChild(wrap);
+      });
+    }
+
+    window.renderEnemyMagicHand = renderEnemyMagicHand;
 
     function updateReservationSummary() {
       let totalCost = 0;
@@ -3364,16 +3399,28 @@
                 const wrap = document.getElementById(`popup-${prefix}-hp-wrap`);
                 const text = document.getElementById(`popup-${prefix}-hp-text`);
                 const fill = document.getElementById(`popup-${prefix}-hp-fill`);
-                const snapBefore = before || (fallbackEntity && Number.isFinite(fallbackEntity.currentHp) ? { current: fallbackEntity.currentHp, max: fallbackEntity.maxHp } : null);
-                const snapAfter = after || (fallbackEntity && Number.isFinite(fallbackEntity.currentHp) ? { current: fallbackEntity.currentHp, max: fallbackEntity.maxHp } : null);
-                if (!snapAfter || !Number.isFinite(Number(snapAfter.max))) {
+                const rawBefore = before || (fallbackEntity ? { current:fallbackEntity.currentHp, max:fallbackEntity.maxHp } : null);
+                const rawAfter = after || (fallbackEntity ? { current:fallbackEntity.currentHp, max:fallbackEntity.maxHp } : null);
+                const normalizeSnap=(snap,fallback)=>{
+                  const maxRaw=Number(snap?.max);
+                  const fallbackMax=Number(fallback?.maxHp);
+                  const max=Number.isFinite(maxRaw)&&maxRaw>0?maxRaw:(Number.isFinite(fallbackMax)&&fallbackMax>0?fallbackMax:null);
+                  if(!max)return null;
+                  const curRaw=Number(snap?.current);
+                  const fallbackCur=Number(fallback?.currentHp);
+                  const cur=Number.isFinite(curRaw)?curRaw:(Number.isFinite(fallbackCur)?fallbackCur:max);
+                  return {current:Math.max(0,Math.min(max,cur)),max};
+                };
+                const snapBefore = normalizeSnap(rawBefore,fallbackEntity);
+                const snapAfter = normalizeSnap(rawAfter,fallbackEntity);
+                if (!snapAfter) {
                   wrap.classList.add('hidden');
                   return;
                 }
                 wrap.classList.remove('hidden');
-                const max = Math.max(1, Number(snapAfter.max));
-                const current = Math.max(0, Math.min(max, Number(snapAfter.current)));
-                const beforeText = snapBefore ? `${Math.max(0, Number(snapBefore.current))}/${Math.max(1, Number(snapBefore.max))}` : '';
+                const max = snapAfter.max;
+                const current = snapAfter.current;
+                const beforeText = snapBefore ? `${snapBefore.current}/${snapBefore.max}` : '';
                 text.innerText = `${beforeText ? beforeText + ' → ' : ''}${current}/${max}`;
                 fill.style.width = `${Math.max(0, Math.min(100, current / max * 100))}%`;
                 fill.classList.toggle('hp-dead', current <= 0);
@@ -3893,11 +3940,19 @@
     const mySide=st.yourSide==='player2'?'player2':'player1';
     const me=isSpectator?st.p1:(mySide==='player1'?st.p1:st.p2);
     const opp=isSpectator?st.p2:(mySide==='player1'?st.p2:st.p1);
-    const localCards=new Map((allCards||[]).map(c=>[c.id,c]));
+    const localCards=new Map((allCards||[]).map(c=>[String(c.id),c]));
+    const registerPublicCard=(card)=>{
+      if(!card||!card.id)return;
+      window.__onlineBattleCards[String(card.id)]={...card,id:String(card.id)};
+    };
+    (st.p1?.magicCards||[]).forEach(registerPublicCard);
+    (st.p2?.magicCards||[]).forEach(registerPublicCard);
+    (st.p1?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],image:u.image||null}));
+    (st.p2?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],image:u.image||null}));
     const mapU=(u,side)=>({
       ...u,
       side:(side===mySide&&!isSpectator)?'player':'enemy',
-      image:getCardImage(localCards.get(u.cardId))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
+      image:getCardImage(localCards.get(String(u.cardId)))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
       skills:Array.isArray(u.skills)?u.skills:[],
       reservedAction:{type:'attack',targetInstanceId:null}
     });
@@ -3906,7 +3961,7 @@
     const magicCards=(me?.magicCards||[]).length?me.magicCards.map(c=>({...c})):((me?.magicIds||[]).map(id=>localCards.get(id)).filter(Boolean));
     battleState={
       battleId:st.battleId,phase:st.phase,turn:st.turn,playerAp:me?.ap??0,enemyAp:opp?.ap??0,
-      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,usedMagicCardIds:new Set(me?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
+      playerUnits:myUnits,enemyUnits:oppUnits,magicHand:magicCards,enemyMagicHand:(opp?.magicCards||[]).map(c=>({...c})),usedMagicCardIds:new Set(me?.usedMagicIds||[]),enemyUsedMagicCardIds:new Set(opp?.usedMagicIds||[]),reservedMagic:null,reservedMagicTargetInstanceId:null,
       selectedPlayerInstanceId:onlineSelectedUnitId||(myUnits.find(u=>u.isActive&&u.currentHp>0)?.instanceId||null),
       playerName:me?.name||'プレイヤー',enemyName:opp?.name||'ライバル',playerIconUrl:playerIcon,enemyIconUrl:null,
       playerReserveQueue:[...(me?.reserveQueue||[])].map(String),enemyReserveQueue:[...(opp?.reserveQueue||[])].map(String),yourSide:st.yourSide
@@ -3917,11 +3972,20 @@
     $('online-controls')?.classList.toggle('hidden',!onlineMode||isSpectator);
     $('online-battle-timer')?.classList.toggle('hidden',!onlineMode||isSpectator);
     if(decision){
-      renderCommandPanel();renderMagicHand();updateReservationSummary();renderOnlineControls();
+      renderCommandPanel();renderMagicHand();renderEnemyMagicHand();updateReservationSummary();renderOnlineControls();
       if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();
+    }else if(st.phase==='execution'){
+      showOnlineExecutionTimer();
+      $('online-battle-timer')?.classList.remove('hidden');
+    }else if(st.phase==='paused'){
+      showOnlinePausedTimer();
+      $('online-battle-timer')?.classList.remove('hidden');
     }else{
-      $('online-confirmed-status').innerText=st.phase==='execution'?'行動を実行中です。':st.phase==='paused'?'接続待ちです。':'対戦状態を同期しています。';
-      $('online-battle-timer').classList.add('hidden');
+      clearInterval(onlineTimerHandle);
+      if($('online-confirmed-status'))$('online-confirmed-status').innerText='対戦状態を同期しています。';
+      $('online-battle-timer')?.classList.remove('hidden');
+      if($('online-timer'))$('online-timer').innerText='—';
+      if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='—';
     }
   }
 
@@ -3979,8 +4043,18 @@
   }
   window.submitOnlineActions=submitOnlineActions;
   function startOnlineTimer(deadline){
-    clearInterval(onlineTimerHandle);onlineDeadline=Number(deadline)||0;
-    const tick=()=>{const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;if($('online-timer'))$('online-timer').innerText=String(left);if($('online-battle-timer-value'))$('online-battle-timer-value').innerText=String(left);if($('online-timer'))$('online-timer').classList.toggle('text-rose-400',left<=10);if($('online-battle-timer'))$('online-battle-timer').classList.toggle('text-rose-300',left<=10);if(left<=0)clearInterval(onlineTimerHandle);};tick();onlineTimerHandle=setInterval(tick,250);
+    clearInterval(onlineTimerHandle);
+    onlineDeadline=Number(deadline)||0;
+    const tick=()=>{const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;if($('online-timer'))$('online-timer').innerText=String(left);if($('online-battle-timer-value'))$('online-battle-timer-value').innerText=String(left);if($('online-timer'))$('online-timer').classList.toggle('text-rose-400',left<=10);if($('online-battle-timer'))$('online-battle-timer').classList.toggle('text-rose-300',left<=10);if(left<=0)clearInterval(onlineTimerHandle);};
+    tick();onlineTimerHandle=setInterval(tick,250);
+  }
+  function showOnlineExecutionTimer(){
+    clearInterval(onlineTimerHandle);onlineDeadline=0;
+    if($('online-timer'))$('online-timer').innerText='処理中';
+    if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='処理中';
+    if($('online-timer'))$('online-timer').classList.remove('text-rose-400');
+    if($('online-battle-timer'))$('online-battle-timer').classList.remove('text-rose-300');
+    if($('online-confirmed-status'))$('online-confirmed-status').innerText='行動を実行中です。';
   }
   function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineDeadline=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
   function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;} }
@@ -4053,15 +4127,18 @@
       onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={unitIds:[],magicIds:[],deployConfirmed:false};onlineReady=true;renderOnlineSelection();setOnlineStatus('サーバー抽選候補が届きました。');return;
     }
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
-    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);applyOnlineState(m.state);if(m.state?.deadline)startOnlineTimer(m.state.deadline);return;}
+    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);if(m.state?.phase==='decision'&&m.state?.deadline)startOnlineTimer(m.state.deadline);else if(m.state?.phase==='execution')showOnlineExecutionTimer();applyOnlineState(m.state);return;}
     if(m.type==='battle_event'){
       applyOnlineState(m.state);onlineEventQueue.push(m.event);processOnlineEventQueue();return;
     }
     if(m.type==='turn_start'||m.type==='battle_state'){
       const st=m.state;if(!st)return;
       const nextTurn=Number(st.turn||0);if(m.type==='turn_start'&&nextTurn>Number(onlineLastTurn||0))resetOnlineTurn();onlineLastTurn=nextTurn||onlineLastTurn;
+      if(st.phase==='decision'){if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();}
+      else if(st.phase==='execution')showOnlineExecutionTimer();
+      else if(st.phase==='paused')showOnlinePausedTimer();
       if(onlineEventQueue.length||onlineEventProcessing){if(st.phase==='decision')onlineDeferredDecisionState=st;else applyOnlineState(st);return;}
-      applyOnlineState(st);if(st.phase==='decision'){if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();}return;
+      applyOnlineState(st);return;
     }
     if(m.type==='battle_paused'){showOnlinePausedTimer();setOnlineStatus(m.reason||'対戦相手の接続待ちです。');return;}
     if(m.type==='battle_resumed'){setOnlineStatus('接続が復帰しました。対戦を再開します。');return;}
