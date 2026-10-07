@@ -1,6 +1,6 @@
 {
   "name": "card-ai-online",
-  "version": "3.25.0",
+  "version": "3.26.0",
   "private": true,
   "description": "カードAIバトル オンライン対戦 v3.25（5戦ストーリーモード）",
   "main": "server.js",
@@ -9,9 +9,9 @@
     "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js",
     "test:card-id": "node tests/card-id-migration-test.js",
     "test:offline": "node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js",
-    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js",
+    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js",
     "test:ai": "node tests/offline-ai-v321-regression.js",
-    "test:story": "node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js"
+    "test:story": "node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js"
   },
   "dependencies": {}
 }
