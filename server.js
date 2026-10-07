@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.11.0';
+const SERVER_VERSION = '3.12.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -110,6 +110,63 @@ function mergeProfileAssets(s, assets) {
   return count;
 }
 
+
+function setProfileAssetExpectations(s, assetIds) {
+  if (!s) return;
+  const ids = new Set((Array.isArray(assetIds) ? assetIds : []).map(String).filter(Boolean));
+  s.profileAssetExpected = ids;
+  const prev = s.profileAssetReceived instanceof Set ? s.profileAssetReceived : new Set();
+  s.profileAssetReceived = new Set([...prev].filter(id => ids.has(id)));
+}
+function markProfileAssetsReceived(s, assetIds) {
+  if (!s) return;
+  if (!(s.profileAssetReceived instanceof Set)) s.profileAssetReceived = new Set();
+  for (const id of (Array.isArray(assetIds) ? assetIds : [])) {
+    const sid = String(id || '');
+    if (sid) s.profileAssetReceived.add(sid);
+  }
+}
+function profileAssetsReady(s) {
+  if (!s) return false;
+  const expected = s.profileAssetExpected instanceof Set ? s.profileAssetExpected : new Set();
+  if (expected.size === 0) return true;
+  const received = s.profileAssetReceived instanceof Set ? s.profileAssetReceived : new Set();
+  for (const id of expected) if (!received.has(id)) return false;
+  return true;
+}
+function markAssetReadyForRoom(r, sid) {
+  const p = r?.players?.find(x => x?.sessionId === sid);
+  const sess = sessions.get(sid);
+  if (p) p.assetsReady = profileAssetsReady(sess);
+}
+function allBattlePrerequisitesReady(r) {
+  if (!r?.players?.every(Boolean)) return false;
+  for (const p of r.players) {
+    const sess = sessions.get(p.sessionId);
+    if (!sess || !profileAssetsReady(sess)) return false;
+  }
+  return true;
+}
+function maybeStartBattle(r) {
+  if (!r || r.battle) return false;
+  if (!r.players.every(Boolean) || !r.players.every(p => p.ready)) return false;
+  if (!r.selected[r.players[0].sessionId] || !r.selected[r.players[1].sessionId]) return false;
+  if (!allBattlePrerequisitesReady(r)) {
+    r.status = 'preparing';
+    broadcastRoom(r, 'battle_preparing', {message:'両プレイヤーのカード画像を同期しています…'});
+    broadcastPlayers(r);
+    return false;
+  }
+  try {
+    startBattle(r);
+    return true;
+  } catch (err) {
+    r.status = 'waiting';
+    for (const q of r.players) if (q) q.ready = false;
+    broadcastRoom(r, 'error', {code:'BATTLE_START_FAILED', message:err.message});
+    return false;
+  }
+}
 function publicRoom(r) {
   return {
     roomId: r.roomId,
@@ -315,7 +372,7 @@ function createRoom(owner, cfg) {
     updatedAt: Date.now(),
     timer: null
   };
-  room.players[0] = { sessionId: owner.sessionId, name: owner.name, ws: owner.ws, ready: false, online: true, lastSeen: Date.now() };
+  room.players[0] = { sessionId: owner.sessionId, name: owner.name, ws: owner.ws, ready: false, online: true, lastSeen: Date.now(), assetsReady: profileAssetsReady(owner) };
   copySessionProfileToRoom(room, owner);
   rooms.set(room.roomId, room);
   owner.roomId = room.roomId;
@@ -671,8 +728,8 @@ function publicBattle(b, viewerSide) {
   const used = viewer ? [...viewer.usedMagic] : [];
   return {
     battleId:b.battleId, turn:b.turn, phase:b.phase, deadline:b.deadline,
-    p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(u=>pubUnit(u,viewerSide==='player1')),magicIds:viewerSide==='player1'?[...b.p1.magicIds]:[],magicCards:viewerSide==='player1'?visibleOwnMagic:[],usedMagicIds:viewerSide==='player1'?used:[]},
-    p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(u=>pubUnit(u,viewerSide==='player2')),magicIds:viewerSide==='player2'?[...b.p2.magicIds]:[],magicCards:viewerSide==='player2'?visibleOwnMagic:[],usedMagicIds:viewerSide==='player2'?used:[]},
+    p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(u=>pubUnit(u,viewerSide==='player1')),reserveQueue:[...b.p1.reserveQueue],magicIds:viewerSide==='player1'?[...b.p1.magicIds]:[],magicCards:viewerSide==='player1'?visibleOwnMagic:[],usedMagicIds:viewerSide==='player1'?used:[]},
+    p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(u=>pubUnit(u,viewerSide==='player2')),reserveQueue:[...b.p2.reserveQueue],magicIds:viewerSide==='player2'?[...b.p2.magicIds]:[],magicCards:viewerSide==='player2'?visibleOwnMagic:[],usedMagicIds:viewerSide==='player2'?used:[]},
     yourSide:viewerSide, winner:b.winner, events:(b.events || []).slice(-30)
   };
 }
@@ -1094,24 +1151,36 @@ server.on('upgrade',(req,socket) => {
 
     if (type === 'profile_sync') {
       s.profile = normalizeProfile(m, s.name);
+      setProfileAssetExpectations(s, m.assetIds || []);
+      for (const c of s.profile.cards) {
+        if (typeof c.image === 'string' && c.image) s.profileAssetReceived.add(String(c.id));
+      }
       const r = roomBySession(sid);
+      markAssetReadyForRoom(r, sid);
       if (r) r.profiles[sid] = clone(s.profile);
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
+      if (r) maybeStartBattle(r);
       return;
     }
 
     if (type === 'profile_assets') {
-      const count = mergeProfileAssets(s, m.assets);
+      const assets = Array.isArray(m.assets) ? m.assets : [];
+      const count = mergeProfileAssets(s, assets);
+      markProfileAssetsReceived(s, assets.map(a => a?.id));
       const r = roomBySession(sid);
       if (r) r.profiles[sid] = clone(s.profile);
-      send(ws,'profile_assets_ack',{done:Number(m.batch||0) + 1 >= Number(m.total||1),batch:Number(m.batch||0),total:Number(m.total||1),count});
+      markAssetReadyForRoom(r, sid);
+      const ready = profileAssetsReady(s);
+      const done = ready || (Number(m.batch||0) + 1 >= Number(m.total||1));
+      send(ws,'profile_assets_ack',{done,batch:Number(m.batch||0),total:Number(m.total||1),count,ready});
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
+      if (r && ready) maybeStartBattle(r);
       return;
     }
 
     if (type === 'room_create') {
       if (roomBySession(sid)) return send(ws,'error',{code:'ALREADY_IN_ROOM',message:'すでに別の部屋に参加しています。'});
-      if (m.profile) s.profile = normalizeProfile(m.profile, s.name);
+      if (m.profile) { s.profile = normalizeProfile(m.profile, s.name); setProfileAssetExpectations(s, m.profile.assetIds || []); for (const c of s.profile.cards) if (typeof c.image === 'string' && c.image) s.profileAssetReceived.add(String(c.id)); }
       if (!s.profile) return send(ws,'error',{code:'PROFILE_NOT_READY',message:'カードデータの同期が完了していません。'});
       const r = createRoom(s,{roomName:m.roomName,password:m.password,rule:m.rule,allowSpectators:m.allowSpectators,maxSpectators:m.maxSpectators});
       copySessionProfileToRoom(r,s);
@@ -1127,16 +1196,16 @@ server.on('upgrade',(req,socket) => {
       const current = roomBySession(sid);
       if (current && current.roomId !== r.roomId) return send(ws,'error',{code:'ALREADY_IN_ROOM',message:'すでに別の部屋に参加しています。'});
       if (r.passwordHash && hashPassword(m.password)!==r.passwordHash) return send(ws,'error',{code:'BAD_PASSWORD',message:'パスワードが違います。'});
-      if (m.profile) s.profile = normalizeProfile(m.profile,s.name);
+      if (m.profile) { s.profile = normalizeProfile(m.profile,s.name); setProfileAssetExpectations(s, m.profile.assetIds || []); for (const c of s.profile.cards) if (typeof c.image === 'string' && c.image) s.profileAssetReceived.add(String(c.id)); }
       if (!s.profile) return send(ws,'error',{code:'PROFILE_NOT_READY',message:'カードデータの同期が完了していません。'});
       const existingIdx = playerSlot(r,sid);
       let idx = existingIdx;
       if (idx < 0) {
         idx = r.players.findIndex(p=>!p);
         if (idx < 0) return send(ws,'error',{code:'FULL',message:'対戦枠が満員です。'});
-        r.players[idx] = {sessionId:sid,name:s.name,ws,ready:false,online:true,lastSeen:Date.now()};
+        r.players[idx] = {sessionId:sid,name:s.name,ws,ready:false,online:true,lastSeen:Date.now(),assetsReady:profileAssetsReady(s)};
       } else {
-        r.players[idx].ws = ws; r.players[idx].online = true; r.players[idx].lastSeen = Date.now();
+        r.players[idx].ws = ws; r.players[idx].online = true; r.players[idx].lastSeen = Date.now(); r.players[idx].assetsReady = profileAssetsReady(s);
       }
       setSessionRoom(sid,r.roomId); copySessionProfileToRoom(r,s);
       r.updatedAt = Date.now();
@@ -1228,7 +1297,7 @@ server.on('upgrade',(req,socket) => {
       r.selected[sid]={...validated, deployConfirmed:true};
       send(ws,'battle_selection_confirmed',{selection:clone(r.selected[sid])});
       if (r.players.length===2 && r.players.every(Boolean) && r.players.every(p=>p.ready) && r.selected[r.players[0].sessionId] && r.selected[r.players[1].sessionId]) {
-        try { startBattle(r); } catch (err) { r.status='waiting'; broadcastRoom(r,'error',{code:'BATTLE_START_FAILED',message:err.message}); }
+        maybeStartBattle(r);
       }
       return;
     }
@@ -1254,7 +1323,7 @@ server.on('upgrade',(req,socket) => {
         } else {
           r.status='preparing';
           if (r.selected[r.players[0].sessionId] && r.selected[r.players[1].sessionId]) {
-            try { startBattle(r); } catch (err) { r.status='waiting'; broadcastRoom(r,'error',{code:'BATTLE_START_FAILED',message:err.message}); }
+            maybeStartBattle(r);
           }
         }
       }

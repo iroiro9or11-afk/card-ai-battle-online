@@ -1,10 +1,10 @@
-# カードAI対戦ゲーム Online v3.11
+# カードAI対戦ゲーム Online v3.12
 
-## v3.11 オンライン対戦通信安定化
+## v3.12 オンライン対戦通信安定化
 
 オンライン対戦部分を、部屋管理・WebSocket接続・ルール別カード配布・サーバー権威型バトル・観戦・再接続まで一貫した状態管理になるよう再構成しました。
 
-### v3.11 主な修正
+### v3.12 主な修正
 - WebSocketの分割フレーム（fragmentation / continuation）を正しく再構成。大きなプロフィール・画像同期でも受信途中で切断しない。
 - 画像同期を部屋作成前に行わず、`room_joined` / `room_recovered` 後に開始。部屋作成要求が画像同期待ちで後回しにならない。
 - WebSocket close code 1009/1002を正しいバイト列で送信。
@@ -50,3 +50,10 @@ npm run test:online
 ```
 
 テストでは、部屋作成・入室・出撃設定・準備・戦闘開始・ターン実行・観戦者切断・プレイヤー切断・再接続・超レンタル・レンタル・闇鍋を確認します。
+
+
+## v3.12 fixes
+- Wait for both players' profile image assets before creating the authoritative battle state.
+- Initialize online unit commands to normal attack so field cards render immediately.
+- Preserve reserve queues in the online battle state so deaths and reserve deployment stay synchronized.
+- Re-run battle start automatically after image assets finish syncing.
