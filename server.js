@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.12.0';
+const SERVER_VERSION = '3.13.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -450,17 +450,29 @@ function prepareCandidatePools(r) {
   }
 }
 
+function finiteNumber(value, fallback=0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+function hpSnapshot(unit) {
+  const max = Math.max(1, finiteNumber(unit?.maxHp, 1));
+  const current = Math.max(0, Math.min(max, finiteNumber(unit?.currentHp, max)));
+  return { current, max };
+}
 function buildUnit(card, side, active) {
+  const maxHp = Math.max(1, finiteNumber(card.stats?.hp, 1000));
+  const atk = finiteNumber(card.stats?.atk, 100);
+  const priority = finiteNumber(card.stats?.priority, 0);
   return {
     instanceId: uid('unit'),
     cardId: String(card.id),
     name: card.name,
     mainAttr: card.mainAttr,
     subAttrs: card.subAttrs || [],
-    maxHp: Number(card.stats?.hp || 1000),
-    currentHp: Number(card.stats?.hp || 1000),
-    atk: Number(card.stats?.atk || 100),
-    priority: Number(card.stats?.priority || 0),
+    maxHp,
+    currentHp:maxHp,
+    atk,
+    priority,
     skills: clone(card.skills || []),
     image: typeof card.image === 'string' ? card.image : (typeof card.imageUrl === 'string' ? card.imageUrl : null),
     side,
@@ -710,26 +722,24 @@ function replaceDead(b) {
     }
   }
 }
-function pubUnit(u, includeSkills=false) {
-  const x = {
-    instanceId:u.instanceId, cardId:u.cardId, name:u.name, mainAttr:u.mainAttr, subAttrs:u.subAttrs,
-    maxHp:u.maxHp, currentHp:u.currentHp, atk:u.atk, priority:u.priority,
-    effectiveAtk:effAtk(u), effectiveSpeed:effSpeed(u), side:u.side, isActive:u.isActive,
-    buffs:clone(u.buffs), debuffs:clone(u.debuffs), statuses:clone(u.statuses), image:u.image||null
+function pubUnit(u) {
+  const hp = hpSnapshot(u);
+  return {
+    instanceId:String(u.instanceId), cardId:String(u.cardId), name:String(u.name || ''), mainAttr:u.mainAttr || '', subAttrs:Array.isArray(u.subAttrs)?clone(u.subAttrs):[],
+    maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0),
+    effectiveAtk:finiteNumber(effAtk(u),0), effectiveSpeed:finiteNumber(effSpeed(u),0), side:u.side, isActive:!!u.isActive,
+    buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []), image:typeof u.image === 'string' ? u.image : null,
+    skills:clone(u.skills || [])
   };
-  if (includeSkills) x.skills = clone(u.skills || []);
-  return x;
+}
+function publicMagicCards(pl) {
+  return (pl.magicIds || []).map(id => pl.magicCards?.[id]).filter(Boolean).map(c => sanitizeCard(c, true));
 }
 function publicBattle(b, viewerSide) {
-  const viewer = viewerSide === 'player1' ? b.p1 : viewerSide === 'player2' ? b.p2 : null;
-  const visibleOwnMagic = viewer
-    ? viewer.magicIds.filter(id => !viewer.usedMagic.includes(id)).map(id => viewer.magicCards[id]).filter(Boolean).map(c => sanitizeCard(c, true))
-    : [];
-  const used = viewer ? [...viewer.usedMagic] : [];
   return {
     battleId:b.battleId, turn:b.turn, phase:b.phase, deadline:b.deadline,
-    p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(u=>pubUnit(u,viewerSide==='player1')),reserveQueue:[...b.p1.reserveQueue],magicIds:viewerSide==='player1'?[...b.p1.magicIds]:[],magicCards:viewerSide==='player1'?visibleOwnMagic:[],usedMagicIds:viewerSide==='player1'?used:[]},
-    p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(u=>pubUnit(u,viewerSide==='player2')),reserveQueue:[...b.p2.reserveQueue],magicIds:viewerSide==='player2'?[...b.p2.magicIds]:[],magicCards:viewerSide==='player2'?visibleOwnMagic:[],usedMagicIds:viewerSide==='player2'?used:[]},
+    p1:{name:b.p1.name,ap:b.p1.ap,units:b.p1.units.map(pubUnit),reserveQueue:[...b.p1.reserveQueue],magicIds:[...b.p1.magicIds],magicCards:publicMagicCards(b.p1),usedMagicIds:[...b.p1.usedMagic]},
+    p2:{name:b.p2.name,ap:b.p2.ap,units:b.p2.units.map(pubUnit),reserveQueue:[...b.p2.reserveQueue],magicIds:[...b.p2.magicIds],magicCards:publicMagicCards(b.p2),usedMagicIds:[...b.p2.usedMagic]},
     yourSide:viewerSide, winner:b.winner, events:(b.events || []).slice(-30)
   };
 }
@@ -969,7 +979,7 @@ function executeMagic(b, side, card, selectedTargetId=null) {
   const main = targets(b, actor, eff.targetType, eff.targetCond, selectedTargetId, true);
   if (['select_enemy_1','select_ally_1'].includes(eff.targetType) && !main.length) return {type:'MAGIC_USE',actor:{side,name:resource.name,image:card.image || null},actionName:card.name,effect:'指定対象なし',result:'不発',description:card.desc || '',card:sanitizeCard(card,true),cardId:card.id};
   resource.ap -= cost;
-  const before = new Map(main.map(t => [t.instanceId,{current:t.currentHp,max:t.maxHp}]));
+  const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines = [];
   for (const t of main) { const r = applyEffect(b, eff.mainEffect, t, actor, true); if (r) lines.push(r); }
   if (eff.hasSubEffect && eff.subEffect) {
@@ -982,7 +992,7 @@ function executeMagic(b, side, card, selectedTargetId=null) {
     target:tar?pubUnit(tar,true):null, actionName:card.name,
     effect:lines.join('\n') || '効果なし', result:lines.join('\n') || '変化なし', description:card.desc || '',
     card:sanitizeCard(card,true), targetHpBefore:tar?before.get(tar.instanceId):null,
-    targetHpAfter:tar?{current:tar.currentHp,max:tar.maxHp}:null, cardId:card.id
+    targetHpAfter:tar?hpSnapshot(tar):null, cardId:card.id
   };
 }
 function executeAction(b, side, u, action) {
@@ -995,12 +1005,12 @@ function executeAction(b, side, u, action) {
     const enemies = activeUnits(b, side === 'player1' ? 'player2' : 'player1');
     if (!enemies.length) return null;
     const t = action.targetInstanceId && enemies.find(x => x.instanceId === action.targetInstanceId) || enemies[crypto.randomInt(enemies.length)];
-    const hp = {before:t.currentHp,max:t.maxHp};
-    const r = damage(t, effAtk(u));
+    const hp = hpSnapshot(t);
+    const r = damage(t, finiteNumber(effAtk(u),0));
     return {
       type:'CHARACTER_ATTACK', actor:pubUnit(u,true), target:pubUnit(t,true),
-      actorHpBefore:{current:u.currentHp,max:u.maxHp}, actorHpAfter:{current:u.currentHp,max:u.maxHp},
-      targetHpBefore:hp, targetHpAfter:{current:t.currentHp,max:t.maxHp},
+      actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
+      targetHpBefore:hp, targetHpAfter:hpSnapshot(t),
       actionName:'通常攻撃', effect:`基礎攻撃力 ${effAtk(u)}`, result:`${r.damage} ダメージ${t.currentHp<=0?'／撃破！':''}`
     };
   }
@@ -1013,7 +1023,7 @@ function executeAction(b, side, u, action) {
   const main = targets(b,u,sk.targetType,sk.targetCond,action.targetInstanceId,false);
   if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !main.length) return {type:'SKILL_USE',actor:pubUnit(u,true),actionName:sk.name,effect:'指定対象なし',result:'不発',description:sk.desc || ''};
   resource.ap -= cost;
-  const before = new Map(main.map(t => [t.instanceId,{current:t.currentHp,max:t.maxHp}]));
+  const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines=[];
   for (const t of main) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(r) lines.push(r); }
   if (sk.hasSubEffect && sk.subEffect) {
@@ -1024,8 +1034,8 @@ function executeAction(b, side, u, action) {
   return {
     type:'SKILL_USE', actor:pubUnit(u,true), target:tar?pubUnit(tar,true):null,
     actionName:sk.name, effect:lines.join('\n')||'効果なし', result:lines.join('\n')||'変化なし', description:sk.desc || sk.description || '',
-    actorHpBefore:{current:u.currentHp,max:u.maxHp}, actorHpAfter:{current:u.currentHp,max:u.maxHp},
-    targetHpBefore:tar?before.get(tar.instanceId):null, targetHpAfter:tar?{current:tar.currentHp,max:tar.maxHp}:null,
+    actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
+    targetHpBefore:tar?before.get(tar.instanceId):null, targetHpAfter:tar?hpSnapshot(tar):null,
     cardId:u.cardId
   };
 }
