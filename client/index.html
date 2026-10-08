@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.1 - 5戦ストーリーモード</title>
+  <title>カードAI対戦ゲーム v3.27.2 - 5戦ストーリーモード</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.1</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.2</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -801,6 +801,7 @@
       enemyUsedMagicCardIds: new Set(),
       reservedMagic: null,
       reservedMagicTargetInstanceId: null,
+      reservedMagicSubTargetInstanceId: null,
       reservedEnemyMagic: null,
       selectedPlayerInstanceId: null,
       enemyIntelligence: "normal",
@@ -2055,14 +2056,13 @@
       }
       const editBtn = document.getElementById("btn-edit-card");
       // 編集対象IDを詳細画面側に保持し、動的DOMや画面切替の影響を受けないようにする。
-      editBtn.onclick = null;
-      editBtn.addEventListener("click", function handleCardEditClick(e) {
+      editBtn.onclick = function(e) {
         e.preventDefault();
         e.stopPropagation();
         const targetId = currentDetailCardId || card.id;
         closeCardDetailModal();
         openCardEditor(targetId);
-      }, { once: true });
+      };
       document.getElementById("btn-delete-card").onclick = async () => {
         if (confirm("カードを削除しますか？")) { await deleteFromStore("cards", card.id); allCards = await getAllFromStore("cards"); closeCardDetailModal(); renderDeckList(); }
       };
@@ -2765,6 +2765,7 @@
       battleState.enemyAp = Math.min(100, battleState.enemyAp + 20);
       battleState.reservedMagic = null;
       battleState.reservedMagicTargetInstanceId = null;
+      battleState.reservedMagicSubTargetInstanceId = null;
       battleState.reservedEnemyMagic = null;
 
       // 前ターンの予約行動を完全に破棄し、毎ターン必ず通常攻撃から開始する。
@@ -3026,7 +3027,7 @@
       if ((needsMainTarget&&!activeUnit.reservedAction.targetInstanceId)||(needsSubTarget&&!activeUnit.reservedAction.subTargetInstanceId)) {
         const hint = document.createElement("div");
         hint.className = "w-full text-[10px] text-amber-300 font-bold mt-1";
-        hint.innerText = "※「指定した1体」のスキルなので、対象カードを選んでください。";
+        hint.innerText = "※指定対象が必要な効果は、対象カードを選んでください。";
         optContainer.appendChild(hint);
       }
     }
@@ -3166,9 +3167,18 @@
       const hasUnselectedTarget = (battleState.playerUnits || []).some(u => {
         if (!u || u.currentHp <= 0 || u.reservedAction?.type !== 'skill') return false;
         const sk = u.skills?.[u.reservedAction.skillIndex];
-        return !!sk && skillNeedsManualTarget(sk) && !u.reservedAction.targetInstanceId;
+        if (!sk) return false;
+        const missingMain = isManualTargetType(sk.targetType) && !u.reservedAction.targetInstanceId;
+        const missingSub = !!(sk.hasSubEffect && sk.subEffect && isManualTargetType(sk.subEffect.targetType) && !u.reservedAction.subTargetInstanceId);
+        return missingMain || missingSub;
       });
-      return { totalCost, currentAp, hasUnselectedTarget, apShortage: totalCost > currentAp };
+      const hasUnselectedMagicTarget = !!(battleState.reservedMagic?.effect && (() => {
+        const eff=battleState.reservedMagic.effect;
+        const missingMain=isManualTargetType(eff.targetType) && !battleState.reservedMagicTargetInstanceId;
+        const missingSub=!!(eff.hasSubEffect && eff.subEffect && isManualTargetType(eff.subEffect.targetType) && !battleState.reservedMagicSubTargetInstanceId);
+        return missingMain || missingSub;
+      })());
+      return { totalCost, currentAp, hasUnselectedTarget:hasUnselectedTarget || hasUnselectedMagicTarget, apShortage: totalCost > currentAp };
     }
 
     function updateReservationSummary() {
@@ -3380,7 +3390,9 @@
     }
 
     function aiPlannerApplyEffect(state, effect, target, actor, isMagic = false) {
-      if (!effect || effect.type === 'none') return { value: 0, kills: 0, damage: 0, healing: 0 };
+      const ok = obj => ({ ...obj, success: true });
+      const fail = obj => ({ ...obj, success: false });
+      if (!effect || effect.type === 'none') return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
       if (effect.type === 'mod_ap') {
         let targetSide = actor.side;
         if (target?.__playerTarget === 'opp') targetSide = actor.side === 'player' ? 'enemy' : 'player';
@@ -3388,67 +3400,69 @@
         const key = targetSide === 'player' ? 'playerAp' : 'enemyAp';
         const before = state[key];
         state[key] = Math.max(0, Math.min(100, state[key] + delta));
-        return { value: (state[key] - before) * 2, kills: 0, damage: 0, healing: 0 };
+        return ok({ value: (state[key] - before) * 2, kills: 0, damage: 0, healing: 0 });
       }
-      if (!target || target.__playerTarget) return { value: 0, kills: 0, damage: 0, healing: 0 };
+      if (!target || target.__playerTarget) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
 
       const beforeHp = target.currentHp;
       if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
+        if (isMagic && effect.type === 'dmg_atk_ratio') return fail({ value: -50, kills: 0, damage: 0, healing: 0 });
         const raw = effect.type === 'dmg_fixed' ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
-        if (isMagic && effect.type === 'dmg_atk_ratio') return { value: -50, kills: 0, damage: 0, healing: 0 };
         const actual = aiPlannerDamageAfterCut(target, raw);
         target.currentHp = Math.max(0, target.currentHp - actual);
-        return {
+        return ok({
           value: actual * 1.15 + (beforeHp > 0 && target.currentHp <= 0 ? 1300 : 0),
           kills: beforeHp > 0 && target.currentHp <= 0 ? 1 : 0,
           damage: actual,
           healing: 0
-        };
+        });
       }
       if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
+        if ((target.debuffs || []).some(x => x.type === 'heal_block' && Number(x.duration) > 0)) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
         const heal = effect.type === 'heal_fixed' ? Number(effect.val) || 0 : Math.round(target.maxHp * ((Number(effect.val) || 0) / 100));
         const actual = Math.max(0, Math.min(target.maxHp, target.currentHp + heal) - target.currentHp);
         target.currentHp += actual;
-        return { value: actual * 0.95, kills: 0, damage: 0, healing: actual };
+        return ok({ value: actual * 0.95, kills: 0, damage: 0, healing: actual });
       }
       if (effect.type === 'damage_cut_ratio' || effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') {
         aiPlannerAddTimed(target, effect);
         const val = Number(effect.val) || 0;
         const weight = effect.type === 'damage_cut_ratio' ? 18 : effect.type === 'mod_speed' ? 10 : 7;
-        return { value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.8), kills: 0, damage: 0, healing: 0 };
+        return ok({ value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.8), kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'clear_buffs') {
         target.buffs = (target.buffs || []).filter(b => b.source && b.source !== 'buff');
-        return { value: target.side !== actor.side ? 70 : 30, kills: 0, damage: 0, healing: 0 };
+        return ok({ value: target.side !== actor.side ? 70 : 30, kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'clear_debuffs') {
         target.debuffs = [];
-        return { value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 };
+        return ok({ value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'status_apply') {
         target.statuses = target.statuses || [];
         const status = effect.status || 'poison';
-        if (!target.statuses.some(x => x.type === status && Number(x.duration) > 0)) target.statuses.push({ type: status, duration: Math.max(1, Number(effect.duration) || 1) });
-        return { value: (status === 'poison' || status === 'burn' ? 50 : status === 'freeze' || status === 'paralysis' ? 85 : 35) * (target.side === actor.side ? -0.5 : 1), kills: 0, damage: 0, healing: 0 };
+        if (target.statuses.some(x => x.type === status && Number(x.duration) > 0)) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
+        target.statuses.push({ type: status, duration: Math.max(1, Number(effect.duration) || 1) });
+        return ok({ value: (status === 'poison' || status === 'burn' ? 50 : status === 'freeze' || status === 'paralysis' ? 85 : 35) * (target.side === actor.side ? -0.5 : 1), kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'status_remove') {
         target.statuses = (target.statuses || []).filter(x => x.type !== (effect.status || 'poison'));
-        return { value: target.side === actor.side ? 45 : 15, kills: 0, damage: 0, healing: 0 };
+        return ok({ value: target.side === actor.side ? 45 : 15, kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'clear_statuses') {
         target.statuses = [];
-        return { value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 };
+        return ok({ value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'heal_block' || effect.type === 'skill_block') {
         target.debuffs = target.debuffs || [];
         const type = effect.type;
         if (!target.debuffs.some(x => x.type === type && Number(x.duration) > 0)) target.debuffs.push({ type, duration: Math.max(1, Number(effect.duration) || 1), source: 'debuff' });
-        return { value: (type === 'skill_block' ? 105 : 60) * (target.side === actor.side ? -0.3 : 1), kills: 0, damage: 0, healing: 0 };
+        return ok({ value: (type === 'skill_block' ? 105 : 60) * (target.side === actor.side ? -0.3 : 1), kills: 0, damage: 0, healing: 0 });
       }
-      return { value: 0, kills: 0, damage: 0, healing: 0 };
+      return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
     }
 
-    function aiPlannerApplySkill(state, actorId, skill, explicitTargetId = null, isMagic = false) {
+    function aiPlannerApplySkill(state, actorId, skill, explicitTargetId = null, isMagic = false, explicitSubTargetId = null) {
       const actor = aiPlannerFindUnit(state, actorId);
       if (!actor || actor.currentHp <= 0 || !skill) return { value: -9999, kills: 0, damage: 0, healing: 0 };
       const cost = Math.max(0, Number(skill.cost) || 0);
@@ -3456,24 +3470,30 @@
       if (state[apKey] < cost) return { value: -9999, kills: 0, damage: 0, healing: 0 };
       state[apKey] -= cost;
       let total = { value: -cost * 1.2, kills: 0, damage: 0, healing: 0 };
-      const effects = [skill.mainEffect].filter(Boolean);
-      if (skill.hasSubEffect && skill.subEffect) effects.push(skill.subEffect);
-      for (const effect of effects) {
-        const eff = { ...effect, targetType: effect.targetType || skill.targetType, targetCond: effect.targetCond || skill.targetCond };
-        let targets = aiPlannerResolveTargets(state, actor, eff, explicitTargetId);
-        if (!targets.length) return { value: -650 - cost * 5, kills: 0, damage: 0, healing: 0 };
-        // random単体は、実際の抽選を直接再現せず「期待値＋安全側」で近似する。
-        if ((eff.targetType || '') === 'random_enemy_1' || (eff.targetType || '') === 'random_ally_1' || (eff.targetType || '') === 'random_all_1') {
-          const pool = aiPlannerTargetPool(state, eff.targetType, actor).filter(t => aiPlannerTargetCondition(t, eff.targetCond));
-          if (pool.length > 1 && (eff.mainEffect?.type === 'dmg_fixed' || eff.type === 'dmg_fixed')) {
-            const avg = pool.reduce((sum, t) => sum + aiPlannerDamageAfterCut(t, Number(eff.val) || 0), 0) / pool.length;
-            total.value += avg * 0.85;
-            total.damage += avg;
-            continue;
-          }
+
+      const mainEffect = skill.mainEffect;
+      const mainTargets = aiPlannerResolveTargets(state, actor, { ...mainEffect, targetType:skill.targetType, targetCond:skill.targetCond }, explicitTargetId);
+      if (!mainTargets.length) return { value: -650 - cost * 5, kills: 0, damage: 0, healing: 0 };
+
+      let mainEffectSucceeded = false;
+      for (const target of mainTargets) {
+        const r = aiPlannerApplyEffect(state, mainEffect, target, actor, isMagic);
+        if (r?.success) mainEffectSucceeded = true;
+        total.value += r.value; total.kills += r.kills; total.damage += r.damage; total.healing += r.healing;
+      }
+
+      if (mainEffectSucceeded && skill.hasSubEffect && skill.subEffect) {
+        const sub=skill.subEffect;
+        let subTargets;
+        if ((sub.targetType || 'same_main_target') === 'same_main_target') {
+          subTargets = mainTargets;
+        } else {
+          const subEff={...sub,targetType:sub.targetType||skill.targetType,targetCond:sub.targetCond||skill.targetCond};
+          subTargets=aiPlannerResolveTargets(state,actor,subEff,explicitSubTargetId);
         }
-        targets.forEach(target => {
-          const r = aiPlannerApplyEffect(state, eff, target, actor, isMagic);
+        if (!subTargets.length) return { value: total.value - 650, kills: total.kills, damage: total.damage, healing: total.healing };
+        subTargets.forEach(target=>{
+          const r=aiPlannerApplyEffect(state,sub,target,actor,isMagic);
           total.value += r.value; total.kills += r.kills; total.damage += r.damage; total.healing += r.healing;
         });
       }
@@ -3551,10 +3571,18 @@
     }
 
     function aiPlannerCandidateTargets(state, actor, skill) {
-      if (skillNeedsManualTarget(skill)) {
-        return aiPlannerTargetPool(state, skill.targetType, actor).filter(t => aiPlannerTargetCondition(t, skill.targetCond));
+      const manual = type => type === 'select_enemy_1' || type === 'select_ally_1';
+      const mainCandidates = manual(skill.targetType)
+        ? aiPlannerTargetPool(state, skill.targetType, actor).filter(t => aiPlannerTargetCondition(t, skill.targetCond))
+        : [null];
+      const sub = skill.hasSubEffect ? skill.subEffect : null;
+      if (!sub || sub.targetType === 'same_main_target' || !manual(sub.targetType)) {
+        return mainCandidates.map(main => ({targetInstanceId:main?.instanceId||null, subTargetInstanceId:null}));
       }
-      return [null];
+      const subCandidates = aiPlannerTargetPool(state, sub.targetType, actor).filter(t => aiPlannerTargetCondition(t, sub.targetCond));
+      const out=[];
+      for(const main of mainCandidates) for(const subTarget of subCandidates) out.push({targetInstanceId:main?.instanceId||null, subTargetInstanceId:subTarget.instanceId});
+      return out;
     }
 
     function aiPlannerBuildUnitCandidates(state, actorId, intelligence) {
@@ -3573,13 +3601,13 @@
           if ((side === 'player' ? state.playerAp : state.enemyAp) < cost) return;
           const targets = aiPlannerCandidateTargets(state, actor, sk);
           if (skillNeedsManualTarget(sk) && targets.length === 0) return;
-          targets.forEach(target => candidates.push({ type: 'skill', actorId, skillIndex: sIdx, skill: sk, targetInstanceId: target?.instanceId || null, cost, name: sk.name }));
+          targets.forEach(target => candidates.push({ type: 'skill', actorId, skillIndex: sIdx, skill: sk, targetInstanceId: target.targetInstanceId || null, subTargetInstanceId: target.subTargetInstanceId || null, cost, name: sk.name }));
         });
       }
       // 各キャラにつき探索候補を絞る。ただし撃破確定・回復・無効化系は切り捨てない。
       const scored = candidates.map(c => {
         const copy = aiPlannerCloneState(state);
-        const r = c.type === 'attack' ? aiPlannerApplyAttack(copy, c.actorId, c.targetInstanceId) : c.type === 'skill' ? aiPlannerApplySkill(copy, c.actorId, c.skill, c.targetInstanceId, false) : {value:0};
+        const r = c.type === 'attack' ? aiPlannerApplyAttack(copy, c.actorId, c.targetInstanceId) : c.type === 'skill' ? aiPlannerApplySkill(copy, c.actorId, c.skill, c.targetInstanceId, false, c.subTargetInstanceId) : {value:0};
         const delta = aiPlannerEvaluateState(copy, side) - aiPlannerEvaluateState(state, side);
         return { c, score: delta + (r.kills || 0) * 250 + Math.random() * (intelligence === 'master' ? 1 : 3) };
       }).sort((a,b) => b.score - a.score);
@@ -3597,8 +3625,18 @@
         const eff = card.effect || {};
         if (eff.targetType === 'select_enemy_1' || eff.targetType === 'select_ally_1') {
           const actor = { instanceId:'magic_actor', side, currentHp:1, maxHp:1, atk:0, priority:999, buffs:[], debuffs:[], statuses:[] };
-          aiPlannerTargetPool(state, eff.targetType, actor).filter(t => aiPlannerTargetCondition(t, eff.targetCond)).forEach(t => candidates.push({type:'magic', card, targetInstanceId:t.instanceId, cost:Number(eff.cost||0)}));
-        } else candidates.push({type:'magic', card, targetInstanceId:null, cost:Number(eff.cost||0)});
+          const mains=aiPlannerTargetPool(state, eff.targetType, actor).filter(t => aiPlannerTargetCondition(t, eff.targetCond));
+          const sub=eff.hasSubEffect?eff.subEffect:null;
+          if(sub && sub.targetType !== 'same_main_target' && (sub.targetType === 'select_enemy_1' || sub.targetType === 'select_ally_1')) {
+            const subs=aiPlannerTargetPool(state, sub.targetType, actor).filter(t => aiPlannerTargetCondition(t, sub.targetCond));
+            mains.forEach(main=>subs.forEach(st=>candidates.push({type:'magic',card,targetInstanceId:main.instanceId,subTargetInstanceId:st.instanceId,cost:Number(eff.cost||0)})));
+          } else {
+            mains.forEach(t => candidates.push({type:'magic', card, targetInstanceId:t.instanceId, subTargetInstanceId:null, cost:Number(eff.cost||0)}));
+          }
+        } else if(eff.hasSubEffect && eff.subEffect && (eff.subEffect.targetType === 'select_enemy_1' || eff.subEffect.targetType === 'select_ally_1')) {
+          const actor = { instanceId:'magic_actor', side, currentHp:1, maxHp:1, atk:0, priority:999, buffs:[], debuffs:[], statuses:[] };
+          aiPlannerTargetPool(state, eff.subEffect.targetType, actor).filter(t => aiPlannerTargetCondition(t, eff.subEffect.targetCond)).forEach(t => candidates.push({type:'magic',card,targetInstanceId:null,subTargetInstanceId:t.instanceId,cost:Number(eff.cost||0)}));
+        } else candidates.push({type:'magic', card, targetInstanceId:null, subTargetInstanceId:null, cost:Number(eff.cost||0)});
       });
       const scored = candidates.map(c => {
         const copy = aiPlannerCloneState(state);
@@ -3607,7 +3645,7 @@
           const actor = { instanceId:'magic_actor', side, currentHp:1, maxHp:1, atk:0, priority:999, buffs:[], debuffs:[], statuses:[], skills:[], isActive:false, name:'マジック' };
           copy.units.push(actor);
           const pseudoSkill = { ...c.card.effect, cost:Number(c.card.effect?.cost||0), mainEffect:c.card.effect?.mainEffect, hasSubEffect:c.card.effect?.hasSubEffect, subEffect:c.card.effect?.subEffect };
-          const r = aiPlannerApplySkill(copy, actor.instanceId, pseudoSkill, c.targetInstanceId, true);
+          const r = aiPlannerApplySkill(copy, actor.instanceId, pseudoSkill, c.targetInstanceId, true, c.subTargetInstanceId);
           delta = (r.value || 0) + (r.kills || 0) * 300;
         }
         delta += aiPlannerEvaluateState(copy, side) - aiPlannerEvaluateState(state, side);
@@ -3619,12 +3657,12 @@
     function aiPlannerApplyCandidate(state, candidate) {
       if (!candidate || candidate.type === 'none' || candidate.type === 'skip') return { value: 0, kills:0, damage:0, healing:0 };
       if (candidate.type === 'attack') return aiPlannerApplyAttack(state, candidate.actorId, candidate.targetInstanceId);
-      if (candidate.type === 'skill') return aiPlannerApplySkill(state, candidate.actorId, candidate.skill, candidate.targetInstanceId, false);
+      if (candidate.type === 'skill') return aiPlannerApplySkill(state, candidate.actorId, candidate.skill, candidate.targetInstanceId, false, candidate.subTargetInstanceId);
       if (candidate.type === 'magic') {
         const actorId = 'magic_actor_' + candidate.card?.id;
         state.units.push({instanceId:actorId,side:state.side,currentHp:1,maxHp:1,atk:0,priority:999,buffs:[],debuffs:[],statuses:[],skills:[],isActive:false,name:'マジック'});
         const pseudoSkill = { ...(candidate.card?.effect || {}), cost:Number(candidate.card?.effect?.cost || 0), mainEffect:candidate.card?.effect?.mainEffect, hasSubEffect:candidate.card?.effect?.hasSubEffect, subEffect:candidate.card?.effect?.subEffect };
-        return aiPlannerApplySkill(state, actorId, pseudoSkill, candidate.targetInstanceId, true);
+        return aiPlannerApplySkill(state, actorId, pseudoSkill, candidate.targetInstanceId, true, candidate.subTargetInstanceId);
       }
       return {value:0,kills:0,damage:0,healing:0};
     }
@@ -3688,11 +3726,11 @@
         if (c.type === 'magic') {
           if (side === 'enemy') {
             battleState.reservedEnemyMagic = c.card;
-            battleState.reservedMagicTargetInstanceId = c.targetInstanceId || null;
           } else {
             battleState.reservedMagic = c.card;
-            battleState.reservedMagicTargetInstanceId = c.targetInstanceId || null;
           }
+          battleState.reservedMagicTargetInstanceId = c.targetInstanceId || null;
+          battleState.reservedMagicSubTargetInstanceId = c.subTargetInstanceId || null;
           return;
         }
         if (c.type !== 'attack' && c.type !== 'skill') return;
@@ -3757,8 +3795,24 @@
         if (pick) {
           const candidates = pick.candidates.length ? pick.candidates : getAiTargetsForSkill(pick.sk,u);
           let target = null;
-          if (skillNeedsManualTarget(pick.sk) && candidates.length) target = candidates.sort((a,b)=>scoreAiTarget(b,pick.sk,u)-scoreAiTarget(a,pick.sk,u))[0];
-          u.reservedAction = {type:'skill',skillIndex:pick.sIdx,targetInstanceId:target?.instanceId||null};
+          const mainManual = isManualTargetType(pick.sk.targetType);
+          if (mainManual && candidates.length) target = candidates.slice().sort((a,b)=>scoreAiTarget(b,pick.sk,u)-scoreAiTarget(a,pick.sk,u))[0];
+          let subTarget = null;
+          if (pick.sk.hasSubEffect && pick.sk.subEffect) {
+            const subType = pick.sk.subEffect.targetType || 'same_main_target';
+            if (subType === 'same_main_target') subTarget = target;
+            else if (isManualTargetType(subType)) {
+              const subCandidates = getManualSubTargetCandidates(pick.sk,u);
+              if (subCandidates.length) subTarget = subCandidates.slice().sort((a,b)=>scoreAiTarget(b,{mainEffect:pick.sk.subEffect},u)-scoreAiTarget(a,{mainEffect:pick.sk.subEffect},u))[0];
+            }
+          }
+          if (pick.sk.hasSubEffect && pick.sk.subEffect && isManualTargetType(pick.sk.subEffect.targetType) && !subTarget) {
+            const fallback = aliveEnemies[Math.floor(Math.random()*aliveEnemies.length)] || null;
+            u.reservedAction = {type:'attack',targetInstanceId:fallback?.instanceId||null};
+          } else {
+            u.reservedAction = {type:'skill',skillIndex:pick.sIdx,targetInstanceId:target?.instanceId||null,subTargetInstanceId:subTarget?.instanceId||null};
+            remainingAp -= Number(pick.sk.cost||0);
+          }
           remainingAp -= Number(pick.sk.cost||0);
         } else {
           const target = aliveEnemies.slice().sort((a,b)=>((a.currentHp/a.maxHp)-(b.currentHp/b.maxHp)) || (a.currentHp-b.currentHp))[0] || aliveEnemies[Math.floor(Math.random()*aliveEnemies.length)];
@@ -3771,16 +3825,27 @@
       if (!card?.effect) return -9999;
       const state = aiPlannerCreateState('enemy');
       const actorId = 'magic_score_actor';
-      state.units.push({instanceId:actorId,side:'enemy',currentHp:1,maxHp:1,atk:0,priority:999,buffs:[],debuffs:[],statuses:[],skills:[],isActive:false,name:'マジック'});
+      const actor = {instanceId:actorId,side:'enemy',currentHp:1,maxHp:1,atk:0,priority:999,buffs:[],debuffs:[],statuses:[],skills:[],isActive:false,name:'マジック'};
+      state.units.push(actor);
       const pseudoSkill = { ...card.effect, cost:Number(card.effect.cost||0), mainEffect:card.effect.mainEffect, hasSubEffect:card.effect.hasSubEffect, subEffect:card.effect.subEffect };
       const before = aiPlannerEvaluateState(state,'enemy');
-      const r = aiPlannerApplySkill(state,actorId,pseudoSkill,null,true);
-      return aiPlannerEvaluateState(state,'enemy') - before + (r.kills||0)*300 + Math.random()*3;
+      const candidates = aiPlannerCandidateTargets(state,actor,pseudoSkill);
+      if (!candidates.length) return -9999;
+      let best=-9999;
+      candidates.forEach(c=>{
+        const sim=aiPlannerCloneState(state);
+        const r=aiPlannerApplySkill(sim,actorId,pseudoSkill,c.targetInstanceId,true,c.subTargetInstanceId);
+        if (r.value < -9000) return;
+        const score=aiPlannerEvaluateState(sim,'enemy')-before+(r.kills||0)*300;
+        if(score>best) best=score;
+      });
+      return best + Math.random()*3;
     }
 
     function chooseAiMagic() {
       battleState.reservedEnemyMagic = null;
       battleState.reservedMagicTargetInstanceId = null;
+      battleState.reservedMagicSubTargetInstanceId = null;
       const cards = (battleState.enemyMagicHand || []).filter(c => !battleState.enemyUsedMagicCardIds.has(c.id));
       if (!cards.length) return;
       const reservedUnitCost = getActiveUnits('enemy').reduce((sum, u) => {
@@ -3802,12 +3867,22 @@
       }
       if (!chosen) return;
       battleState.reservedEnemyMagic = chosen;
+      const actor = {side:'enemy',currentHp:1};
       if (['select_enemy_1','select_ally_1'].includes(chosen.effect?.targetType)) {
-        const actor = {side:'enemy',currentHp:1,maxHp:1};
         const pool = (getTargetPool(chosen.effect.targetType, actor) || []).filter(t => matchesTargetCondition(t, chosen.effect.targetCond));
         if (pool.length) {
           pool.sort((a,b)=>scoreAiTarget(b,{mainEffect:chosen.effect.mainEffect},actor)-scoreAiTarget(a,{mainEffect:chosen.effect.mainEffect},actor));
           battleState.reservedMagicTargetInstanceId = pool[0].instanceId;
+        }
+      }
+      const sub = chosen.effect?.hasSubEffect ? chosen.effect.subEffect : null;
+      if (sub && sub.targetType === 'same_main_target') {
+        battleState.reservedMagicSubTargetInstanceId = battleState.reservedMagicTargetInstanceId;
+      } else if (sub && isManualTargetType(sub.targetType)) {
+        const subPool = (getTargetPool(sub.targetType, actor) || []).filter(t => matchesTargetCondition(t, sub.targetCond || {type:'none'}));
+        if (subPool.length) {
+          subPool.sort((a,b)=>scoreAiTarget(b,{mainEffect:sub},actor)-scoreAiTarget(a,{mainEffect:sub},actor));
+          battleState.reservedMagicSubTargetInstanceId = subPool[0].instanceId;
         }
       }
     }
@@ -3975,7 +4050,7 @@
           targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
           if (t && !t.__playerTarget) targetEntities.push(t);
           const r = applyEffect(eff.mainEffect, t, isPlayerActor, true, actor);
-          if (r) { mainEffectSucceeded=true; effectLines.push(r.effect); resultLines.push(r.result); }
+          if (effectResultSucceeded(r)) mainEffectSucceeded=true; if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
         });
         if (mainEffectSucceeded && eff.hasSubEffect && eff.subEffect) {
           const subType=eff.subEffect.targetType||'same_main_target';
@@ -4013,7 +4088,7 @@
       if (act.type === 'attack') {
         const enemies = isPlayer ? getActiveUnits('enemy') : getActiveUnits('player');
         if (enemies.length === 0) return;
-        const target = act.targetInstanceId ? (enemies.find(u => u.instanceId === act.targetInstanceId) || enemies[Math.floor(Math.random() * enemies.length)]) : enemies[Math.floor(Math.random() * enemies.length)];
+        const target = enemies[Math.floor(Math.random() * enemies.length)];
         const raw = getEffectiveAtk(unit);
         const actorHpBefore = { current: unit.currentHp, max: unit.maxHp };
         const before = target.currentHp;
@@ -4055,7 +4130,7 @@
       let mainEffectSucceeded=false;
       mainTargets.forEach(t=>{
         if(t && !t.__playerTarget) targetHpBeforeMap.set(t.instanceId, { current: t.currentHp, max: t.maxHp });
-        targetNames.push(t.name||'プレイヤー'); if(t && !t.__playerTarget) targetEntities.push(t); const r=applyEffect(sk.mainEffect,t,isPlayer,false,unit); if(r){mainEffectSucceeded=true;effectLines.push(r.effect);resultLines.push(r.result);}
+        targetNames.push(t.name||'プレイヤー'); if(t && !t.__playerTarget) targetEntities.push(t); const r=applyEffect(sk.mainEffect,t,isPlayer,false,unit); if(effectResultSucceeded(r)) mainEffectSucceeded=true; if(r){effectLines.push(r.effect);resultLines.push(r.result);}
       });
       if(mainEffectSucceeded&&sk.hasSubEffect&&sk.subEffect){
         const subTargetType=sk.subEffect.targetType||'same_main_target', subTargetCond=sk.subEffect.targetCond||{type:'none'};
@@ -4112,6 +4187,14 @@
         ? battleState.turn - 1
         : battleState.turn;
       arr.push({ ...status, appliedTurn });
+    }
+
+    function effectResultSucceeded(result) {
+      if (!result) return false;
+      const text = String(result.result || result.effect || '');
+      if (text === '不発') return false;
+      if (/既に継続中/.test(text)) return false;
+      return true;
     }
 
     function applyEffect(eff, target, isPlayerActor, isMagic = false, actor = null) {
@@ -4315,10 +4398,15 @@
             const isPlayer=u.side==='player';
             const previousTiming = battleState._statusApplicationTiming;
             battleState._statusApplicationTiming = timing;
-            const effectLines=[]; let firstTarget=null;
+            const effectLines=[]; let firstTarget=null; let mainEffectSucceeded=false;
             try {
-              resolveTargets(sk.targetType,sk.targetCond,u,isPlayer,sk.targetInstanceId).forEach(t=>{ if(!firstTarget&&!t.__playerTarget)firstTarget=t; const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
-              if(sk.hasSubEffect&&sk.subEffect) resolveTargets(sk.subEffect.targetType||sk.targetType,sk.subEffect.targetCond||sk.targetCond,u,isPlayer).forEach(t=>{ const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
+              const mainTargets=resolveTargets(sk.targetType,sk.targetCond,u,isPlayer,sk.targetInstanceId);
+              mainTargets.forEach(t=>{ if(!firstTarget&&!t.__playerTarget)firstTarget=t; const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(effectResultSucceeded(r)){mainEffectSucceeded=true;} if(r){effectLines.push(r.result||r.effect||r);} });
+              if(mainEffectSucceeded&&sk.hasSubEffect&&sk.subEffect){
+                const subType=sk.subEffect.targetType||sk.targetType;
+                const subTargets=subType==='same_main_target'?mainTargets:resolveTargets(subType,sk.subEffect.targetCond||sk.targetCond,u,isPlayer);
+                subTargets.forEach(t=>{ const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
+              }
             } finally { battleState._statusApplicationTiming = previousTiming; }
             showActionPopup(u, sk.name, {cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)}, {target:firstTarget?.name||'対象なし',effect:effectLines.join('\n')||'効果なし',result:effectLines.join('\n')||'発動',targetEntity:firstTarget||null,description:sk.desc||sk.description||buildAutoSkillDescriptionFromData(sk),actorHpBefore:{current:u.currentHp,max:u.maxHp},actorHpAfter:{current:u.currentHp,max:u.maxHp}});
           }
@@ -5160,24 +5248,45 @@
     const box=$('online-magic-targets');if(!box)return;
     box.innerHTML='';box.classList.add('hidden');
     const m=battleState?.reservedMagic;if(!onlineMode||!m||!m.effect)return;
-    const eff=m.effect;if(!['select_enemy_1','select_ally_1'].includes(eff.targetType))return;
+    const eff=m.effect;
+    const mainManual=isManualTargetType(eff.targetType);
+    const subManual=!!(eff.hasSubEffect&&eff.subEffect&&isManualTargetType(eff.subEffect.targetType));
+    if(!mainManual&&!subManual)return;
     const actor={side:'player',currentHp:1,maxHp:1};
-    const pool=(getTargetPool(eff.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,eff.targetCond));
-    if(!pool.length)return;
     box.classList.remove('hidden');
-    box.innerHTML='<div class="text-[10px] font-black text-amber-300 mb-2">マジック対象を選択</div><div class="flex flex-wrap gap-2"></div>';
-    const row=box.firstElementChild.nextElementSibling;
-    for(const t of pool){const b=document.createElement('button');b.className='px-2 py-1 rounded border text-[10px] '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950');b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{battleState.reservedMagicTargetInstanceId=t.instanceId;renderMagicHand();updateReservationSummary();};row.appendChild(b);}
+
+    if(mainManual){
+      const pool=(getTargetPool(eff.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,eff.targetCond));
+      const title=document.createElement('div');title.className='text-[10px] font-black text-amber-300 mb-2';title.innerText='マジック：メイン効果の対象を選択';box.appendChild(title);
+      const row=document.createElement('div');row.className='flex flex-wrap gap-2';box.appendChild(row);
+      pool.forEach(t=>{const b=document.createElement('button');b.className='px-2 py-1 rounded border text-[10px] '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950');b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{battleState.reservedMagicTargetInstanceId=t.instanceId;renderMagicHand();updateReservationSummary();};row.appendChild(b);});
+      if(!pool.length){const e=document.createElement('div');e.className='text-[10px] text-rose-300';e.innerText='有効なメイン対象がいません';box.appendChild(e);}
+    }
+
+    if(subManual){
+      const sub=eff.subEffect;
+      const label=document.createElement('div');label.className='text-[10px] font-black text-emerald-300 mt-2 mb-2';label.innerText='マジック：追加効果の対象を選択';box.appendChild(label);
+      if(sub.targetType==='same_main_target'){
+        const info=document.createElement('div');info.className='text-[10px] text-emerald-200';info.innerText='↳ メイン効果と同じ対象を使用します。';box.appendChild(info);
+      }else{
+        const subPool=(getTargetPool(sub.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,sub.targetCond));
+        const row=document.createElement('div');row.className='flex flex-wrap gap-2';box.appendChild(row);
+        subPool.forEach(t=>{const b=document.createElement('button');b.className='px-2 py-1 rounded border text-[10px] '+(battleState.reservedMagicSubTargetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950');b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{battleState.reservedMagicSubTargetInstanceId=t.instanceId;renderMagicHand();updateReservationSummary();};row.appendChild(b);});
+        if(!subPool.length){const e=document.createElement('div');e.className='text-[10px] text-rose-300';e.innerText='有効な追加効果対象がいません';box.appendChild(e);}
+      }
+    }
   }
+
   function renderOnlineTargets(u,act){
     const targetBox=$('online-target-buttons');if(!targetBox)return;
     const sk=act.type==='skill'?u.skills?.[act.skillIndex]:null;let targets=[];
-    if(act.type==='attack')targets=(battleState.enemyUnits||[]).filter(x=>x.isActive&&x.currentHp>0);
-    else if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType))targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0);
+    if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType)) targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0);
     targetBox.innerHTML='';
-    if(!targets.length){targetBox.innerHTML=act.type==='attack'?'<span class="text-[10px] text-slate-500">対象は実行時にサーバーがランダム決定</span>':'';return;}
+    if(act.type==='attack'){targetBox.innerHTML='<span class="text-[10px] text-slate-500">通常攻撃の対象は実行時に現在フィールドからランダム決定</span>';return;}
+    if(!targets.length)return;
     for(const t of targets){const b=document.createElement('button');b.className='px-2 py-1 rounded border '+(act.targetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-900')+' text-[10px]';b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{const u2=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u2)return;u2.reservedAction=u2.reservedAction||{type:'attack',targetInstanceId:null};u2.reservedAction.targetInstanceId=t.instanceId;renderCommandPanel();updateReservationSummary();};targetBox.appendChild(b);}
   }
+
   window.setOnlineTarget=id=>{const u=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u)return;u.reservedAction=u.reservedAction||{type:'attack',targetInstanceId:null};u.reservedAction.targetInstanceId=id;renderCommandPanel();updateReservationSummary();};
 
   function submitOnlineActions(){
@@ -5186,14 +5295,19 @@
     for(const u of battleState.playerUnits.filter(u=>u.isActive&&u.currentHp>0)){
       if(u.reservedAction?.type==='skill'){
         const sk=u.skills?.[u.reservedAction.skillIndex];
-        if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType)&&!u.reservedAction.targetInstanceId){showOnlineError(`「${sk.name}」の対象を選択してください。`);return;}
+        if(sk&&isManualTargetType(sk.targetType)&&!u.reservedAction.targetInstanceId){showOnlineError(`「${sk.name}」のメイン効果対象を選択してください。`);return;}
+        if(sk?.hasSubEffect&&sk.subEffect&&isManualTargetType(sk.subEffect.targetType)&&!u.reservedAction.subTargetInstanceId){showOnlineError(`「${sk.name}」の追加効果対象を選択してください。`);return;}
       }
     }
-    if(battleState.reservedMagic?.effect?.targetType && ['select_enemy_1','select_ally_1'].includes(battleState.reservedMagic.effect.targetType) && !battleState.reservedMagicTargetInstanceId){showOnlineError(`「${battleState.reservedMagic.name}」の対象を選択してください。`);return;}
+    const magic=battleState.reservedMagic?.effect;
+    if(magic){
+      if(isManualTargetType(magic.targetType)&&!battleState.reservedMagicTargetInstanceId){showOnlineError(`「${battleState.reservedMagic.name}」のメイン効果対象を選択してください。`);return;}
+      if(magic.hasSubEffect&&magic.subEffect&&isManualTargetType(magic.subEffect.targetType)&&!battleState.reservedMagicSubTargetInstanceId){showOnlineError(`「${battleState.reservedMagic.name}」の追加効果対象を選択してください。`);return;}
+    }
     const units=battleState.playerUnits.filter(u=>u.isActive&&u.currentHp>0).map(u=>({unitInstanceId:u.instanceId,...(u.reservedAction||{type:'attack',targetInstanceId:null})}));
     const actionId='act_'+Date.now()+'_'+Math.random().toString(36).slice(2);
     onlineSubmitted=true;renderOnlineControls();
-    sendOnline('submit_actions',{actionId,battleId:battleState.battleId,turn:battleState.turn,actions:{actionId,units,magicId:battleState.reservedMagic?.id||null,magicTargetInstanceId:battleState.reservedMagicTargetInstanceId||null}});
+    sendOnline('submit_actions',{actionId,battleId:battleState.battleId,turn:battleState.turn,actions:{actionId,units,magicId:battleState.reservedMagic?.id||null,magicTargetInstanceId:battleState.reservedMagicTargetInstanceId||null,magicSubTargetInstanceId:battleState.reservedMagicSubTargetInstanceId||null}});
   }
   window.submitOnlineActions=submitOnlineActions;
   function startOnlineTimer(deadline){
@@ -5211,7 +5325,7 @@
     if($('online-confirmed-status'))$('online-confirmed-status').innerText='行動を実行中です。';
   }
   function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineDeadline=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
-  function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;} }
+  function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;battleState.reservedMagicSubTargetInstanceId=null;} }
 
   async function playOnlineEvent(ev){
     if(!ev)return;
