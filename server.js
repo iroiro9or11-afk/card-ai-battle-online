@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.27.2';
+const SERVER_VERSION = '3.27.3';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -17,12 +17,14 @@ const DECISION_MS = 90_000;
 const MAX_PROFILE_CARDS = 500;
 const MAX_PROFILE_DECKS = 100;
 const MAX_WS_PAYLOAD = 8 * 1024 * 1024;
+const MAIN_ATTRIBUTES = Object.freeze(["人間", "亜人", "機械", "モンスター", "幻獣"]);
 
 const ABNORMALITY_DEFS = Object.freeze({
   poison: { name:'毒', kind:'debuff' },
   paralysis: { name:'麻痺', kind:'debuff' },
   freeze: { name:'凍結', kind:'debuff' },
-  slow: { name:'鈍足', kind:'debuff' }
+  slow: { name:'鈍足', kind:'debuff' },
+  weak: { name:'虚弱', kind:'debuff' }
 });
 function abnormalityName(type) { return ABNORMALITY_DEFS[type]?.name || String(type || '状態異常'); }
 
@@ -59,7 +61,9 @@ function sanitizeCard(c, includePrivate=false) {
     cardType: c.cardType,
     name: String(c.name || '').slice(0, 80),
     mainAttr: c.mainAttr || '',
-    subAttrs: Array.isArray(c.subAttrs) ? c.subAttrs.slice(0, 5) : [],
+    subAttrs: Array.isArray(c.subAttrs)
+      ? [...new Set(c.subAttrs.map(x => String(x || '').trim()).filter(x => x && !MAIN_ATTRIBUTES.includes(x) && x !== String(c.mainAttr || '').trim()))].slice(0, 2)
+      : [],
     stats: clone(c.stats || {}),
     image: typeof c.image === 'string' ? c.image : null,
     imageUrl: typeof c.imageUrl === 'string' ? c.imageUrl : null
@@ -488,12 +492,12 @@ function finiteNumber(value, fallback=0) {
   return Number.isFinite(n) ? n : fallback;
 }
 function hpSnapshot(unit) {
-  const max = Math.max(1, finiteNumber(unit?.maxHp, 1));
+  const max = Math.max(0, finiteNumber(unit?.maxHp, 0));
   const current = Math.max(0, Math.min(max, finiteNumber(unit?.currentHp, max)));
   return { current, max };
 }
 function buildUnit(card, side, active) {
-  const maxHp = Math.max(1, finiteNumber(card.stats?.hp, 1000));
+  const maxHp = Math.max(0, finiteNumber(card.stats?.hp, 1000));
   const atk = finiteNumber(card.stats?.atk, 100);
   const priority = finiteNumber(card.stats?.priority, 0);
   return {
@@ -502,6 +506,7 @@ function buildUnit(card, side, active) {
     name: card.name,
     mainAttr: card.mainAttr,
     subAttrs: card.subAttrs || [],
+    baseMaxHp:maxHp,
     maxHp,
     currentHp:maxHp,
     atk,
@@ -525,7 +530,22 @@ function effAtk(u) {
     if (a.type === 'atk_ratio') x += Math.round(Number(u.atk || 0) * Number(a.val || 0) / 100);
     if (a.type === 'atk_val') x += Number(a.val || 0);
   }
-  return x;
+  if (hasStatus(u, 'weak')) x = Math.floor(x / 2);
+  return Math.max(0, x);
+}
+function refreshEffectiveMaxHp(u, increaseCurrent=false) {
+  if (!u || u.__playerTarget) return {oldMax:0,newMax:0,currentIncreased:0,currentDecreased:0};
+  const oldMax = Math.max(0, Number(u.maxHp) || 0);
+  const baseMax = Math.max(0, Number(u.baseMaxHp ?? oldMax) || 0);
+  const delta = [...(u.buffs || []), ...(u.debuffs || [])]
+    .filter(x => x.type === 'max_hp')
+    .reduce((sum, x) => sum + (Number(x.val) || 0), 0);
+  const newMax = Math.max(0, baseMax + delta);
+  const before = Math.max(0, Number(u.currentHp) || 0);
+  const increase = increaseCurrent && newMax > oldMax ? newMax - oldMax : 0;
+  u.maxHp = newMax;
+  u.currentHp = Math.max(0, Math.min(newMax, before + increase));
+  return {oldMax,newMax,currentIncreased:Math.max(0,u.currentHp-before),currentDecreased:Math.max(0,before-u.currentHp)};
 }
 function effSpeed(u) {
   const base = Number(u.priority || 0) + [...(u.buffs || []), ...(u.debuffs || [])]
@@ -702,10 +722,30 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   }
   if (eff.type === 'mod_speed') {
     addStatus(target, { type:'speed', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
-    return `行動値 ${eff.val>=0?'+':''}${eff.val}`;
+    return `行動値 ${eff.val>=0?'+':''}${eff.val}(${eff.val>=0?'バフ':'デバフ'})`;
   }
-  if (eff.type === 'clear_buffs') { target.buffs = []; return 'バフ全解除'; }
-  if (eff.type === 'clear_debuffs') { target.debuffs = []; return 'デバフ全解除'; }
+  if (eff.type === 'mod_max_hp_val') {
+    const beforeCurrent = target.currentHp;
+    const beforeMax = target.maxHp;
+    addStatus(target, { type:'max_hp', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
+    const delta = refreshEffectiveMaxHp(target, Number(eff.val) >= 0);
+    if (delta.currentIncreased > 0) triggerPassiveTiming(b,'hp_increase',target);
+    if (delta.currentDecreased > 0) triggerPassiveTiming(b,'hp_decrease',target);
+    if (target.currentHp <= 0 && beforeCurrent > 0) {
+      triggerPassiveTiming(b,'death',target);
+      triggerPassiveTiming(b,'ally_death',target);
+    }
+    return `最大HP ${eff.val>=0?'+':''}${eff.val}(${eff.val>=0?'バフ':'デバフ'}) / ${beforeMax}→${target.maxHp}`;
+  }
+  if (eff.type === 'clear_buffs') {
+    const before = target.currentHp;
+    target.buffs = [];
+    refreshEffectiveMaxHp(target, false);
+    if (target.currentHp < before) triggerPassiveTiming(b,'hp_decrease',target);
+    if (target.currentHp <= 0 && before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
+    return 'バフ全解除';
+  }
+  if (eff.type === 'clear_debuffs') { target.debuffs = []; refreshEffectiveMaxHp(target, false); return 'デバフ全解除'; }
   if (eff.type === 'status_apply') {
     const ok = addAbnormality(target, eff.status || 'poison', duration, appliedTurn);
     const name = abnormalityName(eff.status || 'poison');
@@ -755,6 +795,9 @@ function tickStatuses(b) {
     u.buffs = (u.buffs || []).map(x => ({...x, duration:Number(x.duration)-1})).filter(x => x.duration > 0);
     u.debuffs = (u.debuffs || []).map(x => ({...x, duration:Number(x.duration)-1})).filter(x => x.duration > 0);
     u.statuses = (u.statuses || []).map(x => ({...x, duration:Number(x.duration)-1})).filter(x => x.duration > 0);
+    const before = u.currentHp;
+    refreshEffectiveMaxHp(u, false);
+    if (u.currentHp < before) triggerPassiveTiming(b,'hp_decrease',u);
   }
 }
 function processEndTurnAbnormalities(r) {
@@ -788,7 +831,7 @@ function pubUnit(u, includeImage=false) {
   const hp = hpSnapshot(u);
   const out = {
     instanceId:String(u.instanceId), cardId:String(u.cardId), name:String(u.name || ''), mainAttr:u.mainAttr || '', subAttrs:Array.isArray(u.subAttrs)?clone(u.subAttrs):[],
-    maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0),
+    baseMaxHp:Math.max(0, finiteNumber(u.baseMaxHp ?? u.maxHp,0)), maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0),
     effectiveAtk:finiteNumber(effAtk(u),0), effectiveSpeed:finiteNumber(effSpeed(u),0), side:u.side, isActive:!!u.isActive,
     buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []),
     skills:clone(u.skills || [])
