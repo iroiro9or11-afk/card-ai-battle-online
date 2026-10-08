@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.2 - 5戦ストーリーモード</title>
+  <title>カードAI対戦ゲーム v3.27.3 - 5戦ストーリーモード</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.2</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.3</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -211,11 +211,11 @@
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-400 mb-1">サブ属性1</label>
-                <input type="text" id="edit-sub1" list="registered-attributes-list" value="炎" oninput="updatePreview()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs">
+                <input type="text" id="edit-sub1" list="registered-attributes-list" value="" oninput="sanitizeSubAttributeInput(this)" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs">
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-400 mb-1">サブ属性2</label>
-                <input type="text" id="edit-sub2" list="registered-attributes-list" value="戦士" oninput="updatePreview()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs">
+                <input type="text" id="edit-sub2" list="registered-attributes-list" value="" oninput="sanitizeSubAttributeInput(this)" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs">
               </div>
             </div>
             <div>
@@ -812,7 +812,7 @@
       resultWinner: null
     };
 
-    const PRESET_ATTRIBUTES = ["人間", "亜人", "機械", "幻獣", "モンスター", "炎", "水", "風", "地", "光", "闇", "無", "物理", "魔法", "戦士", "回復", "重装"];
+    const MAIN_ATTRIBUTES = ["人間", "亜人", "機械", "モンスター", "幻獣"];
     let battleExecutionRunning = false;
 
     function generateUuid() {
@@ -854,24 +854,38 @@
       poison: { name: '毒', kind: 'debuff' },
       paralysis: { name: '麻痺', kind: 'debuff' },
       freeze: { name: '凍結', kind: 'debuff' },
-      slow: { name: '鈍足', kind: 'debuff' }
+      slow: { name: '鈍足', kind: 'debuff' },
+      weak: { name: '虚弱', kind: 'debuff' }
     };
-    // 状態異常の正規化ルールはサーバーと同じ4種類。状態異常は statuses にのみ保持する。
+    // 状態異常の正規化ルールはサーバーと同じ5種類。状態異常は statuses にのみ保持する。
     function statusName(type) { return STATUS_DEFS[type]?.name || type || '状態異常'; }
     function statusOptions(selected='') {
       return Object.entries(STATUS_DEFS).map(([k,v]) => `<option value="${k}" ${selected===k?'selected':''}>${v.name}</option>`).join('');
     }
 
     // 全登録カードから属性リストを収集しdatalistを更新
+    function sanitizeSubAttributeInput(input) {
+      if (!input) return;
+      const value = String(input.value || '').trim();
+      if (value && MAIN_ATTRIBUTES.includes(value)) {
+        input.value = '';
+        input.setCustomValidity(`サブ属性にメイン属性「${value}」は設定できません。`);
+      } else {
+        input.setCustomValidity('');
+      }
+      updatePreview();
+    }
+
     function refreshAttributeDatalist() {
-      const attrs = new Set(PRESET_ATTRIBUTES);
+      const attrs = new Set();
       allCards.forEach(c => {
-        if (c.mainAttr) attrs.add(c.mainAttr);
-        if (c.subAttrs) c.subAttrs.forEach(a => a && attrs.add(a));
+        if (Array.isArray(c.subAttrs)) c.subAttrs.forEach(a => {
+          if (a && !MAIN_ATTRIBUTES.includes(a)) attrs.add(a);
+        });
       });
       const datalist = document.getElementById("registered-attributes-list");
       if (datalist) {
-        datalist.innerHTML = Array.from(attrs).map(a => `<option value="${a}">`).join("");
+        datalist.innerHTML = Array.from(attrs).sort().map(a => `<option value="${a}">`).join("");
       }
     }
 
@@ -1100,7 +1114,8 @@
         case "heal_max_hp_ratio": return `最大HPの${eff.val}%回復`;
         case "mod_atk_ratio": return `攻撃力を${eff.val >= 0 ? '+' : ''}${eff.val}%(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
         case "mod_atk_val": return `攻撃力を${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
-        case "mod_speed": return `行動値を${eff.val >= 0 ? '+' : ''}${eff.val}${durText}`;
+        case "mod_speed": return `行動値を${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
+        case "mod_max_hp_val": return `最大HPを${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
         case "mod_ap": return `APを${eff.val >= 0 ? '+' : ''}${eff.val}`;
         case "damage_cut_ratio": return `受けるダメージを${eff.val}%カット(バフ)${durText}`;
         case "clear_buffs": return `バフを全て解除`;
@@ -1216,7 +1231,7 @@
     async function seedDefaultCards() {
       const defaults = [
         {
-          id: "card_def_1", cardType: "unit", name: "フレイムナイト", mainAttr: "人間", subAttrs: ["炎"],
+          id: "card_def_1", cardType: "unit", name: "フレイムナイト", mainAttr: "人間", subAttrs: [],
           image: createDummyCardImage("⚔️", "#991b1b"), stats: { hp: 4500, atk: 2200, priority: 60 },
           skills: [{
             id: "sk_1", type: "active", name: "火炎斬り", cost: 20,
@@ -1228,7 +1243,7 @@
           }]
         },
         {
-          id: "card_def_2", cardType: "unit", name: "アクアシャーマン", mainAttr: "亜人", subAttrs: ["水", "回復"],
+          id: "card_def_2", cardType: "unit", name: "アクアシャーマン", mainAttr: "亜人", subAttrs: [],
           image: createDummyCardImage("🧙‍♂️", "#1e3a8a"), stats: { hp: 3800, atk: 1400, priority: 50 },
           skills: [{
             id: "sk_2", type: "active", name: "癒やしの波", cost: 20,
@@ -1240,7 +1255,7 @@
           }]
         },
         {
-          id: "card_def_3", cardType: "unit", name: "ゴーレム", mainAttr: "機械", subAttrs: ["重装"],
+          id: "card_def_3", cardType: "unit", name: "ゴーレム", mainAttr: "機械", subAttrs: [],
           image: createDummyCardImage("🛡", "#3f6212"), stats: { hp: 7000, atk: 1800, priority: 30 },
           skills: [{
             id: "sk_3", type: "active", name: "プロテクト壁", cost: 30,
@@ -1421,6 +1436,12 @@
       changed = changed || migration.decks.some((d,i) => JSON.stringify(d.unitIds)!==JSON.stringify(beforeDecks[i]?.unitIds||[]) || JSON.stringify(d.magicIds)!==JSON.stringify(beforeDecks[i]?.magicIds||[]));
 
       for (const card of migration.cards) {
+        if (card.cardType === 'unit') {
+          const beforeSub = Array.isArray(card.subAttrs) ? card.subAttrs : [];
+          let nextSub = [...new Set(beforeSub.map(a => String(a || '').trim()).filter(a => a && !MAIN_ATTRIBUTES.includes(a)))].slice(0, 2);
+          if (['builtin:card_def_1','builtin:card_def_2','builtin:card_def_3'].includes(card.systemKey)) nextSub = [];
+          if (JSON.stringify(nextSub) !== JSON.stringify(beforeSub)) { card.subAttrs = nextSub; changed = true; }
+        }
         const image = getCardImage(card);
         if (image && !card.image) { card.image=image; changed=true; }
         if (Array.isArray(card.skills)) card.skills.forEach(sk => { const nextDesc=buildAutoSkillDescriptionFromData(sk); if(sk.desc!==nextDesc){sk.desc=nextDesc;changed=true;} });
@@ -1670,7 +1691,8 @@
                 <option value="mod_atk_ratio">攻撃力を○％増加/減少(バフ/デバフ)</option>
                 <option value="mod_atk_val">攻撃力を○増加/減少(バフ/デバフ)</option>
                 <option value="damage_cut_ratio">受けるダメージを○％カット(バフ)</option>
-                <option value="mod_speed">行動値を○増加/減少</option>
+                <option value="mod_speed">行動値を○増加/減少(バフ/デバフ)</option>
+                <option value="mod_max_hp_val">最大HPを○増加/減少(バフ/デバフ)</option>
                 <option value="mod_ap">APを○増加/減少</option>
                 <option value="clear_buffs">バフを全て解除</option>
                 <option value="clear_debuffs">デバフを全て解除</option>
@@ -1719,9 +1741,10 @@
                     <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                     <option value="heal_fixed">○回復</option>
                     <option value="mod_atk_ratio">攻撃力を○％増加/減少</option>
-                    <option value="mod_atk_val">攻撃力を○増加/減少</option>
+                    <option value="mod_atk_val">攻撃力を○増加/減少(バフ/デバフ)</option>
                     <option value="damage_cut_ratio">受けるダメージを○％カット</option>
-                    <option value="mod_speed">行動値を○増加/減少</option>
+                    <option value="mod_speed">行動値を○増加/減少(バフ/デバフ)</option>
+                    <option value="mod_max_hp_val">最大HPを○増加/減少(バフ/デバフ)</option>
                     <option value="mod_ap">APを○増加/減少</option>
                     <option value="clear_buffs">バフを全て解除</option>
                     <option value="clear_debuffs">デバフを全て解除</option>
@@ -1864,8 +1887,10 @@
         alert("メイン属性は「人間・亜人・機械・モンスター・幻獣」から選択してください。");
         return;
       }
-      const sub1 = document.getElementById("edit-sub1").value.trim();
-      const sub2 = document.getElementById("edit-sub2").value.trim();
+      const rawSubAttrs = [document.getElementById("edit-sub1").value.trim(), document.getElementById("edit-sub2").value.trim()].filter(Boolean);
+      const invalidSub = rawSubAttrs.find(a => MAIN_ATTRIBUTES.includes(a));
+      if (invalidSub) { alert(`サブ属性にメイン属性「${invalidSub}」は設定できません。`); return; }
+      const subAttrs = [...new Set(rawSubAttrs)].slice(0, 2);
       const hp = clamp(parseInt(document.getElementById("edit-hp").value), 1000, 10000);
       const atk = clamp(parseInt(document.getElementById("edit-atk").value), 500, 5000);
       const priority = clamp(parseInt(document.getElementById("edit-priority").value), 0, 100);
@@ -1879,7 +1904,7 @@
       });
 
       const existing = editingCardId ? allCards.find(c => c.id === editingCardId && c.cardType === 'unit') : null;
-      const card = { id: existing?.id || generateCardId(), cardType: "unit", name, mainAttr, subAttrs: [sub1, sub2].filter(Boolean), image: croppedImageData.unit || existing?.image || image, stats: { hp, atk, priority }, skills };
+      const card = { id: existing?.id || generateCardId(), cardType: "unit", name, mainAttr, subAttrs, image: croppedImageData.unit || existing?.image || image, stats: { hp, atk, priority }, skills };
       await saveToStore("cards", card);
       allCards = await getAllFromStore("cards");
       refreshAttributeDatalist();
@@ -2081,8 +2106,8 @@
       if (type === 'unit') {
         document.getElementById('edit-name').value = 'ファイアソルジャー';
         document.getElementById('edit-main-attr').value = '人間';
-        document.getElementById('edit-sub1').value = '炎';
-        document.getElementById('edit-sub2').value = '戦士';
+        document.getElementById('edit-sub1').value = '';
+        document.getElementById('edit-sub2').value = '';
         document.getElementById('edit-hp').value = 3000;
         document.getElementById('edit-atk').value = 1500;
         document.getElementById('edit-priority').value = 50;
@@ -2725,8 +2750,9 @@
         subAttrs: template.subAttrs || [],
         image: getCardImage(template) || createDummyCardImage("⚔️", "#334155"),
         imageSource: getCardImage(template),
-        maxHp: template.stats.hp,
-        currentHp: template.stats.hp,
+        baseMaxHp: Number(template.stats.hp),
+        maxHp: Number(template.stats.hp),
+        currentHp: Number(template.stats.hp),
         atk: template.stats.atk,
         priority: template.stats.priority,
         skills: JSON.parse(JSON.stringify(template.skills || [])),
@@ -3240,7 +3266,8 @@
         name: unit.name,
         mainAttr: unit.mainAttr,
         subAttrs: Array.isArray(unit.subAttrs) ? [...unit.subAttrs] : [],
-        maxHp: Number(unit.maxHp) || 1,
+        baseMaxHp: Number(unit.baseMaxHp ?? unit.maxHp) || 0,
+        maxHp: Math.max(0, Number(unit.maxHp) || 0),
         currentHp: Math.max(0, Number(unit.currentHp) || 0),
         atk: Number(unit.atk) || 0,
         priority: Number(unit.priority) || 0,
@@ -3291,6 +3318,7 @@
         if (b.type === 'atk_ratio') atk += Math.round(unit.atk * (Number(b.val) || 0) / 100);
         if (b.type === 'atk_val') atk += Number(b.val) || 0;
       });
+      if (aiPlannerHasStatus(unit, 'weak')) atk = Math.floor(atk / 2);
       return Math.max(0, atk);
     }
 
@@ -3375,13 +3403,28 @@
       return Math.max(0, Math.round(raw * (1 - cut / 100)));
     }
 
+    function aiPlannerRefreshEffectiveMaxHp(unit, increaseCurrent = false) {
+      if (!unit || unit.__playerTarget) return { oldMax: 0, newMax: 0, currentIncreased: 0, currentDecreased: 0 };
+      const oldMax = Math.max(0, Number(unit.maxHp) || 0);
+      const baseMax = Math.max(0, Number(unit.baseMaxHp ?? oldMax) || 0);
+      const delta = [...(unit.buffs || []), ...(unit.debuffs || [])]
+        .filter(x => x.type === 'max_hp')
+        .reduce((sum, x) => sum + (Number(x.val) || 0), 0);
+      const newMax = Math.max(0, baseMax + delta);
+      const before = Math.max(0, Number(unit.currentHp) || 0);
+      const increase = increaseCurrent && newMax > oldMax ? newMax - oldMax : 0;
+      unit.maxHp = newMax;
+      unit.currentHp = Math.max(0, Math.min(newMax, before + increase));
+      return { oldMax, newMax, currentIncreased: Math.max(0, unit.currentHp - before), currentDecreased: Math.max(0, before - unit.currentHp) };
+    }
+
     function aiPlannerAddTimed(target, effect) {
       if (!target || target.__playerTarget || !effect) return;
       const duration = Math.max(1, Number(effect.duration) || 1);
       const isBuff = Number(effect.val) >= 0;
       const dest = isBuff ? target.buffs : target.debuffs;
       const item = {
-        type: effect.type === 'damage_cut_ratio' ? 'dmg_cut' : effect.type === 'mod_speed' ? 'speed' : effect.type === 'mod_atk_ratio' ? 'atk_ratio' : 'atk_val',
+        type: effect.type === 'damage_cut_ratio' ? 'dmg_cut' : effect.type === 'mod_speed' ? 'speed' : effect.type === 'mod_max_hp_val' ? 'max_hp' : effect.type === 'mod_atk_ratio' ? 'atk_ratio' : 'atk_val',
         val: Number(effect.val) || 0,
         duration,
         source: isBuff ? 'buff' : 'debuff'
@@ -3424,19 +3467,30 @@
         target.currentHp += actual;
         return ok({ value: actual * 0.95, kills: 0, damage: 0, healing: actual });
       }
-      if (effect.type === 'damage_cut_ratio' || effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') {
+      if (effect.type === 'damage_cut_ratio' || effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed' || effect.type === 'mod_max_hp_val') {
         aiPlannerAddTimed(target, effect);
         const val = Number(effect.val) || 0;
+        if (effect.type === 'mod_max_hp_val') {
+          const beforeCurrent = target.currentHp;
+          const beforeMax = target.maxHp;
+          const delta = aiPlannerRefreshEffectiveMaxHp(target, val >= 0);
+          const killed = beforeCurrent > 0 && target.currentHp <= 0;
+          const weight = val >= 0 ? 8 : 11;
+          return ok({ value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.85) + (killed ? 1400 : 0), kills: killed ? 1 : 0, damage: Math.max(0, beforeCurrent-target.currentHp), healing: Math.max(0,target.currentHp-beforeCurrent), maxHpChange: target.maxHp-beforeMax });
+        }
         const weight = effect.type === 'damage_cut_ratio' ? 18 : effect.type === 'mod_speed' ? 10 : 7;
         return ok({ value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.8), kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'clear_buffs') {
+        const before = target.currentHp;
         target.buffs = (target.buffs || []).filter(b => b.source && b.source !== 'buff');
-        return ok({ value: target.side !== actor.side ? 70 : 30, kills: 0, damage: 0, healing: 0 });
+        const delta = aiPlannerRefreshEffectiveMaxHp(target, false);
+        return ok({ value: target.side !== actor.side ? 70 : 30, kills: before > 0 && target.currentHp <= 0 ? 1 : 0, damage: Math.max(0,before-target.currentHp), healing: 0, maxHpChange: delta.newMax-delta.oldMax });
       }
       if (effect.type === 'clear_debuffs') {
         target.debuffs = [];
-        return ok({ value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0 });
+        const delta = aiPlannerRefreshEffectiveMaxHp(target, false);
+        return ok({ value: target.side === actor.side ? 65 : 20, kills: 0, damage: 0, healing: 0, maxHpChange: delta.newMax-delta.oldMax });
       }
       if (effect.type === 'status_apply') {
         target.statuses = target.statuses || [];
@@ -4197,6 +4251,21 @@
       return true;
     }
 
+    function refreshEffectiveMaxHp(unit, increaseCurrent = false) {
+      if (!unit || unit.__playerTarget) return { oldMax: 0, newMax: 0, currentIncreased: 0, currentDecreased: 0 };
+      const oldMax = Math.max(0, Number(unit.maxHp) || 0);
+      const baseMax = Math.max(0, Number(unit.baseMaxHp ?? oldMax) || 0);
+      const delta = [...(unit.buffs || []), ...(unit.debuffs || [])]
+        .filter(x => x.type === 'max_hp')
+        .reduce((sum, x) => sum + (Number(x.val) || 0), 0);
+      const newMax = Math.max(0, baseMax + delta);
+      const before = Math.max(0, Number(unit.currentHp) || 0);
+      const increase = increaseCurrent && newMax > oldMax ? newMax - oldMax : 0;
+      unit.maxHp = newMax;
+      unit.currentHp = Math.max(0, Math.min(newMax, before + increase));
+      return { oldMax, newMax, currentIncreased: Math.max(0, unit.currentHp - before), currentDecreased: Math.max(0, before - unit.currentHp) };
+    }
+
     function applyEffect(eff, target, isPlayerActor, isMagic = false, actor = null) {
       if (!eff || eff.type === "none") return;
 
@@ -4279,17 +4348,37 @@
       if (eff.type === "mod_speed") {
         addTimedStatus(target, { type: 'speed', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`💨 ${target.name} の行動値が ${eff.val >= 0 ? '+' : ''}${eff.val}変化！`);
-        return {effect:`行動値 ${eff.val >= 0 ? '+' : ''}${eff.val}`, result:`${target.name} の現在行動値: ${getEffectiveSpeed(target)}（${duration}ターン）`};
+        return {effect:`行動値 ${eff.val >= 0 ? '+' : ''}${eff.val}（${eff.val >= 0 ? 'バフ' : 'デバフ'}）`, result:`${target.name} の現在行動値: ${getEffectiveSpeed(target)}（${duration}ターン）`};
+      }
+
+      if (eff.type === "mod_max_hp_val") {
+        const beforeCurrent = target.currentHp;
+        const beforeMax = target.maxHp;
+        addTimedStatus(target, { type: 'max_hp', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
+        const delta = refreshEffectiveMaxHp(target, Number(eff.val) >= 0);
+        if (delta.currentIncreased > 0) triggerPassiveEvent('hp_increase', target);
+        if (delta.currentDecreased > 0) triggerPassiveEvent('hp_decrease', target);
+        if (target.currentHp <= 0 && beforeCurrent > 0) {
+          triggerPassiveEvent('death', target);
+          [...getActiveUnits(target.side === 'player' ? 'player' : 'enemy')].filter(u => u !== target).forEach(u => triggerPassiveEvent('ally_death', u));
+        }
+        logBattle(`❤️ ${target.name} の最大HPが ${Number(eff.val) >= 0 ? '+' : ''}${eff.val}変化！`);
+        return {effect:`最大HP ${Number(eff.val) >= 0 ? '+' : ''}${eff.val}（${Number(eff.val) >= 0 ? 'バフ' : 'デバフ'}）`, result:`${target.name} 最大HP ${beforeMax}→${target.maxHp} / HP ${target.currentHp}/${target.maxHp}`};
       }
 
       if (eff.type === "clear_buffs") {
+        const before = target.currentHp;
         target.buffs = (target.buffs || []).filter(b => b.source && b.source !== 'buff');
+        refreshEffectiveMaxHp(target, false);
+        if (target.currentHp < before) triggerPassiveEvent('hp_decrease', target);
+        if (target.currentHp <= 0 && before > 0) triggerPassiveEvent('death', target);
         logBattle(`✨ ${target.name} のバフを解除した！`);
         return {effect:'バフを全解除', result:`${target.name} のバフ解除`};
       }
 
       if (eff.type === "clear_debuffs") {
         target.debuffs = [];
+        refreshEffectiveMaxHp(target, false);
         logBattle(`✨ ${target.name} のデバフを解除した！`);
         return {effect:'デバフを全解除', result:`${target.name} のデバフ解除`};
       }
@@ -4374,7 +4463,8 @@
         if (b.type === 'atk_ratio') atk += Math.round(unit.atk * (b.val / 100));
         if (b.type === 'atk_val') atk += b.val;
       });
-      return atk;
+      if ((unit.statuses || []).some(s => s.type === 'weak' && Number(s.duration) > 0)) atk = Math.floor(atk / 2);
+      return Math.max(0, atk);
     }
 
     function getEffectiveSpeed(unit) {
@@ -4444,6 +4534,9 @@
         u.buffs = tick(u.buffs);
         u.debuffs = tick(u.debuffs);
         u.statuses = tick(u.statuses);
+        const before = u.currentHp;
+        refreshEffectiveMaxHp(u, false);
+        if (u.currentHp < before) triggerPassiveEvent('hp_decrease', u);
       });
     }
 
