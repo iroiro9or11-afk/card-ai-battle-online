@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.21.0';
+const SERVER_VERSION = '3.27.2';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -554,6 +554,13 @@ function addAbnormality(t, status, duration, appliedTurn) {
 }
 function hasStatus(t, status) { return !!(t?.statuses || []).some(x => x.type === status && Number(x.duration) > 0); }
 function hasAnyStatus(t) { return !!(t?.statuses || []).some(x => Number(x.duration) > 0); }
+function effectResultSucceeded(result) {
+  if (result == null) return false;
+  const text = String(result);
+  if (text === '回復禁止中') return false;
+  if (/^.+は既に.+中$/.test(text)) return false;
+  return true;
+}
 function pushPassiveEvent(b, u, sk, result, target=null) {
   b.pendingEvents = b.pendingEvents || [];
   b.pendingEvents.push({ type:'PASSIVE_USE', actor:pubUnit(u,false), target:target && !target.__playerTarget ? pubUnit(target,false) : null, actionName:sk.name, effect:result || 'パッシブ効果', result:result || '発動', description:sk.desc || sk.description || '', cardId:u.cardId });
@@ -578,8 +585,16 @@ function triggerPassiveTiming(b, timing, subject=null) {
         const before = u.currentHp;
         const ts = targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
         const lines=[];
-        for (const t of ts) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(r) lines.push(r); }
-        if (sk.hasSubEffect && sk.subEffect) for (const t of targets(b,u,sk.subEffect.targetType||sk.targetType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId)) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
+        let mainEffectSucceeded = false;
+        for (const t of ts) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(effectResultSucceeded(r)) { mainEffectSucceeded = true; }
+        if(r) lines.push(r); }
+        if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
+          const subType = sk.subEffect.targetType || sk.targetType;
+          const subTargets = subType === 'same_main_target'
+            ? ts
+            : targets(b,u,subType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId);
+          for (const t of subTargets) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
+        }
         b._statusApplicationTiming = null;
         pushPassiveEvent(b,u,sk,lines.join('\n')||`HP ${before} → ${u.currentHp}`,ts[0]);
       }
@@ -631,7 +646,7 @@ function evalCond(b, cond, actor) {
   return true;
 }
 function targets(b, actor, type, cond, selected, isMagic=false) {
-  if (type === 'same_main_target') return selected ? targets(b, actor, actor.__sameMainTargetType || 'self', cond, selected, isMagic) : [];
+  if (type === 'same_main_target') return [];
   if (type === 'player_self') return [{ __playerTarget: 'self', name: actor.side === 'player1' ? b.p1.name : b.p2.name }];
   if (type === 'player_opp') return [{ __playerTarget: 'opp', name: actor.side === 'player1' ? b.p2.name : b.p1.name }];
   if (type === 'self') return [actor];
@@ -712,11 +727,26 @@ function passiveOne(b, timing, u) {
   for (const sk of u.skills || []) {
     if (sk.type !== 'passive' || sk.timing !== timing || !evalCond(b, sk.selfCond, u)) continue;
     b._statusApplicationTiming = timing;
-    const lines=[]; const ts=targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
-    for (const t of ts) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(r) lines.push(r); }
-    if (sk.hasSubEffect && sk.subEffect) for (const t of targets(b,u,sk.subEffect.targetType||sk.targetType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId)) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
+    const lines=[];
+    const mainTargets=targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
+    let mainEffectSucceeded=false;
+    for (const t of mainTargets) {
+      const r=applyEffect(b,sk.mainEffect,t,u,false);
+      if (effectResultSucceeded(r)) mainEffectSucceeded=true;
+      if (r) lines.push(r);
+    }
+    if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
+      const subType=sk.subEffect.targetType||sk.targetType;
+      const subTargets=subType==='same_main_target'
+        ? mainTargets
+        : targets(b,u,subType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId);
+      for (const t of subTargets) {
+        const r=applyEffect(b,sk.subEffect,t,u,false);
+        if(r) lines.push(r);
+      }
+    }
     b._statusApplicationTiming = null;
-    pushPassiveEvent(b,u,sk,lines.join('\n')||'発動',ts[0]);
+    pushPassiveEvent(b,u,sk,lines.join('\n')||'発動',mainTargets[0]);
   }
 }
 function passive(b, timing) { for (const u of allUnits(b)) passiveOne(b, timing, u); }
@@ -968,6 +998,20 @@ function chooseAutoForSide(b, side) {
   const pl = battlePlayer(b, side);
   let remaining = pl.ap;
   const actions = [];
+
+  const pickTargetId = (u, type, cond) => {
+    if (!['select_enemy_1','select_ally_1'].includes(type)) return null;
+    const candidates = targetPool(b, u, type).filter(t => matchesTarget(t, cond));
+    return candidates[0]?.instanceId || null;
+  };
+  const pickSubTargetId = (u, sk) => {
+    const sub = sk?.subEffect;
+    if (!sk?.hasSubEffect || !sub || sub.targetType === 'same_main_target') return null;
+    if (!['select_enemy_1','select_ally_1'].includes(sub.targetType)) return null;
+    const candidates = targetPool(b, u, sub.targetType).filter(t => matchesTarget(t, sub.targetCond || {type:'none'}));
+    return candidates[0]?.instanceId || null;
+  };
+
   for (const u of activeUnits(b, side)) {
     let picked = {type:'attack', targetInstanceId:null};
     const blocked = (u.debuffs || []).some(x => x.type === 'skill_block' && x.duration > 0);
@@ -976,33 +1020,51 @@ function chooseAutoForSide(b, side) {
         const sk = u.skills[i];
         const cost = Number(sk.cost || 0);
         if (sk.type !== 'active' || remaining < cost || !evalCond(b, sk.selfCond, u)) continue;
-        const candidates = targets(b, u, sk.targetType, sk.targetCond, null);
-        if ((sk.targetType === 'select_enemy_1' || sk.targetType === 'select_ally_1') && !candidates.length) continue;
-        picked = {type:'skill', skillIndex:i, targetInstanceId:candidates[0]?.instanceId || null};
+
+        const mainTargetId = pickTargetId(u, sk.targetType, sk.targetCond);
+        if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !mainTargetId) continue;
+        const subTargetId = pickSubTargetId(u, sk);
+        if (sk.hasSubEffect && sk.subEffect && sk.subEffect.targetType !== 'same_main_target' &&
+            ['select_enemy_1','select_ally_1'].includes(sk.subEffect.targetType) && !subTargetId) continue;
+
+        picked = {type:'skill', skillIndex:i, targetInstanceId:mainTargetId, subTargetInstanceId:subTargetId};
         remaining -= cost;
         break;
       }
     }
     actions.push({unitInstanceId:u.instanceId, ...picked});
   }
-  let magicId = null, magicTargetInstanceId = null;
+
+  let magicId = null, magicTargetInstanceId = null, magicSubTargetInstanceId = null;
   const magicCandidates = pl.magicIds
     .filter(id => !pl.usedMagic.includes(id))
     .map(id => pl.magicCards[id])
     .filter(Boolean)
-    .filter(card => Number(card.effect?.cost || 0) <= remaining)
-    .filter(card => card.effect?.targetType !== 'player_opp' || true);
+    .filter(card => Number(card.effect?.cost || 0) <= remaining);
+
   if (magicCandidates.length) {
     const card = magicCandidates.find(c => c.effect?.targetType === 'player_self') || magicCandidates[0];
+    const eff = card.effect || {};
     magicId = card.id;
-    if (['select_enemy_1','select_ally_1'].includes(card.effect?.targetType)) {
-      const actor = {side, name:pl.name, currentHp:1, maxHp:1};
-      const ts = targets(b, actor, card.effect.targetType, card.effect.targetCond, null, true);
+    const actor = {side, name:pl.name, currentHp:1, maxHp:1};
+    if (['select_enemy_1','select_ally_1'].includes(eff.targetType)) {
+      const ts = targetPool(b, actor, eff.targetType).filter(t => matchesTarget(t, eff.targetCond));
       magicTargetInstanceId = ts[0]?.instanceId || null;
     }
+    if (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target' &&
+        ['select_enemy_1','select_ally_1'].includes(eff.subEffect.targetType)) {
+      const ss = targetPool(b, actor, eff.subEffect.targetType).filter(t => matchesTarget(t, eff.subEffect.targetCond || {type:'none'}));
+      magicSubTargetInstanceId = ss[0]?.instanceId || null;
+    }
+    if ((['select_enemy_1','select_ally_1'].includes(eff.targetType) && !magicTargetInstanceId) ||
+        (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target' &&
+         ['select_enemy_1','select_ally_1'].includes(eff.subEffect.targetType) && !magicSubTargetInstanceId)) {
+      magicId = null; magicTargetInstanceId = null; magicSubTargetInstanceId = null;
+    }
   }
-  return {units:actions, magicId, magicTargetInstanceId, actionId:uid('auto')};
+  return {units:actions, magicId, magicTargetInstanceId, magicSubTargetInstanceId, actionId:uid('auto')};
 }
+
 function expireDecision(r) {
   const b = r?.battle;
   if (!b || b.phase !== 'decision' || b.pausedForDisconnect) return;
@@ -1031,11 +1093,9 @@ function validateActionSet(b, side, actions) {
     if (!u || seen.has(u.instanceId)) throw new Error('不正なキャラクター行動が含まれています。');
     seen.add(u.instanceId);
     if (a.type === 'attack') {
-      if (a.targetInstanceId) {
-        const opp = activeUnits(b, side === 'player1' ? 'player2' : 'player1');
-        if (!opp.some(t => t.instanceId === a.targetInstanceId)) throw new Error('通常攻撃の対象が不正です。');
-      }
-      out.units.push({unitInstanceId:u.instanceId,type:'attack',targetInstanceId:a.targetInstanceId || null});
+      // 通常攻撃は常に現在フィールドの敵からサーバー側でランダム選択する。
+      // クライアントから届いた targetInstanceId は無視する。
+      out.units.push({unitInstanceId:u.instanceId,type:'attack',targetInstanceId:null});
       continue;
     }
     if (a.type !== 'skill') throw new Error('不正な行動タイプです。');
@@ -1094,7 +1154,7 @@ function executeMagic(b, side, card, selectedTargetId=null, selectedSubTargetId=
   const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines = [];
   let mainEffectSucceeded=false;
-  for (const t of main) { const r = applyEffect(b, eff.mainEffect, t, actor, true); if (r) { mainEffectSucceeded=true; lines.push(r); } }
+  for (const t of main) { const r = applyEffect(b, eff.mainEffect, t, actor, true); if (effectResultSucceeded(r)) mainEffectSucceeded=true; if(r) lines.push(r); }
   if (mainEffectSucceeded && eff.hasSubEffect && eff.subEffect) {
     const subType=eff.subEffect.targetType||'same_main_target';
     const sub = subType==='same_main_target' ? main : targets(b, actor, subType, eff.subEffect.targetCond || {type:'none'}, selectedSubTargetId, true);
@@ -1139,9 +1199,13 @@ function executeAction(b, side, u, action) {
   resource.ap -= cost;
   const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
   const lines=[];
-  for (const t of main) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(r) lines.push(r); }
-  if (sk.hasSubEffect && sk.subEffect) {
-    const sub=targets(b,u,sk.subEffect.targetType||sk.targetType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId||action.targetInstanceId,false);
+  let mainEffectSucceeded = false;
+  for (const t of main) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(effectResultSucceeded(r)) mainEffectSucceeded = true; if(r) lines.push(r); }
+  if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
+    const subType=sk.subEffect.targetType||'same_main_target';
+    const sub=subType==='same_main_target'
+      ? main
+      : targets(b,u,subType,sk.subEffect.targetCond||sk.targetCond,action.subTargetInstanceId || null,false);
     for (const t of sub) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
   }
   const tar=main[0];
