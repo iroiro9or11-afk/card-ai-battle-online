@@ -1,17 +1,17 @@
 {
   "name": "card-ai-online",
-  "version": "3.27.6",
+  "version": "3.27.7",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.27.6（ストーリー予定相手・編成表示の根本修正）",
+  "description": "カードAIバトル オンライン対戦 v3.27.7（ストーリー抽選・対戦相手スナップショット・編成表示の修正）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js",
     "test:card-id": "node tests/card-id-migration-test.js",
     "test:offline": "node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js",
-    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js",
+    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js && node tests/story-mode-v3277-regression.js",
     "test:ai": "node tests/offline-ai-v321-regression.js",
-    "test:story": "node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js"
+    "test:story": "node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js && node tests/story-mode-v3277-regression.js"
   },
   "dependencies": {}
 }
