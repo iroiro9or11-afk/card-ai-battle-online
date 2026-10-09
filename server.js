@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.28.0';
+const SERVER_VERSION = '3.28.1';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -13,7 +13,8 @@ const RULES = new Set(['unlimited', 'rental', 'super_rental', 'random_pot']);
 const MAX_ROOM_NAME = 40;
 const MAX_PLAYER_NAME = 40;
 const MAX_SPECTATORS = 50;
-const DECISION_MS = 90_000;
+// Production default remains exactly 90 seconds. A shorter value is only useful for automated timeout regression tests.
+const DECISION_MS = Math.max(500, Number(process.env.CARD_BATTLE_DECISION_MS) || 90_000);
 const MAX_PROFILE_CARDS = 500;
 const MAX_PROFILE_DECKS = 100;
 const MAX_WS_PAYLOAD = 8 * 1024 * 1024;
@@ -691,7 +692,7 @@ function triggerPassiveTiming(b, timing, subject=null) {
           const subType = sk.subEffect.targetType || sk.targetType;
           const subTargets = subType === 'same_main_target'
             ? ts
-            : targets(b,u,subType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId);
+            : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
           for (const t of subTargets) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
         }
         b._statusApplicationTiming = null;
@@ -893,7 +894,7 @@ function passiveOne(b, timing, u) {
       const subType=sk.subEffect.targetType||sk.targetType;
       const subTargets=subType==='same_main_target'
         ? mainTargets
-        : targets(b,u,subType,sk.subEffect.targetCond||sk.targetCond,sk.subEffect.targetInstanceId);
+        : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
       for (const t of subTargets) {
         const r=applyEffect(b,sk.subEffect,t,u,false);
         if(r) lines.push(r);
@@ -963,7 +964,7 @@ function publicMagicCards(pl, includeImage=false) {
 }
 function publicBattle(b, viewerSide) {
   return {
-    battleId:b.battleId, turn:b.turn, phase:b.phase, deadline:b.deadline,
+    battleId:b.battleId, turn:b.turn, phase:b.phase, deadline:b.deadline, remainingMs:b.deadline ? Math.max(0, b.deadline-Date.now()) : null, decisionToken:b.decisionToken || null,
     p1:{name:b.p1.name,ap:finiteNumber(b.p1.ap,0),units:b.p1.units.map(u=>pubUnit(u,false)),reserveQueue:[...b.p1.reserveQueue],magicIds:[...b.p1.magicIds],magicCards:publicMagicCards(b.p1,false),usedMagicIds:[...b.p1.usedMagic]},
     p2:{name:b.p2.name,ap:finiteNumber(b.p2.ap,0),units:b.p2.units.map(u=>pubUnit(u,false)),reserveQueue:[...b.p2.reserveQueue],magicIds:[...b.p2.magicIds],magicCards:publicMagicCards(b.p2,false),usedMagicIds:[...b.p2.usedMagic]},
     yourSide:viewerSide, winner:b.winner, events:(b.events || []).slice(-30)
@@ -1052,23 +1053,17 @@ function startBattle(r) {
   const sa = getSelectionForPlayer(r, a.sessionId), sb = getSelectionForPlayer(r, b.sessionId);
   if (!sa || !sb) throw new Error('両者の出撃設定が完了していません。');
   const bstate = {
-    battleId:uid('battle'), turn:1, phase:'decision', deadline:null, pausedForDisconnect:false, pausedRemainingMs:DECISION_MS,
+    battleId:uid('battle'), turn:1, phase:'preparing', deadline:null, pausedForDisconnect:false, pausedRemainingMs:DECISION_MS,
     p1:buildBattleSide(r, a.sessionId, pa, sa, 'player1'),
     p2:buildBattleSide(r, b.sessionId, pb, sb, 'player2'), winner:null, events:[], timer:null,
-    _statusApplicationTiming:null
+    _statusApplicationTiming:null, decisionReadySides:[], decisionToken:null
   };
   r.status = 'battle';
   r.battle = bstate;
+  // Battle-start and deploy passives must be applied and presented before the first command phase.
   passive(bstate, 'battle_start');
   for (const u of [...activeUnits(bstate, 'player1'), ...activeUnits(bstate, 'player2')]) passiveOne(bstate, 'deploy', u);
-  for (const p of r.players.filter(Boolean)) {
-    const side = p === r.players[0] ? 'player1' : 'player2';
-    sendBattleSnapshot(r,p.ws,side,'battle_start');
-  }
-  for (const sid of r.spectators) {
-    const s = sessions.get(sid); if (s?.ws) sendBattleSnapshot(r,s.ws,'spectator','battle_start');
-  }
-  scheduleDecision(r, DECISION_MS);
+  prepareDecision(r, true);
 }
 function broadcastBattle(r, type, extra={}) {
   for (const p of r.players.filter(Boolean)) {
@@ -1112,6 +1107,12 @@ function pauseBattleForDisconnect(r, sid) {
   if (!r?.battle || r.battle.phase === 'finished') return;
   const pslot = playerSlot(r, sid);
   if (pslot < 0) return;
+  if (r.battle.phase === 'preparing') {
+    // A disconnected client must acknowledge preparation again after recovery.
+    const side = pslot === 0 ? 'player1' : 'player2';
+    r.battle.decisionReadySides = (r.battle.decisionReadySides || []).filter(x => x !== side);
+    return; // no countdown exists during preparation
+  }
   if (r.battle.phase === 'decision') {
     clearTimeout(r.battle.timer);
     r.battle.pausedRemainingMs = Math.max(1000, (r.battle.deadline || Date.now()) - Date.now());
@@ -1134,95 +1135,142 @@ function resumeBattleAfterReconnect(r) {
   broadcastBattle(r, 'battle_resumed', { remainingMs:ms });
   broadcastBattle(r, 'battle_state');
 }
-function scheduleDecision(r, duration=DECISION_MS) {
-  const b = r.battle; if (!b) return;
-  clearTimeout(b.timer);
-  if (!bothPlayersOnline(r)) {
-    b.phase = 'paused'; b.deadline = null; b.pausedForDisconnect = true; b.pausedRemainingMs = duration;
-    broadcastBattle(r, 'battle_paused', { reason:'接続待ちのためタイマーを停止しています。', remainingMs:duration });
-    return;
-  }
-  b.phase = 'decision';
-  b.deadline = Date.now() + Math.max(1000, duration);
-  b.pausedRemainingMs = Math.max(1000, duration);
+function prepareDecision(r, initial=false) {
+  const b = r?.battle; if (!b || b.phase === 'finished') return;
+  clearTimeout(b.timer); b.timer = null;
+  // No decision deadline exists until both clients have displayed every start/turn-start passive.
+  b.phase = 'preparing'; b.deadline = null; b.pausedForDisconnect = false;
+  b.decisionToken = uid('decision'); b.decisionReadySides = [];
   b.p1.ap = Math.min(100, b.p1.ap + 20);
   b.p2.ap = Math.min(100, b.p2.ap + 20);
   for (const u of allUnits(b)) if (u.currentHp > 0) u.reservedAction = {type:'attack',targetInstanceId:null};
   b.p1.actions = null; b.p2.actions = null;
+  // Offline order: AP recovery first, then turn-start passives, then command selection.
+  passive(b, 'turn_start');
+  if (initial) {
+    for (const p of r.players.filter(Boolean)) {
+      const side = p === r.players[0] ? 'player1' : 'player2';
+      sendBattleSnapshot(r,p.ws,side,'battle_start');
+    }
+    for (const sid of r.spectators) {
+      const watcher = sessions.get(sid); if (watcher?.ws) sendBattleSnapshot(r,watcher.ws,'spectator','battle_start');
+    }
+  } else {
+    broadcastBattle(r, 'turn_preparing');
+  }
+  // The passive event stream is deliberately sent before the preparation marker.
+  flushPendingEvents(r);
+  broadcastBattle(r, 'decision_prepare_end', { battleId:b.battleId, turn:b.turn, decisionToken:b.decisionToken });
+}
+function openDecisionPhase(r) {
+  const b = r?.battle; if (!b || b.phase !== 'preparing' || !bothPlayersOnline(r)) return;
+  const ready = new Set(b.decisionReadySides || []);
+  if (!ready.has('player1') || !ready.has('player2')) return;
+  clearTimeout(b.timer);
+  b.phase = 'decision'; b.deadline = Date.now() + DECISION_MS; b.pausedRemainingMs = DECISION_MS;
+  b.timer = setTimeout(() => expireDecision(r), DECISION_MS);
   broadcastBattle(r, 'turn_start');
-  b.timer = setTimeout(() => expireDecision(r), Math.max(0, b.deadline - Date.now()));
+}
+function reopenDecisionAfterError(r) {
+  const b = r?.battle; if (!b || !bothPlayersOnline(r)) return;
+  clearTimeout(b.timer);
+  b.phase = 'decision'; b.deadline = Date.now() + DECISION_MS; b.pausedRemainingMs = DECISION_MS;
+  b.decisionToken = uid('decision-retry'); b.decisionReadySides = [];
+  b.p1.actions = null; b.p2.actions = null;
+  b.timer = setTimeout(() => expireDecision(r), DECISION_MS);
+  broadcastBattle(r, 'turn_start');
+}
+function noviceTargetScore(target, effect, actor) {
+  if (!target) return -9999;
+  // Keep timeout target selection aligned with the offline novice AI's scoreAiTarget.
+  let score = Math.random() * 2;
+  const type = String(effect?.type || '');
+  const ratio = target.maxHp > 0 ? target.currentHp / target.maxHp : 1;
+  if (['dmg_fixed','dmg_fixed_pierce','dmg_atk_ratio'].includes(type)) {
+    const raw = type === 'dmg_fixed' || type === 'dmg_fixed_pierce'
+      ? Number(effect?.val) || 0
+      : Math.round(effAtk(actor) * (Number(effect?.val) || 0) / 100);
+    const receivedRatio = [...(target.buffs || []), ...(target.debuffs || [])]
+      .filter(x => x.type === 'damage_taken_ratio' || x.type === 'dmg_cut')
+      .reduce((sum, x) => sum + (x.type === 'dmg_cut' ? -(Number(x.val) || 0) : (Number(x.val) || 0)), 0);
+    const actual = type === 'dmg_fixed_pierce'
+      ? Math.max(0, Math.round(raw))
+      : Math.max(0, Math.round(Math.max(0, raw) * Math.max(0, 1 + receivedRatio / 100)));
+    score += actual * 0.8;
+    if (actual >= target.currentHp) score += 260;
+    if (ratio < 0.35) score += 75;
+  }
+  if (type === 'heal_fixed' || type === 'heal_max_hp_ratio') score += (1 - ratio) * 110;
+  if (type === 'mod_atk_ratio' || type === 'mod_atk_val' || type === 'mod_speed') score += target.side === actor.side ? 55 : 20;
+  if (type === 'damage_taken_ratio' || type === 'damage_cut_ratio') {
+    const value = type === 'damage_cut_ratio' ? -(Number(effect?.val) || 0) : (Number(effect?.val) || 0);
+    score += (value < 0 ? (target.side === actor.side ? 75 : 5) : (target.side !== actor.side ? 75 : -10));
+  }
+  if (type === 'heal_block' || type === 'skill_block') score += target.side !== actor.side ? 85 : -20;
+  if (type === 'mod_ap') score += Number(effect?.val || 0) > 0 ? 55 : 35;
+  return score;
 }
 function chooseAutoForSide(b, side) {
+  // This is intentionally the same difficulty tier as the offline "素人" AI,
+  // not a deterministic strongest-skill selector.
   const pl = battlePlayer(b, side);
-  let remaining = pl.ap;
+  let remaining = Math.max(0, Number(pl.ap) || 0);
   const actions = [];
-
-  const pickTargetId = (u, type, cond) => {
-    if (!['select_enemy_1','select_ally_1'].includes(type)) return null;
-    const candidates = targetPool(b, u, type).filter(t => matchesTarget(t, cond));
-    return candidates[0]?.instanceId || null;
-  };
-  const pickSubTargetId = (u, sk) => {
-    const sub = sk?.subEffect;
-    if (!sk?.hasSubEffect || !sub || sub.targetType === 'same_main_target') return null;
-    if (!['select_enemy_1','select_ally_1'].includes(sub.targetType)) return null;
-    const candidates = targetPool(b, u, sub.targetType).filter(t => matchesTarget(t, sub.targetCond || {type:'none'}));
-    return candidates[0]?.instanceId || null;
-  };
-
+  const manual = type => type === 'select_enemy_1' || type === 'select_ally_1';
+  const candidatesFor = (u, type, cond) => targetPool(b,u,type).filter(t => matchesTarget(t,cond) && !(t.side !== u.side && hasStatus(t,'stealth')));
+  const chooseTarget = (list, effect, actor) => list.slice().sort((a,c)=>noviceTargetScore(c,effect,actor)-noviceTargetScore(a,effect,actor))[0] || null;
   for (const u of activeUnits(b, side)) {
     let picked = {type:'attack', targetInstanceId:null};
     const blocked = (u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration));
+    const usable=[];
     if (!blocked) {
       for (let i=0; i<(u.skills || []).length; i++) {
-        const sk = u.skills[i];
-        const cost = Number(sk.cost || 0);
-        if (sk.type !== 'active' || remaining < cost || !evalCond(b, sk.selfCond, u)) continue;
-
-        const mainTargetId = pickTargetId(u, sk.targetType, sk.targetCond);
-        if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !mainTargetId) continue;
-        const subTargetId = pickSubTargetId(u, sk);
-        if (sk.hasSubEffect && sk.subEffect && sk.subEffect.targetType !== 'same_main_target' &&
-            ['select_enemy_1','select_ally_1'].includes(sk.subEffect.targetType) && !subTargetId) continue;
-
-        picked = {type:'skill', skillIndex:i, targetInstanceId:mainTargetId, subTargetInstanceId:subTargetId};
-        remaining -= cost;
-        break;
+        const sk=u.skills[i], cost=Math.max(0,Number(sk.cost)||0);
+        if (sk.type!=='active' || cost>remaining || !evalCond(b,sk.selfCond,u)) continue;
+        const main = manual(sk.targetType) ? candidatesFor(u,sk.targetType,sk.targetCond) : [];
+        if (manual(sk.targetType) && !main.length) continue;
+        const sub=sk.hasSubEffect&&sk.subEffect?sk.subEffect:null;
+        const subs=sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)?candidatesFor(u,sub.targetType,sub.targetCond):[];
+        if (sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)&&!subs.length) continue;
+        usable.push({index:i,sk,cost,main,subs});
       }
     }
-    actions.push({unitInstanceId:u.instanceId, ...picked});
+    if (usable.length && Math.random()<0.35) {
+      const choice=randomItem(usable), mainTarget=manual(choice.sk.targetType)?chooseTarget(choice.main,choice.sk.mainEffect,u):null;
+      const sub=choice.sk.hasSubEffect&&choice.sk.subEffect?choice.sk.subEffect:null;
+      let subTarget=null;
+      if (sub && sub.targetType!=='same_main_target' && manual(sub.targetType)) subTarget=chooseTarget(choice.subs,sub,u);
+      if (!(sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)&&!subTarget)) {
+        picked={type:'skill',skillIndex:choice.index,targetInstanceId:mainTarget?.instanceId||null,subTargetInstanceId:subTarget?.instanceId||null};
+        remaining=Math.max(0,remaining-choice.cost);
+      }
+    }
+    actions.push({unitInstanceId:u.instanceId,...picked});
   }
-
-  let magicId = null, magicTargetInstanceId = null, magicSubTargetInstanceId = null;
-  const magicCandidates = pl.magicIds
-    .filter(id => !pl.usedMagic.includes(id))
-    .map(id => pl.magicCards[id])
-    .filter(Boolean)
-    .filter(card => Number(card.effect?.cost || 0) <= remaining);
-
-  if (magicCandidates.length) {
-    const card = magicCandidates.find(c => c.effect?.targetType === 'player_self') || magicCandidates[0];
-    const eff = card.effect || {};
-    magicId = card.id;
-    const actor = {side, name:pl.name, currentHp:1, maxHp:1};
-    if (['select_enemy_1','select_ally_1'].includes(eff.targetType)) {
-      const ts = targetPool(b, actor, eff.targetType).filter(t => matchesTarget(t, eff.targetCond));
-      magicTargetInstanceId = ts[0]?.instanceId || null;
+  let magicId=null,magicTargetInstanceId=null,magicSubTargetInstanceId=null;
+  const cards=pl.magicIds.filter(id=>!pl.usedMagic.includes(id)).map(id=>pl.magicCards[id]).filter(c=>c&&Math.max(0,Number(c.effect?.cost)||0)<=remaining);
+  if (cards.length && Math.random()<0.35) {
+    const valid=[];
+    for (const card of cards) {
+      const eff=card.effect||{}, actor={side,name:pl.name,currentHp:1,maxHp:1};
+      const main=manual(eff.targetType)?candidatesFor(actor,eff.targetType,eff.targetCond):[];
+      if (manual(eff.targetType)&&!main.length) continue;
+      const sub=eff.hasSubEffect&&eff.subEffect?eff.subEffect:null;
+      const subs=sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)?candidatesFor(actor,sub.targetType,sub.targetCond):[];
+      if(sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)&&!subs.length)continue;
+      valid.push({card,eff,actor,main,subs});
     }
-    if (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target' &&
-        ['select_enemy_1','select_ally_1'].includes(eff.subEffect.targetType)) {
-      const ss = targetPool(b, actor, eff.subEffect.targetType).filter(t => matchesTarget(t, eff.subEffect.targetCond || {type:'none'}));
-      magicSubTargetInstanceId = ss[0]?.instanceId || null;
-    }
-    if ((['select_enemy_1','select_ally_1'].includes(eff.targetType) && !magicTargetInstanceId) ||
-        (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target' &&
-         ['select_enemy_1','select_ally_1'].includes(eff.subEffect.targetType) && !magicSubTargetInstanceId)) {
-      magicId = null; magicTargetInstanceId = null; magicSubTargetInstanceId = null;
+    if(valid.length){
+      const choice=randomItem(valid),mt=manual(choice.eff.targetType)?chooseTarget(choice.main,choice.eff.mainEffect,choice.actor):null;
+      const sub=choice.eff.hasSubEffect&&choice.eff.subEffect?choice.eff.subEffect:null;
+      const st=sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)?chooseTarget(choice.subs,sub,choice.actor):null;
+      if(!(sub&&sub.targetType!=='same_main_target'&&manual(sub.targetType)&&!st)){
+        magicId=choice.card.id; magicTargetInstanceId=mt?.instanceId||null; magicSubTargetInstanceId=st?.instanceId||null;
+      }
     }
   }
-  return {units:actions, magicId, magicTargetInstanceId, magicSubTargetInstanceId, actionId:uid('auto')};
+  return {units:actions,magicId,magicTargetInstanceId,magicSubTargetInstanceId,actionId:uid('auto')};
 }
-
 function expireDecision(r) {
   const b = r?.battle;
   if (!b || b.phase !== 'decision' || b.pausedForDisconnect) return;
@@ -1235,7 +1283,7 @@ function expireDecision(r) {
     console.error('Battle timeout execution error:', err);
     b.phase = 'decision'; b.p1.actions = null; b.p2.actions = null;
     broadcastBattle(r, 'battle_error', { message:'自動行動処理でエラーが発生しました。行動を再入力してください。' });
-    scheduleDecision(r);
+    reopenDecisionAfterError(r);
   }
 }
 function isForbiddenStealthSelection(actor, target) {
@@ -1378,7 +1426,7 @@ function executeAction(b, side, u, action) {
     const subType=sk.subEffect.targetType||'same_main_target';
     const sub=subType==='same_main_target'
       ? main
-      : targets(b,u,subType,sk.subEffect.targetCond||sk.targetCond,action.subTargetInstanceId || null,false);
+      : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},action.subTargetInstanceId || null,false);
     for (const t of sub) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
   }
   const tar=main[0];
@@ -1394,7 +1442,8 @@ function executeTurn(r) {
   const b = r.battle;
   if (!b || b.phase !== 'decision') return;
   clearTimeout(b.timer);
-  b.phase = 'execution'; b.deadline = null;
+  b.phase = 'execution'; b.deadline = null; b.timer = null;
+  broadcastBattle(r, 'turn_execution_start');
   const pending = new Map();
   for (const side of ['player1','player2']) {
     const pl = battlePlayer(b, side);
@@ -1410,10 +1459,13 @@ function executeTurn(r) {
   while (pending.size && !b.winner) {
     const arr = [...pending.values()].filter(x => x.magic || (x.u && x.u.currentHp > 0 && x.u.isActive));
     if (!arr.length) break;
+    // Re-evaluate effective action values after every action, but use a stable random
+    // tie-break key for this sorting pass instead of a non-transitive random comparator.
+    for (const item of arr) item.__tieBreak = crypto.randomInt(0, 0x7fffffff);
     arr.sort((x,y) => {
       const sx = x.magic ? Number(x.magic.stats?.priority ?? 999) : effSpeed(x.u);
       const sy = y.magic ? Number(y.magic.stats?.priority ?? 999) : effSpeed(y.u);
-      return (sy - sx) || (crypto.randomInt(2) ? 1 : -1);
+      return (sy - sx) || (x.__tieBreak - y.__tieBreak);
     });
     const x = arr[0];
     pending.delete(x.u ? x.u.instanceId : 'magic_'+x.side);
@@ -1434,7 +1486,7 @@ function executeTurn(r) {
   if (b.winner) finishBattle(r,b.winner,b.endReason||null);
   else {
     b.turn += 1;
-    scheduleDecision(r, DECISION_MS);
+    prepareDecision(r, false);
   }
 }
 
@@ -1455,7 +1507,10 @@ function playerRoomRecovery(r, sid, ws) {
     rentalDecks:r.rule==='rental' ? (r.profiles[r.ownerId]?.decks || []) : [],
     deploymentOptions:deploymentOptionsForPlayer(r,sid)
   });
-  if (r.battle) sendBattleSnapshot(r, ws, slot===0?'player1':'player2', 'battle_state');
+  if (r.battle) {
+    sendBattleSnapshot(r, ws, slot===0?'player1':'player2', 'battle_state');
+    if (r.battle.phase === 'preparing') send(ws, 'decision_prepare_end', {battleId:r.battle.battleId,turn:r.battle.turn,decisionToken:r.battle.decisionToken,state:publicBattle(r.battle,slot===0?'player1':'player2')});
+  }
   return true;
 }
 function spectatorRecovery(r, sid, ws) {
@@ -1511,6 +1566,19 @@ server.on('upgrade',(req,socket) => {
     const s = sessions.get(sid);
     if (!s) return send(ws,'error',{code:'NO_SESSION',message:'オンラインセッションが見つかりません。'});
     s.ws = ws; s.online = true; s.lastSeen = Date.now();
+
+    if (type === 'decision_ready') {
+      const r = roomBySession(sid);
+      const slot = playerSlot(r, sid);
+      const b = r?.battle;
+      if (slot < 0 || !b || b.phase !== 'preparing') return;
+      if (String(m.battleId||'') !== String(b.battleId) || Number(m.turn) !== Number(b.turn) || String(m.decisionToken||'') !== String(b.decisionToken||'')) return;
+      const side = slot === 0 ? 'player1' : 'player2';
+      b.decisionReadySides = Array.isArray(b.decisionReadySides) ? b.decisionReadySides : [];
+      if (!b.decisionReadySides.includes(side)) b.decisionReadySides.push(side);
+      openDecisionPhase(r);
+      return;
+    }
 
     if (type === 'room_list') {
       return send(ws,'room_list',{rooms:[...rooms.values()].filter(r=>r.status!=='closed').map(publicRoom)});
@@ -1721,7 +1789,7 @@ server.on('upgrade',(req,socket) => {
           console.error('Battle execution error:',err);
           r.battle.phase='decision'; r.battle.p1.actions=null; r.battle.p2.actions=null;
           broadcastBattle(r,'battle_error',{code:'EXECUTION_ERROR',message:'戦闘処理中にエラーが発生しました。行動をリセットして再開します。'});
-          scheduleDecision(r);
+          reopenDecisionAfterError(r);
         }
       }
       return;
