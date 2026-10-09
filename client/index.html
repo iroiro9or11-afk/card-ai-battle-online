@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.8 - ストーリー表示・状態同期修正</title>
+  <title>カードAI対戦ゲーム v3.28.0 - オンラインカード画像同期修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.9</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -1391,11 +1391,18 @@
       if(!card || !card.id)return;
       const id=String(card.id);
       const prev=window.__onlineBattleCards[id] || {};
-      window.__onlineBattleCards[id]={...prev,...card,id};
-      if(card.image || card.imageUrl){
-        window.__onlineBattleCards[id].image=card.image||card.imageUrl;
-        window.__onlineBattleCards[id].imageUrl=card.imageUrl||null;
-      }
+      const incomingImage = [card.image,card.img,card.imageUrl].find(v=>typeof v==='string'&&v.length) || null;
+      const metadata={...card,id};
+      // publicBattle snapshots deliberately send image:null to keep packets small.
+      // Never let a metadata-only snapshot erase the image received in battle_assets.
+      delete metadata.image; delete metadata.img; delete metadata.imageUrl;
+      const next={...prev,...metadata,id};
+      const existingImage=[prev.image,prev.img,prev.imageUrl].find(v=>typeof v==='string'&&v.length) || null;
+      const image=incomingImage || existingImage;
+      if(image) next.image=image;
+      else delete next.image;
+      delete next.img; delete next.imageUrl;
+      window.__onlineBattleCards[id]=next;
     }
     function mergeOnlinePublicAssets(items){
       for(const item of (Array.isArray(items)?items:[])){
@@ -1426,22 +1433,24 @@
 
     function getCardImage(card) {
       if (!card) return null;
-      const value = card.image ?? card.img ?? card.imageUrl ?? null;
-      if (typeof value === "string" && value) return value;
-
-      // オンライン公開カードのキャッシュをローカル画像より下位のフォールバックとして利用。
-      const remote = card.id!=null ? getOnlinePublicCard(card.id) : null;
-      const remoteValue = remote?.image ?? remote?.imageUrl ?? null;
-      if (typeof remoteValue === "string" && remoteValue) return remoteValue;
-
-      // IndexedDBにBlob/Fileとして保存されている画像にも対応
-      if (value instanceof Blob) {
-        if (!cardImageObjectUrlCache.has(value)) {
-          cardImageObjectUrlCache.set(value, URL.createObjectURL(value));
-        }
+      const values = [card.image, card.img, card.imageUrl];
+      const value = values.find(v => (typeof v === 'string' && v.length > 0) || (typeof Blob !== 'undefined' && v instanceof Blob)) || null;
+      // ローカルカードの画像は、同じIDを持つオンラインキャッシュより優先する。
+      if (typeof value === 'string' && value) return value;
+      if (typeof Blob !== 'undefined' && value instanceof Blob) {
+        if (!cardImageObjectUrlCache.has(value)) cardImageObjectUrlCache.set(value, URL.createObjectURL(value));
         return cardImageObjectUrlCache.get(value);
       }
 
+      // オンライン公開カードは、ローカル画像が存在しない場合のみフォールバックに使う。
+      // image:'' や image:null が imageUrl の有効な値を隠さないよう各候補を個別に確認する。
+      const remote = card.id!=null ? getOnlinePublicCard(card.id) : null;
+      const remoteValue = [remote?.image,remote?.img,remote?.imageUrl].find(v => (typeof v === 'string' && v.length > 0) || (typeof Blob !== 'undefined' && v instanceof Blob)) || null;
+      if (typeof remoteValue === 'string' && remoteValue) return remoteValue;
+      if (typeof Blob !== 'undefined' && remoteValue instanceof Blob) {
+        if (!cardImageObjectUrlCache.has(remoteValue)) cardImageObjectUrlCache.set(remoteValue, URL.createObjectURL(remoteValue));
+        return cardImageObjectUrlCache.get(remoteValue);
+      }
       return null;
     }
 
@@ -3541,6 +3550,7 @@
           hp: u.maxHp,
           atk: getEffectiveAtk(u),
           prio: getEffectiveSpeed(u),
+          rank: u.rank,
           img: getCardImage(u)
         });
 
@@ -5557,6 +5567,25 @@
     if(typeof c.imageUrl==='string')x.imageUrl=c.imageUrl;
     return x;
   }
+  function cardImageSource(c){ for(const value of [c?.image,c?.img,c?.imageUrl]) if((typeof value==='string'&&value.length>0)||(typeof Blob!=='undefined'&&value instanceof Blob)) return value; return null; }
+  function hasTransportableImage(c){
+    const value=cardImageSource(c);
+    return (typeof value==='string' && value.length>0) || (typeof Blob!=='undefined' && value instanceof Blob);
+  }
+  async function imageValueForTransport(value){
+    if(typeof value==='string' && value.length) return value;
+    if(typeof Blob!=='undefined' && value instanceof Blob){
+      try{
+        return await new Promise(resolve=>{
+          const reader=new FileReader();
+          reader.onload=()=>resolve(typeof reader.result==='string'&&reader.result?reader.result:null);
+          reader.onerror=()=>resolve(null);
+          reader.readAsDataURL(value);
+        });
+      }catch(_){ return null; }
+    }
+    return null;
+  }
   function transportCard(c){
     if(!c)return null;
     const x=stripCard(c);
@@ -5568,13 +5597,13 @@
     return x;
   }
   function onlineProfilePayload(){
-    return {name:playerName,cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],assetIds:(allCards||[]).filter(c=>typeof c?.image==='string' || typeof c?.img==='string' || typeof c?.imageUrl==='string').map(c=>String(c.id)).filter(Boolean)};
+    return {name:playerName,cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],assetIds:(allCards||[]).filter(hasTransportableImage).map(c=>String(c.id)).filter(Boolean)};
   }
-  function buildCardAssetBatches(){
+  async function buildCardAssetBatches(){
     const assets=[]; const MAX_BATCH_BYTES=256*1024;
     let batch=[]; let size=2;
     for(const c of (allCards||[])){
-      const image=typeof c?.image==='string'?c.image:(typeof c?.img==='string'?c.img:(typeof c?.imageUrl==='string'?c.imageUrl:null));
+      const image=await imageValueForTransport(cardImageSource(c));
       if(!image)continue;
       const item={id:String(c.id),image};
       const itemSize=JSON.stringify(item).length;
@@ -5584,29 +5613,39 @@
     if(batch.length)assets.push(batch);
     return assets;
   }
-  function sendCardAssets(){
-    if(!onlineAuthenticated||!onlineWS||onlineWS.readyState!==WebSocket.OPEN)return;
-    const batches=buildCardAssetBatches();
-    onlineAssetsSyncing=true;
-    onlineAssetsReady=batches.length===0;
-    if(onlineAssetsReady){setOnlineStatus(onlineRoom?'カード画像の同期完了。':'オンライン接続済み。');return;}
+  let onlineAssetSyncGeneration=0;
+  async function sendCardAssets(){
+    if(!onlineAuthenticated||!onlineWS||onlineWS.readyState!==WebSocket.OPEN||onlineAssetsSyncing)return;
+    const wsAtStart=onlineWS;
+    const generation=++onlineAssetSyncGeneration;
+    onlineAssetsSyncing=true;onlineAssetsReady=false;
+    const batches=await buildCardAssetBatches();
+    if(generation!==onlineAssetSyncGeneration||wsAtStart!==onlineWS||!onlineWS||onlineWS.readyState!==WebSocket.OPEN){onlineAssetsSyncing=false;return;}
+    if(batches.length===0){
+      const imageExpected=(allCards||[]).some(hasTransportableImage);
+      onlineAssetsSyncing=false;onlineAssetsReady=!imageExpected;
+      if(onlineAssetsReady)setOnlineStatus(onlineRoom?'画像同期対象のカードはありません。':'オンライン接続済み。');
+      else showOnlineError('カード画像を送信用データに変換できませんでした。画像形式を確認して再接続してください。');
+      return;
+    }
     let index=0;
     const sendNext=()=>{
+      if(generation!==onlineAssetSyncGeneration||wsAtStart!==onlineWS||!onlineAuthenticated||!onlineWS||onlineWS.readyState!==WebSocket.OPEN)return;
       if(index>=batches.length){onlineAssetsSyncing=false;return;}
-      rawSend('profile_assets',{assets:batches[index],batch:index,total:batches.length});
-      index++;
-      if(index>=batches.length){onlineAssetsSyncing=false;}
+      const batchNo=index;
+      const sent=rawSend('profile_assets',{assets:batches[index],batch:batchNo,total:batches.length});
+      if(sent)index++;
     };
-    // 1回のWebSocketフレームを小さく保ち、ブラウザ/Render側で切断されないようにする。
-    sendNext();
     window.__cardBattleAssetNext=sendNext;
+    sendNext();
   }
+
   async function syncProfileAfterHello(){
     const ready = await waitForAppReady();
     if (!ready) { showOnlineError('カードデータの読み込みが完了していないため、オンライン同期を待っています。'); return; }
     if (onlineAuthenticated) {
       onlineAssetsReady=!onlineRoom;
-      rawSend('profile_sync',{cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],name:playerName,assetIds:(allCards||[]).filter(c=>typeof c?.image==='string' || typeof c?.img==='string' || typeof c?.imageUrl==='string').map(c=>String(c.id)).filter(Boolean)});
+      rawSend('profile_sync',{cards:(allCards||[]).map(transportCard).filter(Boolean),decks:allDecks||[],name:playerName,assetIds:(allCards||[]).filter(hasTransportableImage).map(c=>String(c.id)).filter(Boolean)});
       // 画像は部屋作成/入室/復帰後にだけ同期する。
       // ロビー接続時に全画像を先送りすると、部屋作成要求が画像通信の後ろで待たされるため。
       if (onlineRoom) sendCardAssets();
@@ -5642,6 +5681,8 @@
     };
     onlineWS.onclose=()=>{
       onlineAuthenticated=false;
+      onlineAssetsReady=false; onlineAssetsSyncing=false; onlineAssetSyncGeneration++;
+      window.__cardBattleAssetNext=null;
       if(onlineCreateInFlight) clearTimeout(onlineCreateWatchdog);
       updateConnectionBadge('disconnected');
       if (onlineRoom && onlineSessionId) {
@@ -5894,7 +5935,7 @@
     rebuildReserveOrder();
     const active=new Set(onlineSelection.active||[]);
     const reserve=onlineSelection.reserve||[];
-    const unitCard=c=>`<button type="button" onclick='toggleOnlineDeploymentUnit(${JSON.stringify(String(c.id))})' class="text-left p-1 rounded border ${active.has(String(c.id))?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div><div class="text-[9px] ${active.has(String(c.id))?'text-emerald-300':'text-slate-500'}">${active.has(String(c.id))?'出撃':'控え候補'}</div></button>`;
+    const unitCard=c=>`<button type="button" onclick='toggleOnlineDeploymentUnit(${JSON.stringify(String(c.id))})' class="text-left p-1 rounded border ${active.has(String(c.id))?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,rank:c.rank,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div><div class="text-[9px] ${active.has(String(c.id))?'text-emerald-300':'text-slate-500'}">${active.has(String(c.id))?'出撃':'控え候補'}</div></button>`;
     const reserveRow=reserve.map((id,i)=>{const c=onlineDeckOptions.units.find(x=>String(x.id)===id);if(!c)return '';return `<div class="flex items-center gap-2 p-2 rounded border border-slate-800 bg-slate-950"><div class="flex-1 text-xs font-bold">控え${i+1}：${esc(c.name)}</div><button onclick='moveOnlineReserve(${JSON.stringify(id)},-1)' class="px-2 py-1 bg-slate-800 rounded text-xs">▲</button><button onclick='moveOnlineReserve(${JSON.stringify(id)},1)' class="px-2 py-1 bg-slate-800 rounded text-xs">▼</button></div>`;}).join('');
     area.insertAdjacentHTML('beforeend',`<div class="border-t border-slate-800 mt-3 pt-3 space-y-2"><div class="text-xs font-black text-emerald-300">出撃メンバーを決定</div><div class="text-[10px] text-slate-400">キャラクターを3体選択。残り（最大2体）が控えになります。控えの▲▼で登場順を変更できます。</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${onlineDeckOptions.units.map(unitCard).join('')}</div><div class="space-y-1 mt-2">${reserveRow||'<div class="text-[10px] text-slate-500">控えなし</div>'}</div><button onclick="confirmOnlineDeployment()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-black text-xs">${onlineSelection.deployConfirmed?'出撃設定確定済み':'この出撃設定で確定'}</button></div>`);
   }
@@ -5904,7 +5945,7 @@
     onlineSelection=onlineSelection||{unitIds:[],magicIds:[],deployConfirmed:false};
     const selectedUnits=onlineSelection.unitIds||[],selectedMagic=onlineSelection.magicIds||[];
     $('online-pool-area').classList.remove('hidden');
-    const card=(c,sel,kind)=>`<button onclick='toggleOnlinePoolCard(${JSON.stringify(kind)},${JSON.stringify(String(c.id))})' class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;
+    const card=(c,sel,kind)=>`<button onclick='toggleOnlinePoolCard(${JSON.stringify(kind)},${JSON.stringify(String(c.id))})' class="text-left p-1 rounded border ${sel?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,rank:c.rank,img:getCardImage(c)})}</div><div class="text-[10px] font-bold truncate">${esc(c.name)}</div></button>`;
     const canConfirm=selectedUnits.length>=3&&selectedUnits.length<=5&&selectedMagic.length<=10;
     $('online-pool-area').innerHTML=`<div class="font-black text-purple-300 mb-2">サーバー抽選結果：候補から即席デッキを作成</div><div class="text-[10px] text-slate-400 mb-2">キャラは3～5枚。選択順の1～3番目が初期出撃、4～5番目が控え順。マジックは0～10枚です。</div><div class="font-bold text-cyan-300 text-xs mb-1">キャラクター ${selectedUnits.length}/5</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.units.map(c=>card(c,selectedUnits.includes(String(c.id)),'unit')).join('')}</div><div class="font-bold text-purple-300 text-xs mt-3 mb-1">マジック ${selectedMagic.length}/10</div><div class="grid grid-cols-2 sm:grid-cols-5 gap-1">${p.magics.map(c=>card(c,selectedMagic.includes(String(c.id)),'magic')).join('')}</div><button onclick="confirmOnlinePoolSelection()" ${canConfirm?'':'disabled'} class="w-full mt-3 py-2.5 ${canConfirm?'bg-purple-600 hover:bg-purple-500':'bg-slate-700 opacity-50'} rounded-lg font-black text-xs">${onlineSelection.deployConfirmed?'候補選択確定済み':'候補からデッキを確定'}</button>`;
   }
@@ -5948,12 +5989,12 @@
     const registerPublicCard=(card)=>registerOnlinePublicCard(card);
     (st.p1?.magicCards||[]).forEach(registerPublicCard);
     (st.p2?.magicCards||[]).forEach(registerPublicCard);
-    (st.p1?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],image:u.image||null}));
-    (st.p2?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],image:u.image||null}));
+    (st.p1?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,rank:u.rank,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],...(u.image||u.imageUrl?{image:u.image||u.imageUrl}:{})}));
+    (st.p2?.units||[]).forEach(u=>registerPublicCard({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,rank:u.rank,stats:{hp:u.maxHp,atk:u.atk,priority:u.priority},skills:u.skills||[],...(u.image||u.imageUrl?{image:u.image||u.imageUrl}:{})}));
     const mapU=(u,side)=>({
       ...u,
       side:(side===mySide&&!isSpectator)?'player':'enemy',
-      image:getCardImage(localCards.get(String(u.cardId)))||getCardImage(getOnlinePublicCard(u.cardId))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
+      image:getCardImage(getOnlinePublicCard(u.cardId))||getCardImage(localCards.get(String(u.cardId)))||u.image||u.imageUrl||createDummyCardImage('⚔️','#334155'),
       skills:Array.isArray(u.skills)?u.skills:[],
       reservedAction:{type:'attack',targetInstanceId:null}
     });
@@ -6151,8 +6192,12 @@
       onlineAuthenticated=true;onlineSessionId=m.sessionId||onlineSessionId;localStorage.setItem('cardBattleOnlineSession',onlineSessionId);updateConnectionBadge('connected','接続済み');setOnlineStatus('オンライン接続済み。');syncProfileAfterHello();flushOnlineQueue();return;
     }
     if(m.type==='profile_assets_ack'){
-      if(m.done){onlineAssetsReady=true;onlineAssetsSyncing=false;setOnlineStatus(onlineRoom?'カード画像の同期が完了しました。':'オンライン接続済み。');}
-      else if(window.__cardBattleAssetNext) window.__cardBattleAssetNext();
+      if(m.done){
+        onlineAssetsSyncing=false;
+        onlineAssetsReady=!!m.ready;
+        if(onlineAssetsReady)setOnlineStatus(onlineRoom?'カード画像の同期が完了しました。':'オンライン接続済み。');
+        else showOnlineError('一部カード画像をサーバーへ同期できませんでした。通信状態と画像形式を確認して再接続してください。');
+      }else if(window.__cardBattleAssetNext) window.__cardBattleAssetNext();
       return;
     }
     if(m.type==='deployment_assets'){ mergeOnlinePublicAssets(m.items||[]); if(onlineDeckOptions)renderOnlineSelection(); return; }
@@ -6219,7 +6264,18 @@
       if(m.room){onlineRoom=m.room;renderRoomPanel();}const ps=m.players||[];onlineReady=!!ps[onlineSlot||0]?.ready;renderPlayerList(ps);return;
     }
     if(m.type==='pool_ready'){
-      onlinePool={units:m.units||[],magics:m.magics||[]};onlineSelection={unitIds:[],magicIds:[],deployConfirmed:false};onlineReady=true;renderOnlineSelection();setOnlineStatus('サーバー抽選候補が届きました。');return;
+      onlinePool={units:m.units||[],magics:m.magics||[]};
+      [...onlinePool.units,...onlinePool.magics].forEach(registerOnlinePublicCard);
+      onlineSelection={unitIds:[],magicIds:[],deployConfirmed:false};onlineReady=true;renderOnlineSelection();setOnlineStatus('サーバー抽選候補が届きました。画像を読み込んでいます…');return;
+    }
+    if(m.type==='pool_assets'){
+      mergeOnlinePublicAssets(m.items||[]);
+      if(onlinePool)renderPoolBuilder();
+      return;
+    }
+    if(m.type==='pool_assets_end'){
+      if(onlinePool)renderPoolBuilder();
+      return;
     }
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
     if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);if(m.state?.phase==='decision'&&m.state?.deadline)startOnlineTimer(m.state.deadline);else if(m.state?.phase==='execution')showOnlineExecutionTimer();safeApplyOnlineState(m.state);return;}
