@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.3 - 5戦ストーリーモード</title>
+  <title>カードAI対戦ゲーム v3.27.4 - 5戦ストーリーモード</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.3</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.4</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -234,6 +234,19 @@
               <div>
                 <label class="block text-xs font-semibold text-sky-400 mb-1">行動値 (0-100)</label>
                 <input type="number" id="edit-priority" value="50" min="0" max="100" oninput="updatePreview()" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs">
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-amber-300 mb-1">カードランク（★1～★5）</label>
+                <select id="edit-unit-rank" onchange="updatePreview()" class="w-full bg-slate-950 border border-amber-700/60 rounded px-3 py-2 text-xs">
+                  <option value="1">★☆☆☆☆（1）</option><option value="2">★★☆☆☆（2）</option><option value="3" selected>★★★☆☆（3）</option><option value="4">★★★★☆（4）</option><option value="5">★★★★★（5）</option>
+                </select>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                <div class="text-[10px] font-bold text-slate-400">ステータスから算出した推定ランク</div>
+                <div id="edit-estimated-rank" class="text-lg font-black text-amber-300">—</div>
+                <div class="text-[9px] text-slate-500">HP + 基礎攻撃力×2 + 行動値×50</div>
               </div>
             </div>
             
@@ -855,9 +868,14 @@
       paralysis: { name: '麻痺', kind: 'debuff' },
       freeze: { name: '凍結', kind: 'debuff' },
       slow: { name: '鈍足', kind: 'debuff' },
-      weak: { name: '虚弱', kind: 'debuff' }
+      weak: { name: '虚弱', kind: 'debuff' },
+      taunt: { name: '挑発', kind: 'debuff' },
+      stealth: { name: '隠密', kind: 'buff' }
     };
-    // 状態異常の正規化ルールはサーバーと同じ5種類。状態異常は statuses にのみ保持する。
+    // 状態異常は statuses に保持。duration=-1は解除されるまで続く永続効果。
+    function durationActive(value) { const n=Number(value); return n === -1 || n > 0; }
+    function normalizeDuration(value) { const n=Number(value); return n === -1 ? -1 : Math.max(1, Number.isFinite(n)&&n>0?n:1); }
+    function durationText(value, suffix=true) { return Number(value)===-1 ? '永続' : `${Math.max(1,Number(value)||1)}${suffix?'ターン':''}`; }
     function statusName(type) { return STATUS_DEFS[type]?.name || type || '状態異常'; }
     function statusOptions(selected='') {
       return Object.entries(STATUS_DEFS).map(([k,v]) => `<option value="${k}" ${selected===k?'selected':''}>${v.name}</option>`).join('');
@@ -1105,10 +1123,11 @@
 
     function getEffectText(eff) {
       if (!eff || eff.type === "none") return "効果なし";
-      let durText = eff.duration ? `(${eff.duration}ターン)` : "";
+      let durText = Number(eff.duration) === -1 ? '(永続)' : (Number(eff.duration) > 0 ? `(${eff.duration}ターン)` : '');
       
       switch(eff.type) {
         case "dmg_fixed": return `${eff.val}の固定ダメージ`;
+        case "dmg_fixed_pierce": return `${eff.val}の固定貫通ダメージ(受けるダメージ増減を無視)`;
         case "dmg_atk_ratio": return `攻撃力×${eff.val}%のダメージ`;
         case "heal_fixed": return `${eff.val}回復`;
         case "heal_max_hp_ratio": return `最大HPの${eff.val}%回復`;
@@ -1117,7 +1136,8 @@
         case "mod_speed": return `行動値を${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
         case "mod_max_hp_val": return `最大HPを${eff.val >= 0 ? '+' : ''}${eff.val}(${eff.val >= 0 ? 'バフ' : 'デバフ'})${durText}`;
         case "mod_ap": return `APを${eff.val >= 0 ? '+' : ''}${eff.val}`;
-        case "damage_cut_ratio": return `受けるダメージを${eff.val}%カット(バフ)${durText}`;
+        case "damage_taken_ratio": return `受けるダメージを${eff.val >= 0 ? "+" : ""}${eff.val}%${eff.val > 0 ? "増加（デバフ）" : eff.val < 0 ? "減少（バフ）" : "変化なし"}${durText}`;
+        case "damage_cut_ratio": return `受けるダメージを${-Number(eff.val||0) >= 0 ? "+" : ""}${-Number(eff.val||0)}%(${Number(eff.val||0) > 0 ? "バフ" : "デバフ"})${durText}`;
         case "clear_buffs": return `バフを全て解除`;
         case "clear_debuffs": return `デバフを全て解除`;
         case "heal_block": return `回復禁止(デバフ)${durText}`;
@@ -1441,7 +1461,12 @@
           let nextSub = [...new Set(beforeSub.map(a => String(a || '').trim()).filter(a => a && !MAIN_ATTRIBUTES.includes(a)))].slice(0, 2);
           if (['builtin:card_def_1','builtin:card_def_2','builtin:card_def_3'].includes(card.systemKey)) nextSub = [];
           if (JSON.stringify(nextSub) !== JSON.stringify(beforeSub)) { card.subAttrs = nextSub; changed = true; }
+          // 作成済みキャラクターでランク未設定のものは、現行仕様の推定ランクを初期ランクとして保存する。
+          if (card.rank == null || !Number.isFinite(Number(card.rank)) || Number(card.rank) <= 0) { card.rank=estimateUnitRank(card.stats||{}); changed=true; }
         }
+        const normalizeEffectSchema = eff => { if(!eff||typeof eff!=='object')return; if(eff.type==='damage_cut_ratio'){eff.type='damage_taken_ratio';eff.val=-(Number(eff.val)||0);changed=true;} };
+        if(Array.isArray(card.skills)) card.skills.forEach(sk=>{normalizeEffectSchema(sk.mainEffect);normalizeEffectSchema(sk.subEffect);});
+        if(card.effect){normalizeEffectSchema(card.effect.mainEffect);normalizeEffectSchema(card.effect.subEffect);}
         const image = getCardImage(card);
         if (image && !card.image) { card.image=image; changed=true; }
         if (Array.isArray(card.skills)) card.skills.forEach(sk => { const nextDesc=buildAutoSkillDescriptionFromData(sk); if(sk.desc!==nextDesc){sk.desc=nextDesc;changed=true;} });
@@ -1491,6 +1516,9 @@
       const imgUrl = getCardImage(data);
       const cardIdAttr = data.id ? `data-card-id="${data.id}"` : '';
       const safeName = data.name || '名称未設定';
+      const rankCard = data.id ? ((Array.isArray(allCards) ? allCards.find(c=>String(c.id)===String(data.id)) : null) || getOnlinePublicCard(data.id)) : null;
+      const rankValue = Number(data.rank ?? data.stats?.rank ?? rankCard?.rank ?? 1);
+      const rankStars = Math.max(1, Math.min(5, Math.round(Number.isFinite(rankValue) ? rankValue : 1)));
       if (data.cardType === "magic") {
         const magicPrio = data.prio ?? (data.stats?.priority ?? 999);
         const prioText = magicPrio === 999 ? "最速" : (magicPrio === -999 ? "最遅" : `SPD:${magicPrio}`);
@@ -1515,13 +1543,14 @@
             <img src="${unitImgUrl}" onerror="this.onerror=null;this.src=createDummyCardImage('⚔️','#334155')" class="w-full h-full object-cover">
             <span class="absolute top-1 left-1 bg-slate-950/90 border border-amber-500/40 text-amber-300 text-[9px] px-1.5 py-0.5 rounded font-bold truncate max-w-[85%]">${attrs}</span>
           </div>
-          <div class="h-[42%] bg-gradient-to-b from-slate-900 to-slate-950 px-2 py-2 flex flex-col gap-1 border-t border-slate-800">
+          <div class="h-[42%] bg-gradient-to-b from-slate-900 to-slate-950 px-2 py-1.5 flex flex-col gap-1 border-t border-slate-800">
             <div class="font-black text-sm sm:text-base text-slate-100 text-center truncate">${safeName}</div>
             <div class="grid grid-cols-3 gap-1 text-center">
               <div class="bg-slate-950 p-1 rounded border border-rose-500/30"><div class="text-[8px] text-rose-400 font-bold">HP</div><div class="text-[10px] font-black text-rose-200">${data.hp}</div></div>
               <div class="bg-slate-950 p-1 rounded border border-amber-500/30"><div class="text-[8px] text-amber-400 font-bold">ATK</div><div class="text-[10px] font-black text-amber-200">${data.atk}</div></div>
               <div class="bg-slate-950 p-1 rounded border border-sky-500/30"><div class="text-[8px] text-sky-400 font-bold">行動</div><div class="text-[10px] font-black text-sky-200">${data.prio}</div></div>
             </div>
+            <div class="mt-auto text-center text-amber-300 leading-none text-[11px] tracking-[1px]" aria-label="ランク ${rankStars}">${'★'.repeat(rankStars)}<span class="text-slate-700">${'☆'.repeat(5-rankStars)}</span></div>
           </div>
         </div>`;
     }
@@ -1686,11 +1715,12 @@
               <select class="${prefix}-main-eff-type bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                 <option value="dmg_atk_ratio">攻撃力×○％ダメージ</option>
                 <option value="dmg_fixed">○の固定ダメージ</option>
+                    <option value="dmg_fixed_pierce">○の固定貫通ダメージ（受けるダメージ増減を無視）</option>
                 <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                 <option value="heal_fixed">○回復</option>
                 <option value="mod_atk_ratio">攻撃力を○％増加/減少(バフ/デバフ)</option>
                 <option value="mod_atk_val">攻撃力を○増加/減少(バフ/デバフ)</option>
-                <option value="damage_cut_ratio">受けるダメージを○％カット(バフ)</option>
+                <option value="damage_taken_ratio">受けるダメージを○％増加/減少（増加=デバフ、減少=バフ）</option>
                 <option value="mod_speed">行動値を○増加/減少(バフ/デバフ)</option>
                 <option value="mod_max_hp_val">最大HPを○増加/減少(バフ/デバフ)</option>
                 <option value="mod_ap">APを○増加/減少</option>
@@ -1705,8 +1735,9 @@
               <input type="number" class="${prefix}-main-eff-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="100" placeholder="効果量" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
               <select class="${prefix}-main-eff-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
             </div>
-            <div>
-              <input type="number" class="${prefix}-main-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px] w-full" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+            <div class="grid grid-cols-2 gap-1">
+              <input type="number" min="1" class="${prefix}-main-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px] w-full" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+              <select class="${prefix}-main-eff-duration-mode bg-slate-800 text-[10px] rounded" onchange="toggleDurationMode('${prefix}','main-eff','${skillType}',${isMagic})"><option value="turns">ターン数</option><option value="permanent">永続</option></select>
             </div>
           </div>
 
@@ -1738,11 +1769,12 @@
                   <select class="${prefix}-sub-eff-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                     <option value="dmg_atk_ratio">攻撃力×○％ダメージ</option>
                     <option value="dmg_fixed">○の固定ダメージ</option>
+                    <option value="dmg_fixed_pierce">○の固定貫通ダメージ（受けるダメージ増減を無視）</option>
                     <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                     <option value="heal_fixed">○回復</option>
                     <option value="mod_atk_ratio">攻撃力を○％増加/減少</option>
                     <option value="mod_atk_val">攻撃力を○増加/減少(バフ/デバフ)</option>
-                    <option value="damage_cut_ratio">受けるダメージを○％カット</option>
+                    <option value="damage_taken_ratio">受けるダメージを○％増加/減少（増加=デバフ、減少=バフ）</option>
                     <option value="mod_speed">行動値を○増加/減少(バフ/デバフ)</option>
                     <option value="mod_max_hp_val">最大HPを○増加/減少(バフ/デバフ)</option>
                     <option value="mod_ap">APを○増加/減少</option>
@@ -1771,7 +1803,7 @@
               <div class="grid grid-cols-2 gap-1">
                 <input type="number" class="${prefix}-sub-eff-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="500" placeholder="効果量" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                 <select class="${prefix}-sub-eff-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
-                <input type="number" class="${prefix}-sub-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+                <div class="grid grid-cols-2 gap-1"><input type="number" min="1" class="${prefix}-sub-eff-dur bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="2" placeholder="持続ターン数" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})"><select class="${prefix}-sub-eff-duration-mode bg-slate-800 text-[10px] rounded" onchange="toggleDurationMode('${prefix}','sub-eff','${skillType}',${isMagic})"><option value="turns">ターン数</option><option value="permanent">永続</option></select></div>
               </div>
             </div>
           </div>
@@ -1823,7 +1855,7 @@
       const mainEffect = {
         type: getVal(`${prefix}-main-eff-type`) || "dmg_atk_ratio",
         val: parseInt(getVal(`${prefix}-main-eff-val`)) || 100,
-        duration: parseInt(getVal(`${prefix}-main-eff-dur`)) || 0,
+        duration: getVal(`${prefix}-main-eff-duration-mode`) === "permanent" ? -1 : (parseInt(getVal(`${prefix}-main-eff-dur`)) || 1),
 
         status: getVal(`${prefix}-main-eff-status`) || "poison"
       };
@@ -1834,7 +1866,7 @@
         targetCond: { type:getVal(`${prefix}-sub-target-cond-type`)||"none", val:parseInt(getVal(`${prefix}-sub-target-cond-val`))||0, attr:getVal(`${prefix}-sub-target-cond-attr`)||"炎" },
         type: getVal(`${prefix}-sub-eff-type`) || "heal_fixed",
         val: parseInt(getVal(`${prefix}-sub-eff-val`)) || 0,
-        duration: parseInt(getVal(`${prefix}-sub-eff-dur`)) || 0,
+        duration: getVal(`${prefix}-sub-eff-duration-mode`) === "permanent" ? -1 : (parseInt(getVal(`${prefix}-sub-eff-dur`)) || 1),
         status: getVal(`${prefix}-sub-eff-status`) || "poison"
       };
 
@@ -1858,6 +1890,20 @@
       updatePreview();
     }
 
+    function estimateUnitRank(stats) {
+      const hp = clamp(Number(stats?.hp)||1000, 1000, 10000);
+      const atk = clamp(Number(stats?.atk)||500, 500, 5000);
+      const priority = clamp(Number(stats?.priority)||0, 0, 100);
+      const total = hp + atk * 2 + priority * 50;
+      return Math.round((1 + (total / 25000) * 5) * 10) / 10;
+    }
+    function rankStarCount(rank) { return Math.max(1, Math.min(5, Math.round(Number(rank)||1))); }
+    function toggleDurationMode(prefix, effectPart, skillType, isMagic=false) {
+      const mode = document.querySelector(`.${prefix}-${effectPart}-duration-mode`);
+      const input = document.querySelector(`.${prefix}-${effectPart}-dur`);
+      if (input) { input.disabled = mode?.value === 'permanent'; input.classList.toggle('opacity-50', input.disabled); }
+      updateSkillFormDisplay(prefix, skillType, isMagic);
+    }
     function updatePreview() {
       const container = document.getElementById("card-preview-container");
       if (!container) return;
@@ -1869,7 +1915,10 @@
         const hp = clamp(parseInt(document.getElementById("edit-hp").value), 1000, 10000);
         const atk = clamp(parseInt(document.getElementById("edit-atk").value), 500, 5000);
         const prio = clamp(parseInt(document.getElementById("edit-priority").value), 0, 100);
-        container.innerHTML = getCardHTML({ cardType: "unit", name, mainAttr, subAttrs: [sub1, sub2], hp, atk, prio, img: croppedImageData.unit });
+        const rank = clamp(parseInt(document.getElementById("edit-unit-rank")?.value || 3), 1, 5);
+        const estimate = estimateUnitRank({hp,atk,priority:prio});
+        const estimateBox = document.getElementById('edit-estimated-rank'); if (estimateBox) estimateBox.textContent = estimate.toFixed(1);
+        container.innerHTML = getCardHTML({ cardType: "unit", name, mainAttr, subAttrs: [sub1, sub2], hp, atk, prio, rank, img: croppedImageData.unit });
       } else {
         syncMagicCardAndSkillName();
         const name = document.getElementById("edit-magic-name").value || "名称未設定";
@@ -1904,7 +1953,8 @@
       });
 
       const existing = editingCardId ? allCards.find(c => c.id === editingCardId && c.cardType === 'unit') : null;
-      const card = { id: existing?.id || generateCardId(), cardType: "unit", name, mainAttr, subAttrs, image: croppedImageData.unit || existing?.image || image, stats: { hp, atk, priority }, skills };
+      const rank = clamp(parseInt(document.getElementById("edit-unit-rank")?.value || 3), 1, 5);
+      const card = { id: existing?.id || generateCardId(), cardType: "unit", name, mainAttr, subAttrs, rank, image: croppedImageData.unit || existing?.image || image, stats: { hp, atk, priority }, skills };
       await saveToStore("cards", card);
       allCards = await getAllFromStore("cards");
       refreshAttributeDatalist();
@@ -2070,7 +2120,7 @@
         bodyWrap.innerHTML = `<div class="text-sm text-purple-100 space-y-2"><div><b>消費AP:</b> ${card.effect?.cost || 0}</div><div><b>行動値:</b> ${prioDisplay}</div><div class="pt-3 border-t border-slate-800 text-base leading-relaxed">${card.desc || ''}</div></div>`;
       } else {
         const stats = card.stats || {};
-        imgWrap.innerHTML = getCardHTML({ id: card.id, cardType: "unit", name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: stats.hp ?? 0, atk: stats.atk ?? 0, prio: stats.priority ?? 0, img: getCardImage(card) });
+        imgWrap.innerHTML = getCardHTML({ id: card.id, cardType: "unit", name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: stats.hp ?? 0, atk: stats.atk ?? 0, prio: stats.priority ?? 0, rank: card.rank, img: getCardImage(card) });
         statsWrap.classList.remove("hidden");
         document.getElementById("detail-hp").innerText = stats.hp ?? 0;
         document.getElementById("detail-atk").innerText = stats.atk ?? 0;
@@ -2111,6 +2161,7 @@
         document.getElementById('edit-hp').value = 3000;
         document.getElementById('edit-atk').value = 1500;
         document.getElementById('edit-priority').value = 50;
+        document.getElementById('edit-unit-rank').value = '3';
         document.querySelectorAll('#unit-skills-builder .skill-builder-card').forEach((card,i)=>{
           const sel=card.querySelector('.skill-type-select'); sel.value=i===0?'active':'none'; toggleSkillTypeUI(sel);
         });
@@ -2131,9 +2182,10 @@
       setEditorField(prefix,'name',skill.name); setEditorField(prefix,'cost',skill.cost||0); setEditorField(prefix,'timing',skill.timing||'turn_start');
       setEditorField(prefix,'self-cond-type',skill.selfCond?.type||'none'); setEditorField(prefix,'self-cond-val',skill.selfCond?.val||0); setEditorField(prefix,'self-cond-attr',skill.selfCond?.attr||'炎'); setEditorField(prefix,'self-cond-status',skill.selfCond?.status||'poison');
       setEditorField(prefix,'target-type',skill.targetType||'self'); setEditorField(prefix,'target-cond-type',skill.targetCond?.type||'none'); setEditorField(prefix,'target-cond-val',skill.targetCond?.val||0); setEditorField(prefix,'target-cond-attr',skill.targetCond?.attr||'炎');
-      setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',skill.mainEffect?.duration||0); setEditorField(prefix,'main-eff-status',skill.mainEffect?.status||'poison');
-      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'same_main_target'); setEditorField(prefix,'sub-target-cond-type',skill.subEffect?.targetCond?.type||'none'); setEditorField(prefix,'sub-target-cond-val',skill.subEffect?.targetCond?.val||0); setEditorField(prefix,'sub-target-cond-attr',skill.subEffect?.targetCond?.attr||'炎'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); setEditorField(prefix,'sub-eff-dur',skill.subEffect?.duration||0); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
-      updateSkillFormDisplay(prefix,type,isMagic);
+      const mainPermanent = Number(skill.mainEffect?.duration) === -1;
+      setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',mainPermanent?2:(skill.mainEffect?.duration||1)); setEditorField(prefix,'main-eff-duration-mode',mainPermanent?'permanent':'turns'); setEditorField(prefix,'main-eff-status',skill.mainEffect?.status||'poison');
+      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'same_main_target'); setEditorField(prefix,'sub-target-cond-type',skill.subEffect?.targetCond?.type||'none'); setEditorField(prefix,'sub-target-cond-val',skill.subEffect?.targetCond?.val||0); setEditorField(prefix,'sub-target-cond-attr',skill.subEffect?.targetCond?.attr||'炎'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); const subPermanent=Number(skill.subEffect?.duration)===-1; setEditorField(prefix,'sub-eff-dur',subPermanent?2:(skill.subEffect?.duration||1)); setEditorField(prefix,'sub-eff-duration-mode',subPermanent?'permanent':'turns'); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
+      toggleDurationMode(prefix,'main-eff',type,isMagic); toggleDurationMode(prefix,'sub-eff',type,isMagic); updateSkillFormDisplay(prefix,type,isMagic);
     }
     function openCardEditor(cardId) {
       const card=allCards.find(c=>c.id===cardId); if(!card) return;
@@ -2142,7 +2194,7 @@
       if(card.cardType==='unit') {
         document.getElementById('edit-name').value=card.name||''; document.getElementById('edit-main-attr').value=card.mainAttr||'人間';
         document.getElementById('edit-sub1').value=card.subAttrs?.[0]||''; document.getElementById('edit-sub2').value=card.subAttrs?.[1]||'';
-        document.getElementById('edit-hp').value=card.stats?.hp||3000; document.getElementById('edit-atk').value=card.stats?.atk||1500; document.getElementById('edit-priority').value=card.stats?.priority||50;
+        document.getElementById('edit-hp').value=card.stats?.hp||3000; document.getElementById('edit-atk').value=card.stats?.atk||1500; document.getElementById('edit-priority').value=card.stats?.priority??50; document.getElementById('edit-unit-rank').value=String(rankStarCount(card.rank ?? estimateUnitRank(card.stats))); 
         document.querySelectorAll('#unit-skills-builder .skill-builder-card').forEach((box,i)=>{
           const sk=card.skills?.[i]; const sel=box.querySelector('.skill-type-select'); sel.value=sk?.type||'none'; toggleSkillTypeUI(sel); if(sk) populateSkillEditor(`s${i+1}`,sk,sk.type,false);
         });
@@ -2168,12 +2220,12 @@
       document.getElementById("detail-card-title").innerText = `${unit.name}（戦闘中）`;
       document.getElementById("detail-card-type").innerText = base.cardType === 'magic' ? 'マジック' : 'キャラクター';
       document.getElementById("detail-card-category").innerText = base.cardType === 'magic' ? '魔法' : [unit.mainAttr, ...(unit.subAttrs||[])].filter(Boolean).join('/');
-      document.getElementById("detail-card-image-wrapper").innerHTML = getCardHTML({id:unit.cardId,cardType:'unit',name:unit.name,mainAttr:unit.mainAttr,subAttrs:unit.subAttrs,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit),img:getCardImage(unit)});
+      document.getElementById("detail-card-image-wrapper").innerHTML = getCardHTML({id:unit.cardId,cardType:'unit',name:unit.name,mainAttr:unit.mainAttr,subAttrs:unit.subAttrs,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit),rank:unit.rank,img:getCardImage(unit)});
       document.getElementById("detail-unit-stats").classList.remove('hidden');
       document.getElementById("detail-hp").innerText = `${unit.currentHp} / ${unit.maxHp}`;
       document.getElementById("detail-atk").innerText = getEffectiveAtk(unit);
       document.getElementById("detail-prio").innerText = getEffectiveSpeed(unit);
-      const statusLine = (arr, title, cls) => arr.length ? `<div class="mb-3"><div class="font-black ${cls} mb-1">${title}</div><div class="space-y-1">${arr.map(x=>`<div class="bg-slate-900 border border-slate-800 rounded px-2 py-1.5"><b>${x.type==='status'?statusName(x.status):x.type}</b>：${x.type==='status' ? '' : (x.val !== undefined ? (x.val>=0?'+':'')+x.val : '')}${x.duration ? ` ／ 残り${x.duration}ターン` : ''}</div>`).join('')}</div></div>` : `<div class="text-slate-500">${title}なし</div>`;
+      const statusLine = (arr, title, cls) => arr.length ? `<div class="mb-3"><div class="font-black ${cls} mb-1">${title}</div><div class="space-y-1">${arr.map(x=>`<div class="bg-slate-900 border border-slate-800 rounded px-2 py-1.5"><b>${x.type==='status'?statusName(x.status):x.type}</b>：${x.type==='status' ? '' : (x.val !== undefined ? (x.val>=0?'+':'')+x.val : '')}${durationActive(x.duration) ? ` ／ 残り${durationText(x.duration)}` : ''}</div>`).join('')}</div></div>` : `<div class="text-slate-500">${title}なし</div>`;
       const buffs = unit.buffs || [], debuffs = unit.debuffs || [];
       const detailSkills = Array.isArray(unit.skills) && unit.skills.length ? unit.skills : (base.skills || []);
       const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}${statusLine((unit.statuses||[]).map(x=>({...x,val:statusName(x.type)})),'🟣 状態異常','text-purple-300')}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(detailSkills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
@@ -2223,7 +2275,7 @@
               <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400">キャラ: ${uCards.length}/5（3～5） | マジック: ${mCards.length}/10</span>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 my-2 items-start">
-              ${uCards.map(u => `<div class="min-w-0">${getCardHTML({ id:u.id, cardType:"unit", name:u.name, mainAttr:u.mainAttr, subAttrs:u.subAttrs, hp:u.stats?.hp||0, atk:u.stats?.atk||0, prio:u.stats?.priority??0, img:getCardImage(u) })}</div>`).join('')}
+              ${uCards.map(u => `<div class="min-w-0">${getCardHTML({ id:u.id, cardType:"unit", name:u.name, mainAttr:u.mainAttr, subAttrs:u.subAttrs, hp:u.stats?.hp||0, atk:u.stats?.atk||0, prio:u.stats?.priority??0, rank:u.rank, img:getCardImage(u) })}</div>`).join('')}
             </div>
             ${mCards.length ? `
               <div class="text-[10px] text-purple-300 font-bold mt-2 mb-1">マジック</div>
@@ -2468,7 +2520,7 @@
         const u=allCards.find(c=>c.id===id); if(!u)return;
         const ai=deploymentSelection.player.active.indexOf(id), ri=deploymentSelection.player.reserve.indexOf(id);
         const div=document.createElement('div'); div.className=`relative cursor-pointer rounded-xl p-1 border-2 transition ${ai>=0?'border-amber-400 bg-amber-500/15':'border-slate-800 bg-slate-950'}`;
-        div.innerHTML=getCardHTML({id:u.id,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.stats.hp,atk:u.stats.atk,prio:u.stats.priority,img:getCardImage(u)})+
+        div.innerHTML=getCardHTML({id:u.id,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.stats.hp,atk:u.stats.atk,prio:u.stats.priority,rank:u.rank,img:getCardImage(u)})+
           `<div class="absolute top-2 left-2 px-2 py-1 rounded bg-slate-950/90 text-[10px] font-black ${ai>=0?'text-amber-300':'text-slate-300'}">${ai>=0?`出撃 ${ai+1}`:`控え ${ri+1}`}</div>`;
         div.onclick=()=>togglePlayerDeployment(id); container.appendChild(div);
       });
@@ -2478,7 +2530,7 @@
     function previewEnemyDeck() {
       const dId=document.getElementById('select-enemy-deck').value; const deck=allDecks.find(d=>d.id===dId); const container=document.getElementById('preview-enemy-deck-units'); container.innerHTML='';
       if(!deck)return; const ids=deck.unitIds||[]; deploymentSelection.enemy={active:ids.slice(0,3),reserve:ids.slice(3,5)};
-      ids.forEach((id,i)=>{const u=allCards.find(c=>c.id===id); if(!u)return; const div=document.createElement('div'); div.innerHTML=getCardHTML({id:u.id,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.stats.hp,atk:u.stats.atk,prio:u.stats.priority,img:getCardImage(u)})+`<div class="text-center text-[10px] text-rose-300 font-bold mt-1">${i<3?`出撃 ${i+1}`:`控え ${i-2}`}</div>`; container.appendChild(div);});
+      ids.forEach((id,i)=>{const u=allCards.find(c=>c.id===id); if(!u)return; const div=document.createElement('div'); div.innerHTML=getCardHTML({id:u.id,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.stats.hp,atk:u.stats.atk,prio:u.stats.priority,rank:u.rank,img:getCardImage(u)})+`<div class="text-center text-[10px] text-rose-300 font-bold mt-1">${i<3?`出撃 ${i+1}`:`控え ${i-2}`}</div>`; container.appendChild(div);});
     }
 
     function applyRivalPreset() {
@@ -2558,7 +2610,7 @@
     function storyRenderStartOpponents(){const box=document.getElementById('story-start-opponents');if(!box)return;box.innerHTML='';const d=storyEnsureDraft();d.opponents.forEach((e,i)=>{const r=e.type==='rival'?allRivals.find(x=>x.id===e.rivalId):null;const p=r?storyBuildFixedParticipant(r,i+1):storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));const opts=allRivals.map(x=>`<option value="rival:${x.id}" ${e.type==='rival'&&e.rivalId===x.id?'selected':''}>${esc(x.name)}</option>`).join('')+`<option value="instant" ${e.type==='instant'?'selected':''}>🎲 即席ライバル</option>`;const card=document.createElement('div');card.className='rounded-xl border border-slate-800 bg-slate-950 p-3';card.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center mb-2">第${i+1}戦</div><div class="w-12 h-12 mx-auto rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${p.iconImage?`<img src="${p.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center">🤖</div>'}</div><div class="text-sm font-black text-white text-center mt-2">${esc(p.name)}</div><div class="text-[10px] font-bold text-rose-300 text-center">AI：${storyAiName(p.intelligence)}</div><select class="w-full mt-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[9px] font-bold" onchange="storySetDraftOpponent(${i},this.value)">${opts}</select>`;box.appendChild(card);});}
     function storySetDraftOpponent(index,value){storyEnsureDraft();const next=value==='instant'?{type:'instant',intelligence:storyGeneratedAi(index)}:{type:'rival',rivalId:value.replace(/^rival:/,'')};if(next.type==='rival'){const dup=storyModeDraft.opponents.findIndex((e,i)=>i!==index&&e.type==='rival'&&e.rivalId===next.rivalId);if(dup>=0){const old=storyModeDraft.opponents[index];storyModeDraft.opponents[index]=storyModeDraft.opponents[dup];storyModeDraft.opponents[dup]=old;}else storyModeDraft.opponents[index]=next;}else storyModeDraft.opponents[index]=next;storyModeDraft.opponents=storyModeDraft.opponents.map((e,i)=>e.type==='instant'?{...e,intelligence:storyGeneratedAi(i)}:e);const ranked=storyModeDraft.opponents.map((e,i)=>({e,i,rank:e.type==='rival'?storyAiRank(allRivals.find(r=>r.id===e.rivalId)?.intelligence||'normal'):storyAiRank(e.intelligence||storyGeneratedAi(i))}));storyModeDraft.opponents=ranked.sort((a,b)=>a.rank-b.rank||a.i-b.i).map(x=>x.e);saveStoryModeDraft();renderStoryMode();}
     function storyRenderStartConfirmed(){const a=document.getElementById('story-start-confirmed-active'),r=document.getElementById('story-start-confirmed-reserve');if(!a||!r)return;storyEnsureDraft();storyDraftNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDraftDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeDraft.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeDraft.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
-    function storyRenderStartDeckEditor(){storyEnsureDraft();const ul=document.getElementById('story-start-unit-pool'),ml=document.getElementById('story-start-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storyModeDraft.playerDeck.unitIds.map(String)),sm=new Set(storyModeDraft.playerDeck.magicIds.map(String));storyModeDraft.initialUnitIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftUnit(id);ul.appendChild(d);});storyModeDraft.initialMagicIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftMagic(id);ml.appendChild(d);});document.getElementById('story-start-unit-selection-label').innerText=`${su.size} / 5`;document.getElementById('story-start-magic-selection-label').innerText=`${sm.size} / 10`;const v=storyDraftValidate();const vb=document.getElementById('story-start-deck-validation');vb.innerText=v.ok?'設定OK':v.message;vb.className=`text-[10px] font-black ${v.ok?'text-emerald-300':'text-amber-300'}`;storyRenderStartConfirmed();}
+    function storyRenderStartDeckEditor(){storyEnsureDraft();const ul=document.getElementById('story-start-unit-pool'),ml=document.getElementById('story-start-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storyModeDraft.playerDeck.unitIds.map(String)),sm=new Set(storyModeDraft.playerDeck.magicIds.map(String));storyModeDraft.initialUnitIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftUnit(id);ul.appendChild(d);});storyModeDraft.initialMagicIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftMagic(id);ml.appendChild(d);});document.getElementById('story-start-unit-selection-label').innerText=`${su.size} / 5`;document.getElementById('story-start-magic-selection-label').innerText=`${sm.size} / 10`;const v=storyDraftValidate();const vb=document.getElementById('story-start-deck-validation');vb.innerText=v.ok?'設定OK':v.message;vb.className=`text-[10px] font-black ${v.ok?'text-emerald-300':'text-amber-300'}`;storyRenderStartConfirmed();}
 
     function storyNormalizeDeployment(){if(!storyModeState)return;const selected=storySelectedUnits().map(String),set=new Set(selected);let active=[...(storyModeState.playerDeployment?.active||[])].map(String).filter(id=>set.has(id));let reserve=[...(storyModeState.playerDeployment?.reserve||[])].map(String).filter(id=>set.has(id)&&!active.includes(id));selected.forEach(id=>{if(active.length<3&&!active.includes(id)&&!reserve.includes(id))active.push(id);});selected.forEach(id=>{if(active.length>=3&&!active.includes(id)&&!reserve.includes(id)&&reserve.length<2)reserve.push(id);});storyModeState.playerDeployment={active:active.slice(0,3),reserve:reserve.slice(0,2)};}
     function storySetDeploymentSlot(id,slot){if(!storyModeState||!storySelectedUnits().map(String).includes(String(id)))return;storyNormalizeDeployment();const d=storyModeState.playerDeployment;d.active=d.active.filter(x=>String(x)!==String(id));d.reserve=d.reserve.filter(x=>String(x)!==String(id));const n=Math.max(1,Math.min(3,parseInt(String(slot).replace(/\D/g,''),10)||1));if(String(slot).startsWith('active'))d.active.splice(n-1,0,id);else d.reserve.splice(Math.min(1,parseInt(String(slot).replace(/\D/g,''),10)-1),0,id);storyNormalizeDeployment();saveStoryModeState();renderStoryMode();}
@@ -2572,7 +2624,7 @@
     function storyRenderOpponentDetail(){const o=storyModeState?.currentOpponent,box=document.getElementById('story-opponent-card'),ub=document.getElementById('story-opponent-unit-deck'),mb=document.getElementById('story-opponent-magic-deck');if(!box)return;if(!o){box.innerHTML='<div class="text-sm text-slate-500">次の対戦相手はありません。</div>';if(ub)ub.innerHTML='';if(mb)mb.innerHTML='';return;}box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${esc(o.name)}</div><div class="text-xs font-bold text-rose-300 mt-1">AI：${storyAiName(o.intelligence)}</div><div class="text-[10px] text-slate-500 mt-1">第${(storyModeState.currentMatchIndex||0)+1}戦</div></div></div>`;const units=(o.unitIds||[]).map(storyCardById).filter(Boolean),magics=(o.magicIds||[]).map(storyCardById).filter(Boolean);if(ub){ub.innerHTML='';units.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'unit');ub.appendChild(d);});}if(mb){mb.innerHTML='';magics.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'magic');mb.appendChild(d);});}}
     function storyRenderConfirmed(){const a=document.getElementById('story-confirmed-active'),r=document.getElementById('story-confirmed-reserve');if(!a||!r)return;storyNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeState.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeState.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
 
-    function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
+    function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
 
     function storyRepairLoadedState(){
       if(!storyModeState)return false;
@@ -2660,7 +2712,7 @@
       storyModeState={version:6,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};
       await saveStoryModeState();await saveStoryModeDraft();hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();storyRenderInitialRewardModal();
     }
-    function storyRenderInitialRewardModal(){const modal=document.getElementById('story-initial-reward-modal'),ub=document.getElementById('story-initial-unit-reward'),mb=document.getElementById('story-initial-magic-reward');if(!modal||!ub||!mb||!storyModeState)return;ub.innerHTML='';mb.innerHTML='';(storyModeState.initialUnitIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,img:getCardImage(c)});ub.appendChild(d);});(storyModeState.initialMagicIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});mb.appendChild(d);});modal.classList.remove('hidden');}
+    function storyRenderInitialRewardModal(){const modal=document.getElementById('story-initial-reward-modal'),ub=document.getElementById('story-initial-unit-reward'),mb=document.getElementById('story-initial-magic-reward');if(!modal||!ub||!mb||!storyModeState)return;ub.innerHTML='';mb.innerHTML='';(storyModeState.initialUnitIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});ub.appendChild(d);});(storyModeState.initialMagicIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});mb.appendChild(d);});modal.classList.remove('hidden');}
     function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');switchView('story');renderStoryMode();}
 
     function storyGrantVictoryReward(){const remU=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().some(id=>String(id)===String(c.id)));const remM=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().some(id=>String(id)===String(c.id)));const us=storyShuffle(remU).slice(0,3),ms=storyShuffle(remM).slice(0,5);storyModeState.availableUnitIds.push(...us.map(c=>c.id));storyModeState.availableMagicIds.push(...ms.map(c=>c.id));return {units:us,magics:ms};}
@@ -2935,7 +2987,7 @@
 
     function renderReserveUnits(){
       const box=document.getElementById('reserve-player'); if(!box)return; box.innerHTML='';
-      const q=battleState.playerReserveQueue||[]; q.forEach((id,i)=>{const u=battleState.playerUnits.find(x=>x.cardId===id&&!x.isActive&&x.currentHp>0); if(!u)return; const div=document.createElement('div'); div.className='bg-slate-950 border border-slate-800 rounded-lg p-1.5 flex items-center gap-2 opacity-80'; div.innerHTML=`<div class="w-10">${getCardHTML({cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.maxHp,atk:u.atk,prio:u.priority,img:getCardImage(u)})}</div><div class="text-[10px] text-amber-200 font-bold">控え ${i+1}<br>${u.name}</div>`; box.appendChild(div);});
+      const q=battleState.playerReserveQueue||[]; q.forEach((id,i)=>{const u=battleState.playerUnits.find(x=>x.cardId===id&&!x.isActive&&x.currentHp>0); if(!u)return; const div=document.createElement('div'); div.className='bg-slate-950 border border-slate-800 rounded-lg p-1.5 flex items-center gap-2 opacity-80'; div.innerHTML=`<div class="w-10">${getCardHTML({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.maxHp,atk:u.atk,prio:u.priority,rank:u.rank,img:getCardImage(u)})}</div><div class="text-[10px] text-amber-200 font-bold">控え ${i+1}<br>${u.name}</div>`; box.appendChild(div);});
     }
 
     function renderTimeline() {
@@ -3096,12 +3148,12 @@
     function getManualTargetCandidates(skill, actor) {
       if (!skill) return [];
       const pool = getTargetPool(skill.targetType, actor);
-      return pool.filter(t => matchesTargetCondition(t, skill.targetCond));
+      return pool.filter(t => matchesTargetCondition(t, skill.targetCond) && !(actor && t.side !== actor.side && unitHasStatus(t,'stealth')));
     }
 
     function isManualTargetType(targetType) { return targetType === 'select_enemy_1' || targetType === 'select_ally_1'; }
     function skillNeedsManualTarget(skill) { return !!skill && (isManualTargetType(skill.targetType) || (skill.hasSubEffect && skill.subEffect && isManualTargetType(skill.subEffect.targetType))); }
-    function getManualSubTargetCandidates(skill, actor) { if(!skill?.hasSubEffect||!skill.subEffect||!isManualTargetType(skill.subEffect.targetType)) return []; return getTargetPool(skill.subEffect.targetType,actor).filter(t=>matchesTargetCondition(t,skill.subEffect.targetCond)); }
+    function getManualSubTargetCandidates(skill, actor) { if(!skill?.hasSubEffect||!skill.subEffect||!isManualTargetType(skill.subEffect.targetType)) return []; return getTargetPool(skill.subEffect.targetType,actor).filter(t=>matchesTargetCondition(t,skill.subEffect.targetCond)&&!(actor&&t.side!==actor.side&&unitHasStatus(t,'stealth'))); }
 
     function renderMagicHand() {
       const grid = document.getElementById("magic-hand-grid");
@@ -3127,7 +3179,7 @@
           const mainType=m.effect?.targetType;
           if(isManualTargetType(mainType)){
             const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-purple-500/40 bg-purple-950/20 text-[9px]';
-            const pool=(getTargetPool(mainType,actor)||[]).filter(t=>matchesTargetCondition(t,m.effect.targetCond));
+            const pool=(getTargetPool(mainType,actor)||[]).filter(t=>matchesTargetCondition(t,m.effect.targetCond)&&!(actor&&t.side!==actor.side&&unitHasStatus(t,'stealth')));
             box.innerHTML='<div class="font-black text-purple-300 mb-1">🎯 メイン効果の対象</div>';
             pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicTargetInstanceId=t.instanceId;renderBattleState();updateReservationSummary();};box.appendChild(b);});
             wrap.appendChild(box);
@@ -3137,7 +3189,7 @@
             if(sub.targetType==='same_main_target'){const info=document.createElement('div');info.className='text-[9px] text-emerald-300 mt-1';info.innerText='↳ 追加効果：メイン効果と同じ対象';wrap.appendChild(info);}
             else if(isManualTargetType(sub.targetType)){
               const box=document.createElement('div'); box.className='w-full mt-1 p-1 rounded border border-emerald-500/40 bg-emerald-950/20 text-[9px]';
-              const pool=(getTargetPool(sub.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,sub.targetCond));
+              const pool=(getTargetPool(sub.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,sub.targetCond)&&!(actor&&t.side!==actor.side&&unitHasStatus(t,'stealth')));
               box.innerHTML='<div class="font-black text-emerald-300 mb-1">🎯 追加効果の対象</div>';
               pool.forEach(t=>{const b=document.createElement('button');b.className='px-1.5 py-1 mr-1 mb-1 rounded border '+(battleState.reservedMagicSubTargetInstanceId===t.instanceId?'border-emerald-400':'border-slate-700');b.innerText=t.name;b.onclick=ev=>{ev.stopPropagation();battleState.reservedMagicSubTargetInstanceId=t.instanceId;renderBattleState();updateReservationSummary();};box.appendChild(b);});
               wrap.appendChild(box);
@@ -3326,12 +3378,12 @@
       let speed = unit.priority;
       (unit.buffs || []).forEach(b => { if (b.type === 'speed') speed += Number(b.val) || 0; });
       (unit.debuffs || []).forEach(b => { if (b.type === 'speed') speed += Number(b.val) || 0; });
-      if ((unit.statuses || []).some(s => s.type === 'slow' && Number(s.duration) > 0)) speed = Math.floor(speed / 2);
+      if ((unit.statuses || []).some(s => s.type === 'slow' && durationActive(s.duration))) speed = Math.floor(speed / 2);
       return speed;
     }
 
     function aiPlannerHasStatus(unit, type) {
-      return (unit.statuses || []).some(s => s.type === type && Number(s.duration) > 0);
+      return (unit.statuses || []).some(s => s.type === type && durationActive(s.duration));
     }
 
     function aiPlannerCondition(cond, actor, state) {
@@ -3350,11 +3402,11 @@
       if (cond.type === 'turn_lte') return state.turn <= Number(cond.val);
       if (cond.type === 'turn_gte') return state.turn >= Number(cond.val);
       if (cond.type === 'self_status') return aiPlannerHasStatus(actor, cond.status);
-      if (cond.type === 'self_any_status') return (actor.statuses || []).some(x => Number(x.duration) > 0);
+      if (cond.type === 'self_any_status') return (actor.statuses || []).some(x => durationActive(x.duration));
       if (cond.type === 'ally_has_status') return allies.some(u => u !== actor && aiPlannerHasStatus(u, cond.status));
-      if (cond.type === 'ally_has_any_status') return allies.some(u => u !== actor && (u.statuses || []).some(x => Number(x.duration) > 0));
+      if (cond.type === 'ally_has_any_status') return allies.some(u => u !== actor && (u.statuses || []).some(x => durationActive(x.duration)));
       if (cond.type === 'enemy_has_status') return enemies.some(u => aiPlannerHasStatus(u, cond.status));
-      if (cond.type === 'enemy_has_any_status') return enemies.some(u => (u.statuses || []).some(x => Number(x.duration) > 0));
+      if (cond.type === 'enemy_has_any_status') return enemies.some(u => (u.statuses || []).some(x => durationActive(x.duration)));
       return true;
     }
 
@@ -3377,30 +3429,53 @@
       return [];
     }
 
+    function aiPlannerHasStatus(unit, status) { return !!(unit?.statuses||[]).some(x=>x.type===status&&durationActive(x.duration)); }
+    function aiPlannerSingleTarget(state, pool, actor, targetType, explicitTargetId=null) {
+      if(!pool.length)return [];
+      if(targetType==='random_all_1') { const taunts=pool.filter(t=>aiPlannerHasStatus(t,'taunt')); if(taunts.length)return [taunts[Math.floor(Math.random()*taunts.length)]]; }
+      const isManual=targetType==='select_enemy_1'||targetType==='select_ally_1';
+      let picked=isManual?pool.find(t=>t.instanceId===explicitTargetId):null;
+      if(isManual&&!picked)return [];
+      if(isManual && actor && picked.side!==actor.side && aiPlannerHasStatus(picked,'stealth'))return [];
+      if(!picked){
+        const taunts=pool.filter(t=>actor&&t.side!==actor.side&&aiPlannerHasStatus(t,'taunt'));
+        if(taunts.length)picked=taunts[Math.floor(Math.random()*taunts.length)];
+        else {
+          const eligible=pool.filter(t=>{
+            if(!actor||t.side===actor.side||!aiPlannerHasStatus(t,'stealth'))return true;
+            const allSide=aiPlannerActive(state,t.side);
+            return allSide.length<=1;
+          });
+          if(!eligible.length)return [];
+          picked=eligible[Math.floor(Math.random()*eligible.length)];
+        }
+      }
+      if(picked.side!==actor.side){
+        if(aiPlannerHasStatus(picked,'taunt'))return [picked];
+        if(aiPlannerHasStatus(picked,'stealth'))return [];
+        const taunts=pool.filter(t=>t.side===picked.side&&aiPlannerHasStatus(t,'taunt'));
+        if(taunts.length)return [taunts[Math.floor(Math.random()*taunts.length)]];
+      }
+      return [picked];
+    }
     function aiPlannerResolveTargets(state, actor, effect, explicitTargetId = null) {
       if (!effect) return [];
       const targetType = effect.targetType || 'none';
-      if (targetType === 'player_self') return [{ __playerTarget: 'self', __playerSide: actor.side }];
-      if (targetType === 'player_opp') return [{ __playerTarget: 'opp', __playerSide: actor.side === 'player' ? 'enemy' : 'player' }];
+      if (targetType === 'player_self') return [{ __playerTarget: 'self', side:actor.side, __playerSide: actor.side }];
+      if (targetType === 'player_opp') return [{ __playerTarget: 'opp', side:actor.side === 'player' ? 'enemy' : 'player', __playerSide: actor.side === 'player' ? 'enemy' : 'player' }];
       if (targetType === 'self') return [actor];
       let pool = aiPlannerTargetPool(state, targetType, actor).filter(t => aiPlannerTargetCondition(t, effect.targetCond));
       if (!pool.length) return [];
-      if (targetType === 'select_enemy_1' || targetType === 'select_ally_1') {
-        return [pool.find(t => t.instanceId === explicitTargetId) || pool[0]].filter(Boolean);
-      }
-      if (targetType === 'random_enemy_1' || targetType === 'random_ally_1' || targetType === 'random_all_1') {
-        return [pool[0]];
-      }
+      if (['select_enemy_1','select_ally_1','random_enemy_1','random_ally_1','random_all_1'].includes(targetType)) return aiPlannerSingleTarget(state,pool,actor,targetType,explicitTargetId);
       return pool;
     }
 
     function aiPlannerDamageAfterCut(target, raw) {
       if (!target || target.__playerTarget) return 0;
-      let cut = 0;
-      [...(target.buffs || []), ...(target.debuffs || [])].forEach(b => {
-        if (b.type === 'dmg_cut') cut = Math.max(cut, Number(b.val) || 0);
-      });
-      return Math.max(0, Math.round(raw * (1 - cut / 100)));
+      const ratio = [...(target.buffs||[]), ...(target.debuffs||[])]
+        .filter(b=>b.type==='damage_taken_ratio'||b.type==='dmg_cut')
+        .reduce((sum,b)=>sum+(b.type==='dmg_cut'?-(Number(b.val)||0):(Number(b.val)||0)),0);
+      return Math.max(0, Math.round((Number(raw)||0) * Math.max(0,1+ratio/100)));
     }
 
     function aiPlannerRefreshEffectiveMaxHp(unit, increaseCurrent = false) {
@@ -3420,12 +3495,14 @@
 
     function aiPlannerAddTimed(target, effect) {
       if (!target || target.__playerTarget || !effect) return;
-      const duration = Math.max(1, Number(effect.duration) || 1);
-      const isBuff = Number(effect.val) >= 0;
+      const duration = normalizeDuration(effect.duration);
+      const isDamageTaken = effect.type === 'damage_taken_ratio' || effect.type === 'damage_cut_ratio';
+      const normalizedVal = effect.type === 'damage_cut_ratio' ? -(Number(effect.val)||0) : (Number(effect.val)||0);
+      const isBuff = isDamageTaken ? normalizedVal < 0 : Number(effect.val) >= 0;
       const dest = isBuff ? target.buffs : target.debuffs;
       const item = {
-        type: effect.type === 'damage_cut_ratio' ? 'dmg_cut' : effect.type === 'mod_speed' ? 'speed' : effect.type === 'mod_max_hp_val' ? 'max_hp' : effect.type === 'mod_atk_ratio' ? 'atk_ratio' : 'atk_val',
-        val: Number(effect.val) || 0,
+        type: (effect.type === 'damage_cut_ratio' || effect.type === 'damage_taken_ratio') ? 'damage_taken_ratio' : effect.type === 'mod_speed' ? 'speed' : effect.type === 'mod_max_hp_val' ? 'max_hp' : effect.type === 'mod_atk_ratio' ? 'atk_ratio' : 'atk_val',
+        val: isDamageTaken ? normalizedVal : (Number(effect.val) || 0),
         duration,
         source: isBuff ? 'buff' : 'debuff'
       };
@@ -3448,10 +3525,10 @@
       if (!target || target.__playerTarget) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
 
       const beforeHp = target.currentHp;
-      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
+      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce' || effect.type === 'dmg_atk_ratio') {
         if (isMagic && effect.type === 'dmg_atk_ratio') return fail({ value: -50, kills: 0, damage: 0, healing: 0 });
         const raw = effect.type === 'dmg_fixed' ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
-        const actual = aiPlannerDamageAfterCut(target, raw);
+        const actual = effect.type === 'dmg_fixed_pierce' ? Math.max(0, Math.round(raw)) : aiPlannerDamageAfterCut(target, raw);
         target.currentHp = Math.max(0, target.currentHp - actual);
         return ok({
           value: actual * 1.15 + (beforeHp > 0 && target.currentHp <= 0 ? 1300 : 0),
@@ -3461,13 +3538,13 @@
         });
       }
       if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
-        if ((target.debuffs || []).some(x => x.type === 'heal_block' && Number(x.duration) > 0)) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
+        if ((target.debuffs || []).some(x => x.type === 'heal_block' && durationActive(x.duration))) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
         const heal = effect.type === 'heal_fixed' ? Number(effect.val) || 0 : Math.round(target.maxHp * ((Number(effect.val) || 0) / 100));
         const actual = Math.max(0, Math.min(target.maxHp, target.currentHp + heal) - target.currentHp);
         target.currentHp += actual;
         return ok({ value: actual * 0.95, kills: 0, damage: 0, healing: actual });
       }
-      if (effect.type === 'damage_cut_ratio' || effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed' || effect.type === 'mod_max_hp_val') {
+      if (effect.type === 'damage_taken_ratio' || effect.type === 'damage_cut_ratio' || effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed' || effect.type === 'mod_max_hp_val') {
         aiPlannerAddTimed(target, effect);
         const val = Number(effect.val) || 0;
         if (effect.type === 'mod_max_hp_val') {
@@ -3478,7 +3555,7 @@
           const weight = val >= 0 ? 8 : 11;
           return ok({ value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.85) + (killed ? 1400 : 0), kills: killed ? 1 : 0, damage: Math.max(0, beforeCurrent-target.currentHp), healing: Math.max(0,target.currentHp-beforeCurrent), maxHpChange: target.maxHp-beforeMax });
         }
-        const weight = effect.type === 'damage_cut_ratio' ? 18 : effect.type === 'mod_speed' ? 10 : 7;
+        const weight = (effect.type === 'damage_cut_ratio' || effect.type === 'damage_taken_ratio') ? 18 : effect.type === 'mod_speed' ? 10 : 7;
         return ok({ value: Math.abs(val) * weight * (target.side === actor.side ? 1 : 0.8), kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'clear_buffs') {
@@ -3495,8 +3572,8 @@
       if (effect.type === 'status_apply') {
         target.statuses = target.statuses || [];
         const status = effect.status || 'poison';
-        if (target.statuses.some(x => x.type === status && Number(x.duration) > 0)) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
-        target.statuses.push({ type: status, duration: Math.max(1, Number(effect.duration) || 1) });
+        if (target.statuses.some(x => x.type === status && durationActive(x.duration))) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
+        target.statuses.push({ type: status, duration: normalizeDuration(effect.duration) });
         return ok({ value: (status === 'poison' || status === 'burn' ? 50 : status === 'freeze' || status === 'paralysis' ? 85 : 35) * (target.side === actor.side ? -0.5 : 1), kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'status_remove') {
@@ -3510,7 +3587,7 @@
       if (effect.type === 'heal_block' || effect.type === 'skill_block') {
         target.debuffs = target.debuffs || [];
         const type = effect.type;
-        if (!target.debuffs.some(x => x.type === type && Number(x.duration) > 0)) target.debuffs.push({ type, duration: Math.max(1, Number(effect.duration) || 1), source: 'debuff' });
+        if (!target.debuffs.some(x => x.type === type && durationActive(x.duration))) target.debuffs.push({ type, duration: normalizeDuration(effect.duration), source: 'debuff' });
         return ok({ value: (type === 'skill_block' ? 105 : 60) * (target.side === actor.side ? -0.3 : 1), kills: 0, damage: 0, healing: 0 });
       }
       return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
@@ -3558,11 +3635,15 @@
       const actor = aiPlannerFindUnit(state, actorId);
       const target = aiPlannerFindUnit(state, targetId);
       if (!actor || !target || actor.currentHp <= 0 || target.currentHp <= 0) return { value: -9999, kills: 0, damage: 0, healing: 0 };
+      const enemies = aiPlannerActive(state, actor.side === 'player' ? 'enemy' : 'player');
+      const targetList = aiPlannerSingleTarget(state, enemies, actor, 'random_enemy_1', targetId);
+      const actualTarget = targetList[0];
+      if (!actualTarget) return { value: -20, kills: 0, damage: 0, healing: 0 };
       const raw = aiPlannerEffectiveAtk(actor);
-      const before = target.currentHp;
-      const actual = aiPlannerDamageAfterCut(target, raw);
-      target.currentHp = Math.max(0, target.currentHp - actual);
-      return { value: actual * 1.05 + (before > 0 && target.currentHp <= 0 ? 1300 : 0), kills: before > 0 && target.currentHp <= 0 ? 1 : 0, damage: actual, healing: 0 };
+      const before = actualTarget.currentHp;
+      const actual = aiPlannerDamageAfterCut(actualTarget, raw);
+      actualTarget.currentHp = Math.max(0, actualTarget.currentHp - actual);
+      return { value: actual * 1.05 + (before > 0 && actualTarget.currentHp <= 0 ? 1300 : 0), kills: before > 0 && actualTarget.currentHp <= 0 ? 1 : 0, damage: actual, healing: 0 };
     }
 
     function aiPlannerEvaluateState(state, side) {
@@ -3577,6 +3658,7 @@
         score += (aiPlannerEffectiveSpeed(u) - u.priority) * 0.75;
         [...(u.buffs || [])].forEach(b => {
           if (b.type === 'dmg_cut') score += Math.max(0, Number(b.val) || 0) * 1.6;
+          if (b.type === 'damage_taken_ratio') score += Math.max(0, -(Number(b.val)||0)) * 1.6;
           if (b.type === 'atk_ratio') score += Math.max(0, Number(b.val) || 0) * 0.9;
           if (b.type === 'speed') score += Math.max(0, Number(b.val) || 0) * 0.7;
         });
@@ -3647,7 +3729,7 @@
       const candidates = [];
       enemies.forEach(t => candidates.push({ type: 'attack', actorId, targetInstanceId: t.instanceId, cost: 0, name: '通常攻撃' }));
 
-      const skillBlocked = (actor.debuffs || []).some(d => d.type === 'skill_block' && Number(d.duration) > 0);
+      const skillBlocked = (actor.debuffs || []).some(d => d.type === 'skill_block' && durationActive(d.duration));
       if (!skillBlocked) {
         (actor.skills || []).forEach((sk, sIdx) => {
           if (sk.type !== 'active' || !aiPlannerCondition(sk.selfCond, actor, state)) return;
@@ -3800,16 +3882,16 @@
       if (!target) return -9999;
       const effect = skill.mainEffect || {};
       let score = Math.random() * 2;
-      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_atk_ratio') {
+      if (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce' || effect.type === 'dmg_atk_ratio') {
         const raw = effect.type === 'dmg_fixed' ? Number(effect.val || 0) : Math.round(aiPlannerEffectiveAtk(unit) * Number(effect.val || 0) / 100);
-        const actual = aiPlannerDamageAfterCut(target, raw);
+        const actual = effect.type === 'dmg_fixed_pierce' ? Math.max(0, Math.round(raw)) : aiPlannerDamageAfterCut(target, raw);
         score += actual * 0.8;
         if (actual >= target.currentHp) score += 260;
         if (target.currentHp / Math.max(1, target.maxHp) < 0.35) score += 75;
       }
       if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') score += (1 - target.currentHp / Math.max(1, target.maxHp)) * 110;
       if (effect.type === 'mod_atk_ratio' || effect.type === 'mod_atk_val' || effect.type === 'mod_speed') score += target.side === unit.side ? 55 : 20;
-      if (effect.type === 'damage_cut_ratio') score += target.side === unit.side ? 75 : 5;
+      if (effect.type === 'damage_taken_ratio' || effect.type === 'damage_cut_ratio') { const v = effect.type === 'damage_cut_ratio' ? -(Number(effect.val)||0) : (Number(effect.val)||0); score += (v < 0 ? (target.side === unit.side ? 75 : 5) : (target.side !== unit.side ? 75 : -10)); }
       if (effect.type === 'heal_block' || effect.type === 'skill_block') score += target.side !== unit.side ? 85 : -20;
       if (effect.type === 'mod_ap') score += Number(effect.val || 0) > 0 ? 55 : 35;
       return score;
@@ -3830,7 +3912,7 @@
       let remainingAp = side === 'player' ? battleState.playerAp : battleState.enemyAp;
       units.forEach(u => {
         if (u.currentHp <= 0) return;
-        const blocked = (u.debuffs || []).some(d => d.type === 'skill_block' && d.duration > 0);
+        const blocked = (u.debuffs || []).some(d => d.type === 'skill_block' && durationActive(d.duration));
         const usable = [];
         if (!blocked) (u.skills || []).forEach((sk, sIdx) => {
           if (sk.type !== 'active' || !evalCond(sk.selfCond, u, side === 'player')) return;
@@ -4131,8 +4213,8 @@
     async function executeUnitAction(unit) {
       const isPlayer = unit.side === 'player';
       const act = unit.reservedAction;
-      const frozen=(unit.statuses||[]).some(x=>x.type==='freeze'&&x.duration>0);
-      const paralyzed=(unit.statuses||[]).some(x=>x.type==='paralysis'&&x.duration>0);
+      const frozen=(unit.statuses||[]).some(x=>x.type==='freeze'&&durationActive(x.duration));
+      const paralyzed=(unit.statuses||[]).some(x=>x.type==='paralysis'&&durationActive(x.duration));
       if(frozen || (paralyzed && Math.random()<0.5)){
         const st=frozen?'凍結':'麻痺';
         logBattle(`🚫 ${unit.name} は${st}で行動失敗！`);
@@ -4142,7 +4224,8 @@
       if (act.type === 'attack') {
         const enemies = isPlayer ? getActiveUnits('enemy') : getActiveUnits('player');
         if (enemies.length === 0) return;
-        const target = enemies[Math.floor(Math.random() * enemies.length)];
+        const target = resolveSingleTargetRuntime(enemies, 'random_enemy_1', unit, null)[0];
+        if (!target) { logBattle(`⚠️ ${unit.name} の通常攻撃は隠密に阻まれた！`); return; }
         const raw = getEffectiveAtk(unit);
         const actorHpBefore = { current: unit.currentHp, max: unit.maxHp };
         const before = target.currentHp;
@@ -4164,7 +4247,7 @@
       if (act.type !== 'skill') return;
       const sk = unit.skills[act.skillIndex];
       if (!sk) return;
-      if ((unit.debuffs || []).some(d => d.type === 'skill_block' && d.duration > 0)) {
+      if ((unit.debuffs || []).some(d => d.type === 'skill_block' && durationActive(d.duration))) {
         logBattle(`🚫 ${unit.name} はスキル使用禁止中！`);
         await showActionPopup(unit, sk.name, sk, {target:'自分',effect:'スキル使用禁止',result:'不発',description: sk.desc || sk.description || buildAutoSkillDescriptionFromData(sk)});
         return;
@@ -4208,25 +4291,45 @@
       });
     }
 
+    function unitHasStatus(unit, status) { return !!(unit?.statuses||[]).some(x=>x.type===status&&durationActive(x.duration)); }
+    function resolveSingleTargetRuntime(pool, type, actor, selected=null) {
+      if(!pool.length)return [];
+      const manual=type==='select_enemy_1'||type==='select_ally_1';
+      if(type==='random_all_1') { const taunts=pool.filter(t=>unitHasStatus(t,'taunt')); if(taunts.length)return [taunts[Math.floor(Math.random()*taunts.length)]]; }
+      if(manual){
+        const picked=selected;
+        if(!picked)return [];
+        if(actor&&picked.side!==actor.side){
+          if(unitHasStatus(picked,'taunt'))return [picked];
+          if(unitHasStatus(picked,'stealth'))return [];
+          const taunts=pool.filter(t=>t.side===picked.side&&unitHasStatus(t,'taunt'));
+          if(taunts.length)return [taunts[Math.floor(Math.random()*taunts.length)]];
+        }
+        return [picked];
+      }
+      if(!type.startsWith('random_'))return [];
+      const hostileTaunts=pool.filter(t=>actor&&t.side!==actor.side&&unitHasStatus(t,'taunt'));
+      if(hostileTaunts.length)return [hostileTaunts[Math.floor(Math.random()*hostileTaunts.length)]];
+      const eligible=pool.filter(t=>{
+        if(!actor||t.side===actor.side||!unitHasStatus(t,'stealth'))return true;
+        const sideUnits=(t.side==='player'?battleState.playerUnits:battleState.enemyUnits).filter(x=>x.currentHp>0&&x.isActive);
+        return sideUnits.length<=1;
+      });
+      if(!eligible.length)return [];
+      return [eligible[Math.floor(Math.random()*eligible.length)]];
+    }
     function resolveTargets(targetType, targetCond, actor, isPlayer, selectedTargetInstanceId = null, isMagic = false) {
-      // プレイヤー対象は「発動者がプレイヤーかAIか」に関係なく、
-      // self=発動側プレイヤー、opp=相手プレイヤーとして解決する。
-      // 旧実装ではAI側の player_self / player_opp が [] になり、
-      // AP変更スキルなどが「対象なし」で不発になることがあった。
-      if (targetType === 'player_self') return [{ __playerTarget: 'self', __playerSide: isPlayer ? 'player' : 'enemy' }];
-      if (targetType === 'player_opp') return [{ __playerTarget: 'opp', __playerSide: isPlayer ? 'enemy' : 'player' }];
+      if (targetType === 'player_self') return [{ __playerTarget: 'self', side:isPlayer?'player':'enemy', __playerSide: isPlayer ? 'player' : 'enemy' }];
+      if (targetType === 'player_opp') return [{ __playerTarget: 'opp', side:isPlayer?'enemy':'player', __playerSide: isPlayer ? 'enemy' : 'player' }];
       if (targetType === 'self') return actor ? [actor] : [];
-
       let pool = getTargetPool(targetType, actor).filter(t => matchesTargetCondition(t, targetCond));
       if (pool.length === 0) return [];
-
-      if (targetType === 'select_enemy_1' || targetType === 'select_ally_1') {
+      if (['select_enemy_1','select_ally_1'].includes(targetType)) {
         const selected = pool.find(t => t.instanceId === selectedTargetInstanceId);
-        return selected ? [selected] : (isMagic ? [pool[0]] : []);
+        if (!selected) return isMagic ? resolveSingleTargetRuntime(pool,targetType,actor,null) : [];
+        return resolveSingleTargetRuntime(pool,targetType,actor,selected);
       }
-      if (targetType === 'random_enemy_1' || targetType === 'random_ally_1' || targetType === 'random_all_1') {
-        return [pool[Math.floor(Math.random() * pool.length)]];
-      }
+      if (['random_enemy_1','random_ally_1','random_all_1'].includes(targetType)) return resolveSingleTargetRuntime(pool,targetType,actor,null);
       return pool;
     }
 
@@ -4282,7 +4385,7 @@
 
       if (!target || target.__playerTarget) return;
 
-      const duration = Math.max(1, Number(eff.duration) || 1);
+      const duration = normalizeDuration(eff.duration);
 
       if (eff.type === "dmg_atk_ratio") {
         // マジックカードの発動者はプレイヤーでありキャラではないため、
@@ -4300,16 +4403,16 @@
         return {effect:`攻撃力×${eff.val}%ダメージ`, result:`${target.name} に ${dmg} ダメージ`};
       }
 
-      if (eff.type === "dmg_fixed") {
-        const beforeHp = target.currentHp; dealDamage(target, eff.val); const actual = beforeHp - target.currentHp;
+      if (eff.type === "dmg_fixed" || eff.type === "dmg_fixed_pierce") {
+        const beforeHp = target.currentHp; dealDamage(target, eff.val, eff.type === 'dmg_fixed_pierce'); const actual = beforeHp - target.currentHp;
         if(actual>0) triggerPassiveEvent('hp_decrease',target);
         if(target.currentHp<=0&&beforeHp>0){ triggerPassiveEvent('death',target); [...getActiveUnits(target.side==='player'?'player':'enemy')].filter(u=>u!==target).forEach(u=>triggerPassiveEvent('ally_death',u)); }
         logBattle(`💥 ${target.name} に ${actual} の固定ダメージ！`);
-        return {effect:`${eff.val}の固定ダメージ`, result:`${target.name} に ${actual} ダメージ${target.currentHp<=0?'／撃破！':''}`};
+        return {effect:eff.type==='dmg_fixed_pierce'?`${eff.val}の固定貫通ダメージ`:`${eff.val}の固定ダメージ`, result:`${target.name} に ${actual} ダメージ${target.currentHp<=0?'／撃破！':''}`};
       }
 
       if (eff.type === "heal_max_hp_ratio" || eff.type === "heal_fixed") {
-        if ((target.debuffs || []).some(d => d.type === 'heal_block' && d.duration > 0)) {
+        if ((target.debuffs || []).some(d => d.type === 'heal_block' && durationActive(d.duration))) {
           logBattle(`🚫 ${target.name} は回復禁止中！`);
           return;
         }
@@ -4324,31 +4427,30 @@
         return {effect:`${healVal}回復`, result:`${target.name} のHP +${actualHeal}`};
       }
 
-      if (eff.type === "damage_cut_ratio") {
-        addTimedStatus(target, {
-          type: 'dmg_cut', val: eff.val, duration,
-          source: eff.val >= 0 ? 'buff' : 'debuff'
-        }, eff.val >= 0);
-        logBattle(`🛡 ${target.name} の受けるダメージが ${eff.val}% カットされる！`);
-        return {effect:`被ダメージ${eff.val}%カット`, result:`${target.name} に ${duration}ターン適用`};
+      if (eff.type === "damage_taken_ratio" || eff.type === "damage_cut_ratio") {
+        const val = eff.type === 'damage_cut_ratio' ? -(Number(eff.val)||0) : (Number(eff.val)||0);
+        addTimedStatus(target, { type:'damage_taken_ratio', val, duration, source:val < 0 ? 'buff' : 'debuff' }, val < 0);
+        const text = `受けるダメージ ${val>=0?'+':''}${val}%（${val>0?'増加・デバフ':val<0?'減少・バフ':'変化なし'}）`;
+        logBattle(`🛡 ${target.name} の${text}！`);
+        return {effect:text, result:`${target.name} に ${durationText(duration)}適用`};
       }
 
       if (eff.type === "mod_atk_ratio") {
         addTimedStatus(target, { type: 'atk_ratio', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`⚔️ ${target.name} の攻撃力が ${eff.val >= 0 ? '+' : ''}${eff.val}%変化！`);
-        return {effect:`攻撃力 ${eff.val >= 0 ? '+' : ''}${eff.val}%`, result:`${target.name} の攻撃力に${duration}ターン適用`};
+        return {effect:`攻撃力 ${eff.val >= 0 ? '+' : ''}${eff.val}%`, result:`${target.name} の攻撃力に${durationText(duration)}適用`};
       }
 
       if (eff.type === "mod_atk_val") {
         addTimedStatus(target, { type: 'atk_val', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`⚔️ ${target.name} の攻撃力が ${eff.val >= 0 ? '+' : ''}${eff.val}変化！`);
-        return {effect:`攻撃力 ${eff.val >= 0 ? '+' : ''}${eff.val}`, result:`${target.name} に ${duration}ターン適用`};
+        return {effect:`攻撃力 ${eff.val >= 0 ? '+' : ''}${eff.val}`, result:`${target.name} に ${durationText(duration)}適用`};
       }
 
       if (eff.type === "mod_speed") {
         addTimedStatus(target, { type: 'speed', val: eff.val, duration, source: eff.val >= 0 ? 'buff' : 'debuff' }, eff.val >= 0);
         logBattle(`💨 ${target.name} の行動値が ${eff.val >= 0 ? '+' : ''}${eff.val}変化！`);
-        return {effect:`行動値 ${eff.val >= 0 ? '+' : ''}${eff.val}（${eff.val >= 0 ? 'バフ' : 'デバフ'}）`, result:`${target.name} の現在行動値: ${getEffectiveSpeed(target)}（${duration}ターン）`};
+        return {effect:`行動値 ${eff.val >= 0 ? '+' : ''}${eff.val}（${eff.val >= 0 ? 'バフ' : 'デバフ'}）`, result:`${target.name} の現在行動値: ${getEffectiveSpeed(target)}（${durationText(duration)}）`};
       }
 
       if (eff.type === "mod_max_hp_val") {
@@ -4363,7 +4465,7 @@
           [...getActiveUnits(target.side === 'player' ? 'player' : 'enemy')].filter(u => u !== target).forEach(u => triggerPassiveEvent('ally_death', u));
         }
         logBattle(`❤️ ${target.name} の最大HPが ${Number(eff.val) >= 0 ? '+' : ''}${eff.val}変化！`);
-        return {effect:`最大HP ${Number(eff.val) >= 0 ? '+' : ''}${eff.val}（${Number(eff.val) >= 0 ? 'バフ' : 'デバフ'}）`, result:`${target.name} 最大HP ${beforeMax}→${target.maxHp} / HP ${target.currentHp}/${target.maxHp}`};
+        return {effect:`最大HP ${Number(eff.val) >= 0 ? '+' : ''}${eff.val}（${Number(eff.val) >= 0 ? 'バフ' : 'デバフ'}）`, result:`${target.name} 最大HP ${beforeMax}→${target.maxHp} / HP ${target.currentHp}/${target.maxHp}（${durationText(duration)}）`};
       }
 
       if (eff.type === "clear_buffs") {
@@ -4386,10 +4488,10 @@
       if (eff.type === "status_apply") {
         target.statuses = target.statuses || [];
         const status=eff.status||'poison';
-        if(target.statuses.some(x=>x.type===status&&x.duration>0)){ logBattle(`⚠️ ${target.name} は${statusName(status)}中のため重ねがけできません。`); return {effect:`${statusName(status)}を付与`,result:`${statusName(status)}は既に継続中`}; }
+        if(target.statuses.some(x=>x.type===status&&durationActive(x.duration))){ logBattle(`⚠️ ${target.name} は${statusName(status)}中のため重ねがけできません。`); return {effect:`${statusName(status)}を付与`,result:`${statusName(status)}は既に継続中`}; }
         target.statuses.push({type:status,duration:duration,appliedTurn:battleState.turn});
-        logBattle(`🌀 ${target.name} に${statusName(status)}を${duration}ターン付与！`);
-        return {effect:`${statusName(status)}を付与`,result:`${target.name} に${duration}ターン適用`};
+        logBattle(`🌀 ${target.name} に${statusName(status)}を${durationText(duration)}付与！`);
+        return {effect:`${statusName(status)}を付与`,result:`${target.name} に${durationText(duration)}適用`};
       }
       if (eff.type === "status_remove") { target.statuses=(target.statuses||[]).filter(x=>x.type!==(eff.status||'poison')); return {effect:`${statusName(eff.status||'poison')}を解除`,result:`${target.name} の状態異常解除`}; }
       if (eff.type === "clear_statuses") { target.statuses=[]; return {effect:'全ての状態異常を解除',result:`${target.name} の状態異常解除`}; }
@@ -4397,24 +4499,27 @@
       if (eff.type === "heal_block") {
         target.debuffs = target.debuffs || [];
         addTimedStatus(target, { type: 'heal_block', duration, source: 'debuff' }, false);
-        logBattle(`🚫 ${target.name} は ${duration}ターン回復禁止！`);
-        return {effect:`回復禁止 ${duration}ターン`, result:`${target.name} に適用`};
+        logBattle(`🚫 ${target.name} は ${durationText(duration)}回復禁止！`);
+        return {effect:`回復禁止 ${durationText(duration)}`, result:`${target.name} に適用`};
       }
 
       if (eff.type === "skill_block") {
         target.debuffs = target.debuffs || [];
         addTimedStatus(target, { type: 'skill_block', duration, source: 'debuff' }, false);
-        logBattle(`🚫 ${target.name} は ${duration}ターンスキル使用禁止！`);
-        return {effect:`スキル使用禁止 ${duration}ターン`, result:`${target.name} に適用`};
+        logBattle(`🚫 ${target.name} は ${durationText(duration)}スキル使用禁止！`);
+        return {effect:`スキル使用禁止 ${durationText(duration)}`, result:`${target.name} に適用`};
       }
     }
 
-    function dealDamage(unit, amount) {
-      let cut = 0;
-      (unit.buffs || []).forEach(b => {
-        if (b.type === 'dmg_cut') cut = Math.max(cut, b.val);
-      });
-      const finalDmg = Math.max(0, Math.round(amount * (1 - cut / 100)));
+    function dealDamage(unit, amount, bypassReceivedDamageModifiers=false) {
+      let finalAmount = Math.max(0, Number(amount)||0);
+      if (!bypassReceivedDamageModifiers) {
+        const receivedRatio = [...(unit.buffs||[]), ...(unit.debuffs||[])]
+          .filter(b => b.type === 'damage_taken_ratio' || b.type === 'dmg_cut')
+          .reduce((sum,b) => sum + (b.type === 'dmg_cut' ? -(Number(b.val)||0) : (Number(b.val)||0)),0);
+        finalAmount *= Math.max(0, 1 + receivedRatio / 100);
+      }
+      const finalDmg = Math.max(0, Math.round(finalAmount));
       unit.currentHp = Math.max(0, unit.currentHp - finalDmg);
     }
 
@@ -4444,12 +4549,12 @@
       }
       if (cond.type === "turn_lte") return battleState.turn <= Number(cond.val);
       if (cond.type === "turn_gte") return battleState.turn >= Number(cond.val);
-      if (cond.type === "self_status") return (actor.statuses||[]).some(x=>x.type===cond.status&&x.duration>0);
-      if (cond.type === "self_any_status") return (actor.statuses||[]).some(x=>x.duration>0);
-      if (cond.type === "ally_has_status") return allies.some(u=>u!==actor&&(u.statuses||[]).some(x=>x.type===cond.status&&x.duration>0));
-      if (cond.type === "ally_has_any_status") return allies.some(u=>u!==actor&&(u.statuses||[]).some(x=>x.duration>0));
-      if (cond.type === "enemy_has_status") return enemies.some(u=>(u.statuses||[]).some(x=>x.type===cond.status&&x.duration>0));
-      if (cond.type === "enemy_has_any_status") return enemies.some(u=>(u.statuses||[]).some(x=>x.duration>0));
+      if (cond.type === "self_status") return (actor.statuses||[]).some(x=>x.type===cond.status&&durationActive(x.duration));
+      if (cond.type === "self_any_status") return (actor.statuses||[]).some(x=>durationActive(x.duration));
+      if (cond.type === "ally_has_status") return allies.some(u=>u!==actor&&(u.statuses||[]).some(x=>x.type===cond.status&&durationActive(x.duration)));
+      if (cond.type === "ally_has_any_status") return allies.some(u=>u!==actor&&(u.statuses||[]).some(x=>durationActive(x.duration)));
+      if (cond.type === "enemy_has_status") return enemies.some(u=>(u.statuses||[]).some(x=>x.type===cond.status&&durationActive(x.duration)));
+      if (cond.type === "enemy_has_any_status") return enemies.some(u=>(u.statuses||[]).some(x=>durationActive(x.duration)));
       return true;
     }
 
@@ -4463,7 +4568,7 @@
         if (b.type === 'atk_ratio') atk += Math.round(unit.atk * (b.val / 100));
         if (b.type === 'atk_val') atk += b.val;
       });
-      if ((unit.statuses || []).some(s => s.type === 'weak' && Number(s.duration) > 0)) atk = Math.floor(atk / 2);
+      if ((unit.statuses || []).some(s => s.type === 'weak' && durationActive(s.duration))) atk = Math.floor(atk / 2);
       return Math.max(0, atk);
     }
 
@@ -4473,7 +4578,7 @@
       (unit.debuffs || []).forEach(b => { if (b.type === 'speed') spd += b.val; });
       // 状態異常の鈍足は buffs/debuffs ではなく statuses に格納される。
       // オンライン（サーバー側）と同じく、継続中の鈍足だけ行動値を半減する。
-      const slow = (unit.statuses || []).some(s => s.type === 'slow' && Number(s.duration) > 0);
+      const slow = (unit.statuses || []).some(s => s.type === 'slow' && durationActive(s.duration));
       return slow ? Math.floor(spd / 2) : spd;
     }
 
@@ -4511,7 +4616,7 @@
     async function processEndTurnAbnormalitiesOffline() {
       [...battleState.playerUnits,...battleState.enemyUnits].forEach(u=>{
         if(u.currentHp<=0||!u.isActive)return;
-        if((u.statuses||[]).some(x=>x.type==='poison'&&x.duration>0)){
+        if((u.statuses||[]).some(x=>x.type==='poison'&&durationActive(x.duration))){
           const before=u.currentHp; dealDamage(u,Math.round(u.maxHp*0.10)); const dmg=before-u.currentHp;
           logBattle(`☠️ ${u.name} は毒で ${dmg} ダメージ！`);
           showActionPopup(u,'毒',{cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)},{target:u.name,effect:'最大HPの10%ダメージ',result:`${dmg} ダメージ${u.currentHp<=0?'／撃破！':''}`,targetEntity:u,targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp},description:'毒：ターン終了間際に最大HPの10%のダメージ。'});
@@ -4529,8 +4634,8 @@
       if (timing !== 'turn_end') return;
       [...battleState.playerUnits, ...battleState.enemyUnits].forEach(u => {
         const tick = arr => (arr || [])
-          .map(b => ({ ...b, duration: Number(b.duration) - 1 }))
-          .filter(b => b.duration > 0);
+          .map(b => Number(b.duration) === -1 ? b : ({ ...b, duration: Number(b.duration) - 1 }))
+          .filter(b => durationActive(b.duration));
         u.buffs = tick(u.buffs);
         u.debuffs = tick(u.debuffs);
         u.statuses = tick(u.statuses);
@@ -5349,7 +5454,7 @@
     box.classList.remove('hidden');
 
     if(mainManual){
-      const pool=(getTargetPool(eff.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,eff.targetCond));
+      const pool=(getTargetPool(eff.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,eff.targetCond)&&!(actor&&t.side!==actor.side&&unitHasStatus(t,'stealth')));
       const title=document.createElement('div');title.className='text-[10px] font-black text-amber-300 mb-2';title.innerText='マジック：メイン効果の対象を選択';box.appendChild(title);
       const row=document.createElement('div');row.className='flex flex-wrap gap-2';box.appendChild(row);
       pool.forEach(t=>{const b=document.createElement('button');b.className='px-2 py-1 rounded border text-[10px] '+(battleState.reservedMagicTargetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950');b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{battleState.reservedMagicTargetInstanceId=t.instanceId;renderMagicHand();updateReservationSummary();};row.appendChild(b);});
@@ -5362,7 +5467,7 @@
       if(sub.targetType==='same_main_target'){
         const info=document.createElement('div');info.className='text-[10px] text-emerald-200';info.innerText='↳ メイン効果と同じ対象を使用します。';box.appendChild(info);
       }else{
-        const subPool=(getTargetPool(sub.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,sub.targetCond));
+        const subPool=(getTargetPool(sub.targetType,actor)||[]).filter(t=>matchesTargetCondition(t,sub.targetCond)&&!(actor&&t.side!==actor.side&&unitHasStatus(t,'stealth')));
         const row=document.createElement('div');row.className='flex flex-wrap gap-2';box.appendChild(row);
         subPool.forEach(t=>{const b=document.createElement('button');b.className='px-2 py-1 rounded border text-[10px] '+(battleState.reservedMagicSubTargetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-950');b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{battleState.reservedMagicSubTargetInstanceId=t.instanceId;renderMagicHand();updateReservationSummary();};row.appendChild(b);});
         if(!subPool.length){const e=document.createElement('div');e.className='text-[10px] text-rose-300';e.innerText='有効な追加効果対象がいません';box.appendChild(e);}
@@ -5373,14 +5478,14 @@
   function renderOnlineTargets(u,act){
     const targetBox=$('online-target-buttons');if(!targetBox)return;
     const sk=act.type==='skill'?u.skills?.[act.skillIndex]:null;let targets=[];
-    if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType)) targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0);
+    if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType)) targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0&&!(x.side!==u.side&&unitHasStatus(x,'stealth')));
     targetBox.innerHTML='';
     if(act.type==='attack'){targetBox.innerHTML='<span class="text-[10px] text-slate-500">通常攻撃の対象は実行時に現在フィールドからランダム決定</span>';return;}
     if(!targets.length)return;
     for(const t of targets){const b=document.createElement('button');b.className='px-2 py-1 rounded border '+(act.targetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-900')+' text-[10px]';b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{const u2=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u2)return;u2.reservedAction=u2.reservedAction||{type:'attack',targetInstanceId:null};u2.reservedAction.targetInstanceId=t.instanceId;renderCommandPanel();updateReservationSummary();};targetBox.appendChild(b);}
   }
 
-  window.setOnlineTarget=id=>{const u=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u)return;u.reservedAction=u.reservedAction||{type:'attack',targetInstanceId:null};u.reservedAction.targetInstanceId=id;renderCommandPanel();updateReservationSummary();};
+  window.setOnlineTarget=id=>{const u=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u)return;const t=(battleState.enemyUnits||[]).concat(battleState.playerUnits||[]).find(x=>x.instanceId===id);if(!t||(t.side!==u.side&&unitHasStatus(t,'stealth'))){showOnlineError('隠密中の敵は指定できません。');return;}u.reservedAction=u.reservedAction||{type:'attack',targetInstanceId:null};u.reservedAction.targetInstanceId=id;renderCommandPanel();updateReservationSummary();};
 
   function submitOnlineActions(){
     if(onlineSubmitted||!onlineMode||onlineSpectating||battleState?.phase!=='decision')return;
