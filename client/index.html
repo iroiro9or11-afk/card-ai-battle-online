@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.3 - ライバル表示・パッシブ・控え・対象表示修正</title>
+  <title>カードAI対戦ゲーム v3.28.4 - 控え表示・オンライン結果・再戦修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.3</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.4</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -642,11 +642,12 @@
 
       <!-- フィールド -->
       <div class="space-y-4">
-        <!-- 敵フィールド -->
+        <!-- 敵の控えは敵フィールドの上に、小さなサムネイルで表示 -->
         <div>
+          <div class="text-[10px] text-rose-300 font-bold mb-1">敵の控え（死亡時・ターン終了時に順番に登場）</div>
+          <div id="reserve-enemy" class="grid grid-cols-5 gap-1 mb-2 min-h-[4.25rem]"></div>
           <div class="text-xs font-bold text-rose-400 mb-1">🔴 敵フィールド</div>
           <div id="field-enemy" class="grid grid-cols-3 gap-2 sm:gap-4"></div>
-          <div class="mt-2"><div class="text-[10px] text-rose-300 font-bold mb-1">敵の控え（死亡時・ターン終了時に順番に登場）</div><div id="reserve-enemy" class="grid grid-cols-2 sm:grid-cols-5 gap-2"></div></div>
         </div>
 
         <!-- リアルタイムタイムライン -->
@@ -661,7 +662,7 @@
         <div>
           <div class="text-xs font-bold text-cyan-400 mb-1">🔵 味方フィールド（タップして個別に予約行動を変更）</div>
           <div id="field-player" class="grid grid-cols-3 gap-2 sm:gap-4"></div>
-          <div class="mt-2"><div class="text-[10px] text-amber-300 font-bold mb-1">控え（死亡時・ターン終了時に順番に登場）</div><div id="reserve-player" class="grid grid-cols-2 gap-2"></div></div>
+          <div class="mt-2"><div class="text-[10px] text-amber-300 font-bold mb-1">控え（死亡時・ターン終了時に順番に登場）</div><div id="reserve-player" class="grid grid-cols-5 gap-1 min-h-[4.25rem]"></div></div>
         </div>
       </div>
 
@@ -3958,13 +3959,25 @@
         // キュー不整合でも生存控えカードを隠さない。
         units.filter(x=>!x.isActive&&x.currentHp>0&&!reserve.some(r=>r.instanceId===x.instanceId)).forEach(x=>reserve.push(x));
         reserve.forEach((u,i)=>{
-          const div=document.createElement('div');
-          div.className=`bg-slate-950 border ${side==='player'?'border-amber-800':'border-rose-900'} rounded-lg p-2 min-w-0`;
-          div.innerHTML=`<div class="text-[10px] ${side==='player'?'text-amber-200':'text-rose-200'} font-bold mb-1">控え ${i+1}：${u.name}</div><div class="cursor-pointer" data-reserve-detail="${u.instanceId}">${getCardHTML({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u),rank:u.rank,img:getCardImage(u)})}</div><div class="text-[10px] text-slate-400 mt-1">HP ${u.currentHp}/${u.maxHp}</div>`;
-          div.querySelector('[data-reserve-detail]')?.addEventListener('click',()=>openBattleUnitDetail(u.instanceId));
+          const border=side==='player'?'border-amber-800':'border-rose-900';
+          const text=side==='player'?'text-amber-200':'text-rose-200';
+          const div=document.createElement('button');
+          div.type='button';
+          div.className=`mx-auto flex w-full max-w-[70px] min-w-0 flex-col items-center gap-0.5 rounded border ${border} bg-slate-950/90 px-1 py-1 hover:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-400`;
+          const label=document.createElement('span');label.className=`w-full truncate text-center text-[8px] font-bold ${text}`;label.textContent=`控え ${i+1}`;
+          const img=document.createElement('img');
+          img.className='h-[50px] w-[36px] sm:h-[58px] sm:w-[42px] rounded border border-slate-700 bg-slate-900 object-cover';
+          img.alt=u.name||'控えキャラ';
+          const fallback=createDummyCardImage(side==='player'?'⚔️':'👹',side==='player'?'#075985':'#9f1239');
+          img.onerror=()=>{img.onerror=null;img.src=fallback;};
+          img.src=getCardImage(u)||u.image||u.imageUrl||fallback;
+          const name=document.createElement('span');name.className='w-full truncate text-center text-[8px] font-black text-slate-100';name.textContent=u.name||'名称未設定';
+          const hp=document.createElement('span');hp.className='w-full truncate text-center text-[7px] text-slate-400';hp.textContent=`${u.currentHp}/${u.maxHp}`;
+          div.append(label,img,name,hp);
+          div.addEventListener('click',()=>openBattleUnitDetail(u.instanceId));
           box.appendChild(div);
         });
-        if(!reserve.length){const empty=document.createElement('div');empty.className='text-[10px] text-slate-600';empty.textContent='控えなし';box.appendChild(empty);}
+        if(!reserve.length){const empty=document.createElement('div');empty.className='col-span-full self-center text-[9px] text-slate-600';empty.textContent='控えなし';box.appendChild(empty);}
       };
       renderSide('enemy','reserve-enemy');
       renderSide('player','reserve-player');
@@ -5927,6 +5940,7 @@
   let onlineEventProcessing = false;
   let onlineDeferredState = null;
   let onlineDeferredEnd = null;
+  let onlineRematchRequested = false;
 
   var onlineMode = false;
   var onlinePending = {units:{},magicId:null};
@@ -6221,7 +6235,7 @@
   function resetOnlineRoomLocal(){
     onlineUiToken++;
     clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
-    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
     onlineMode=false;$('online-controls')?.classList.add('hidden');
@@ -6623,6 +6637,80 @@
       await showActionPopup(actor,ev.actionName,cardData,{target:targetDetails.length?targetDetails.map(d=>d.entity.name).filter(Boolean).join(' / '):(target?.name||'対象なし'),effect:ev.effect||'効果なし',result:ev.result||'変化なし',targetEntity:targetDetails[0]?.entity||target,targetDetails,description:ev.description||'',actorHpBefore:ev.actorHpBefore,actorHpAfter:ev.actorHpAfter,targetHpBefore:ev.targetHpBefore,targetHpAfter:ev.targetHpAfter});
     }catch(e){console.error('Online popup error:',e);await new Promise(r=>setTimeout(r,500));}
   }
+  function showOnlineBattleResult(winner, state=onlineLastState, reason=null){
+    const modal=$('battle-result-modal');
+    const title=$('battle-result-title');
+    const message=$('battle-result-message');
+    const reward=$('battle-result-reward');
+    const rematch=$('battle-result-rematch');
+    const back=$('battle-result-back');
+    if(!modal||!title||!message)return;
+    if(reward){reward.classList.add('hidden');reward.innerHTML='';}
+    onlineRematchRequested=false;
+    const st=state||{};
+    const spectator=onlineSpectating||st.yourSide==='spectator';
+    if(spectator){
+      const winnerName=winner==='draw'?'引き分け':winner==='player1'?(st.p1?.name||'プレイヤー1'):(st.p2?.name||'プレイヤー2');
+      title.innerText=winner==='draw'?'🤝 引き分け':`🏆 ${winnerName} の勝利`;
+      title.className=`text-4xl sm:text-6xl font-black leading-tight ${winner==='draw'?'text-amber-300':'text-emerald-300'}`;
+      message.innerText=`対戦が終了しました。${reason?`
+${reason}`:''}`;
+    }else{
+      const mySide=st.yourSide==='player2'?'player2':'player1';
+      const localWinner=winner==='draw'?'draw':(winner===mySide?'player':'enemy');
+      title.innerText=localWinner==='player'?'🎉 勝利！':localWinner==='enemy'?'💀 敗北…':'🤝 引き分け';
+      title.className=`text-4xl sm:text-6xl font-black leading-tight ${localWinner==='player'?'text-emerald-300':localWinner==='enemy'?'text-rose-300':'text-amber-300'}`;
+      message.innerText=`${localWinner==='player'?'おめでとうございます！勝利です。':localWinner==='enemy'?'今回は敗北しました。':'両者引き分けです。'}
+再戦するには、両方のプレイヤーが「再戦」を押してください。${reason?`
+${reason}`:''}`;
+    }
+    if(rematch){
+      rematch.classList.toggle('hidden',spectator);
+      rematch.disabled=false;
+      rematch.innerText='🔄 再戦';
+      rematch.onclick=()=>{
+        if(spectator||onlineRematchRequested||!onlineRoom)return;
+        onlineRematchRequested=true;
+        rematch.disabled=true;
+        rematch.innerText='再戦希望を送信中…';
+        sendOnline('rematch_request',{battleId:st.battleId||battleState?.battleId||null});
+      };
+    }
+    if(back){
+      back.innerText=spectator?'↩ 観戦を終了':'🚪 部屋を抜ける';
+      back.disabled=false;
+      back.onclick=()=>{
+        if(onlineRoom)sendOnline('room_leave');
+        hideBattleResultModal();
+        resetOnlineRoomLocal();
+        switchView('online');
+        setOnlineStatus(spectator?'観戦を終了しています…':'部屋から退出しています…');
+        sendOnline('room_list');
+      };
+    }
+    modal.classList.remove('hidden');
+  }
+
+  function applyOnlineRematchUpdate(m){
+    onlineRematchRequested=!!m.ready;
+    const modal=$('battle-result-modal');
+    const message=$('battle-result-message');
+    const rematch=$('battle-result-rematch');
+    if(rematch&&!onlineSpectating){
+      rematch.disabled=onlineRematchRequested;
+      rematch.innerText=onlineRematchRequested?'再戦希望送信済み':'🔄 再戦';
+      rematch.classList.toggle('opacity-50',onlineRematchRequested);
+    }
+    if(message&&modal&&!modal.classList.contains('hidden')){
+      if(onlineSpectating)return;
+      message.innerText=onlineRematchRequested
+        ? `再戦を希望しました。相手の選択を待っています（${m.votes||1}/2）。` 
+        : (Number(m.votes||0)>0
+          ? `相手は再戦を希望しています。再戦する場合は「再戦」を押してください（${m.votes}/2）。`
+          : '再戦を開始できるか確認しています。');
+    }
+  }
+
   async function processOnlineEventQueue(){
     if(onlineEventProcessing)return;
     onlineEventProcessing=true;
@@ -6634,8 +6722,7 @@
         const end=onlineDeferredEnd;onlineDeferredEnd=null;onlineDeferredState=null;
         safeApplyOnlineState(end.state);
         $('online-controls')?.classList.add('hidden');
-        const st=end.state;
-        alert((end.winner==='player1'&&st.yourSide==='player1')||(end.winner==='player2'&&st.yourSide==='player2')?'勝利！':end.winner==='draw'?'引き分け':'敗北…');
+        showOnlineBattleResult(end.winner,end.state,end.reason||null);
       }else if(onlineDeferredState){
         const st=onlineDeferredState;onlineDeferredState=null;
         safeApplyOnlineState(st);
@@ -6747,7 +6834,7 @@
       return;
     }
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
-    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineLastDecisionToken=null;onlinePrepareAckToken=null;safeApplyOnlineState(m.state);return;}
+    if(m.type==='battle_start'){onlineRematchRequested=false;hideBattleResultModal();resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineLastDecisionToken=null;onlinePrepareAckToken=null;safeApplyOnlineState(m.state);return;}
     if(m.type==='turn_preparing'){
       if(m.state){if(onlineEventQueue.length||onlineEventProcessing)onlineDeferredState=m.state;else safeApplyOnlineState(m.state);}
       return;
@@ -6770,6 +6857,9 @@
       if(m.state) onlineDeferredState=m.state;
       processOnlineEventQueue();return;
     }
+    if(m.type==='battle_state' && m.state?.phase==='finished' && onlineRoom){
+      safeApplyOnlineState(m.state);showOnlineBattleResult(m.state.winner,m.state);return;
+    }
     if(m.type==='turn_start'||m.type==='battle_state'||m.type==='turn_execution_start'){
       const st=m.state;if(!st)return;
       if(m.type==='turn_start'){
@@ -6788,10 +6878,12 @@
     if(m.type==='battle_error'){onlineSubmitted=false;showOnlineError(m.message||'戦闘処理エラー');if(battleState?.phase==='decision'){$('decision-command-panel')?.classList.remove('hidden');renderOnlineControls();}return;}
     if(m.type==='player_disconnected'){showOnlinePausedTimer();setOnlineStatus('対戦プレイヤーの接続が切断されました。再接続を待っています。');return;}
     if(m.type==='battle_end'){
-      if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredEnd={winner:m.winner,state:m.state};return;}
-      safeApplyOnlineState(m.state);$('online-controls')?.classList.add('hidden');const st=m.state;alert((m.winner==='player1'&&st.yourSide==='player1')||(m.winner==='player2'&&st.yourSide==='player2')?'勝利！':m.winner==='draw'?'引き分け':'敗北…');return;
+      if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredEnd={winner:m.winner,state:m.state,reason:m.reason||null};return;}
+      safeApplyOnlineState(m.state);$('online-controls')?.classList.add('hidden');showOnlineBattleResult(m.winner,m.state,m.reason||null);return;
     }
-    if(m.type==='room_closed'){showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();return;}
+    if(m.type==='rematch_update'){applyOnlineRematchUpdate(m);return;}
+    if(m.type==='rematch_starting'){onlineRematchRequested=false;hideBattleResultModal();setOnlineStatus('両者が再戦を希望しました。新しい対戦を準備しています…');return;}
+    if(m.type==='room_closed'){hideBattleResultModal();showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();switchView('online');sendOnline('room_list');return;}
     if(m.type==='left_room'){resetOnlineRoomLocal();setOnlineStatus('部屋から退出しました。');return;}
     if(m.type==='error'){
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
@@ -6802,6 +6894,10 @@
         // The rejection can mean our phase snapshot became stale. Ask the server for its current phase,
         // rather than leaving the client stuck in the submitted/disabled state.
         if(onlineRoom)sendOnline('battle_state');
+      }
+      if(m.code==='REMATCH_UNAVAILABLE'){
+        onlineRematchRequested=false;
+        const rematch=$('battle-result-rematch');if(rematch){rematch.disabled=false;rematch.innerText='🔄 再戦';rematch.classList.remove('opacity-50');}
       }
       if(['INVALID_DECK','NO_DECK','NO_SOURCE','PROFILE_NOT_READY','OUTSIDE_DECK','NOT_IN_ROOM'].includes(m.code)){
         clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;onlineDeckRequestId=null;
