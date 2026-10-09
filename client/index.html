@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.6 - ストーリー表示修正</title>
+  <title>カードAI対戦ゲーム v3.27.7 - ストーリー抽選・表示同期修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.6</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.7</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -2661,123 +2661,165 @@
     function storyPreviewHasValidCards(p) {
       return !!p && Array.isArray(p.unitIds) && p.unitIds.length >= 3 &&
         p.unitIds.every(id => storyCardById(id)?.cardType === 'unit') &&
-        Array.isArray(p.magicIds) && p.magicIds.every(id => storyCardById(id)?.cardType === 'magic');
+        new Set(p.unitIds.map(String)).size === p.unitIds.length &&
+        Array.isArray(p.magicIds) && p.magicIds.every(id => storyCardById(id)?.cardType === 'magic') &&
+        new Set(p.magicIds.map(String)).size === p.magicIds.length;
+    }
+    function storyDraftPreviewMatchesEntry(entry, p) {
+      if (!storyPreviewHasValidCards(p) || !entry) return false;
+      if (entry.type === 'rival') return p.type === 'rival' && !!p.rivalId && String(p.rivalId) === String(entry.rivalId);
+      return entry.type === 'instant' && p.type === 'instant' && !p.rivalId && !p.deckId;
     }
     function storyMaterializeDraftOpponent(entry, index, forceNew = false) {
       const e = entry && typeof entry === 'object' ? entry : {type:'instant'};
-      if (!forceNew && storyPreviewHasValidCards(e.preview)) {
+      const type = e.type === 'rival' ? 'rival' : 'instant';
+      if (!forceNew && storyDraftPreviewMatchesEntry({...e,type}, e.preview)) {
         const p = storyCloneParticipant(e.preview);
-        // 表示名・アイコン・難易度はライバル管理側の最新値に合わせる。
-        if (e.type === 'rival') {
+        if (type === 'rival') {
           const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(e.rivalId));
+          // カードデッキは表示済みのスナップショットを維持し、プロフィール情報のみ更新する。
           if (rival) {
             p.name = rival.name || p.name || `ライバル${index+1}`;
             p.iconImage = rival.iconImage || null;
-            p.intelligence = rival.intelligence || p.intelligence || 'normal';
-            p.rivalId = rival.id;
-            p.type = 'rival';
+            p.intelligence = storyValidAiLevel(rival.intelligence) ? rival.intelligence : (p.intelligence || 'normal');
+            p.rivalId = rival.id; p.type = 'rival';
           }
         } else {
+          p.type = 'instant';
+          delete p.rivalId; delete p.deckId;
           p.name = `即席ライバル ${String(index+1).padStart(2,'0')}`;
+          p.iconImage = null;
           p.intelligence = storyValidAiLevel(e.intelligence) ? e.intelligence : storyGeneratedAi(index);
+          if (!String(p.id || '').startsWith('story_instant_')) p.id = `story_instant_snapshot_${index+1}_${Math.random().toString(36).slice(2,7)}`;
         }
         return p;
       }
-      if (e.type === 'rival') {
+      if (type === 'rival') {
         const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(e.rivalId));
         if (rival) {
           const fixed = storyBuildFixedParticipant(rival, index+1);
           if (storyPreviewHasValidCards(fixed)) return fixed;
-          // ライバルのデッキ参照が壊れていても、予定相手表示を止めず使用可能な即席デッキに退避。
-          const fallback = storyMakeInstantRival(index+1, rival.intelligence || e.intelligence || 'normal');
-          fallback.name = rival.name || fallback.name;
-          fallback.iconImage = rival.iconImage || null;
-          fallback.intelligence = rival.intelligence || e.intelligence || 'normal';
-          fallback.type = 'rival';
-          fallback.rivalId = rival.id;
-          return fallback;
         }
       }
       const intelligence = storyValidAiLevel(e.intelligence) ? e.intelligence : storyGeneratedAi(index);
+      // 同じ種別の古いプレビューならカード配列を保ち、誤ったライバル参照だけを除去する。
+      if (!forceNew && storyPreviewHasValidCards(e.preview) && type === 'instant') {
+        const p = storyCloneParticipant(e.preview);
+        p.type='instant'; delete p.rivalId; delete p.deckId;
+        p.id=`story_instant_snapshot_${index+1}_${Math.random().toString(36).slice(2,7)}`;
+        p.name=`即席ライバル ${String(index+1).padStart(2,'0')}`; p.iconImage=null; p.intelligence=intelligence;
+        return p;
+      }
+      if (type === 'rival') {
+        const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(e.rivalId));
+        if (rival) {
+          const instant = storyMakeInstantRival(index+1, intelligence);
+          return {...instant, id:`story_rival_fallback_${rival.id}`, type:'rival', rivalId:rival.id,
+            name:rival.name||`ライバル${index+1}`, iconImage:rival.iconImage||null, intelligence,
+            unitIds:instant.unitIds, magicIds:instant.magicIds};
+        }
+      }
       const instant = storyMakeInstantRival(index+1, intelligence);
       instant.name = `即席ライバル ${String(index+1).padStart(2,'0')}`;
-      instant.intelligence = intelligence;
-      instant.type = 'instant';
+      instant.intelligence = intelligence; instant.type = 'instant';
+      delete instant.rivalId; delete instant.deckId;
       return instant;
     }
     function storyCreateOpponentDraft() {
       const rivals = storyShuffle((Array.isArray(allRivals) ? allRivals : []).filter(r => r && r.id)).slice(0,5);
-      const entries = rivals.map(r => ({type:'rival', rivalId:r.id, intelligence:r.intelligence || 'normal'}));
-      while (entries.length < 5) entries.push({type:'instant', intelligence:storyGeneratedAi(entries.length)});
+      const entries = rivals.map(r => ({type:'rival', rivalId:r.id, intelligence:storyValidAiLevel(r.intelligence)?r.intelligence:'normal', selectionSource:'auto'}));
+      while (entries.length < 5) entries.push({type:'instant', intelligence:storyGeneratedAi(entries.length), selectionSource:'auto'});
       const ranked = entries.map((e,i) => ({e,i,rank:storyDraftEntryRank(e,i)}))
         .sort((a,b) => a.rank-b.rank || a.i-b.i).map(x => x.e);
-      return ranked.map((entry,index) => ({
-        ...entry,
-        intelligence: entry.type === 'instant' ? (storyValidAiLevel(entry.intelligence) ? entry.intelligence : storyGeneratedAi(index)) : entry.intelligence,
-        preview: storyMaterializeDraftOpponent(entry,index,true)
-      }));
+      return ranked.map((entry,index) => {
+        const normalized = {...entry, selectionSource:entry.selectionSource||'auto'};
+        if (normalized.type === 'rival') {
+          normalized.preview = storyMaterializeDraftOpponent(normalized,index,true);
+        } else {
+          normalized.intelligence = storyValidAiLevel(normalized.intelligence) ? normalized.intelligence : storyGeneratedAi(index);
+          normalized.preview = storyMaterializeDraftOpponent(normalized,index,true);
+        }
+        return normalized;
+      });
     }
     function storyCreateEmptyDraft() {
-      return {version:7,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};
+      return {version:8,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};
     }
     function storyEnsureDraft() {
       const raw = storyModeDraft && typeof storyModeDraft === 'object' ? storyModeDraft : {};
       const source = Array.isArray(raw.opponents) ? raw.opponents.slice(0,5) : [];
-      let changed = Number(raw.version) !== 7 || source.length !== 5;
-      // 旧ドラフトは配列の長さだけ正常でも、null／消えたライバルID／カード参照切れを含むことがあった。
-      // 5件それぞれを検査して補修し、1件の不正値で一覧全体の描画が停止しないようにする。
+      const oldVersion = Number(raw.version) || 0;
+      const rivals = (Array.isArray(allRivals)?allRivals:[]).filter(r=>r&&r.id);
+      const unmarkedLegacyAuto = source.length===5 && source.every(e=>e && !e.selectionSource) && source.every(e=>e.type==='instant');
+      const staleAutoOnly = source.length===5 && source.every(e=>e && (!e.selectionSource || e.selectionSource==='auto')) &&
+        rivals.length>0 && source.every(e=>e.type==='instant');
+      // V3.27.6以前にライバル読込前に作られた「即席ライバル5人」のドラフトは、
+      // 新しいライバル一覧があるのに永遠に残る。ユーザーが明示選択したinstantはsource markerで守る。
+      const replaceStaleAutoSchedule = rivals.length>0 && staleAutoOnly && (oldVersion < 8 || unmarkedLegacyAuto);
+      const rebuildDefaultBecauseNewRivals = rivals.length>0 && source.length===5 && source.every(e=>e && e.selectionSource==='auto') &&
+        source.filter(e=>e.type==='rival' && rivals.some(r=>String(r.id)===String(e.rivalId))).length < Math.min(5,rivals.length);
+      let changed = oldVersion !== 8 || source.length !== 5;
       let regenerated = null;
       const regeneratedAt = index => { if(!regenerated) regenerated=storyCreateOpponentDraft(); return regenerated[index]; };
+      let baseSource = source;
+      if (replaceStaleAutoSchedule || rebuildDefaultBecauseNewRivals || source.length!==5) {
+        baseSource = storyCreateOpponentDraft();
+        changed = true;
+      }
       const usedRivalIds = new Set();
       const opponents = [];
       for (let i=0; i<5; i++) {
-        let entry = source[i] && typeof source[i] === 'object' ? source[i] : null;
+        let entry = baseSource[i] && typeof baseSource[i] === 'object' ? baseSource[i] : null;
         let normalized = null;
+        const sourceMarker = ['auto','manual-rival','manual-instant','legacy'].includes(entry?.selectionSource) ? entry.selectionSource : (oldVersion<8?'legacy':'auto');
         if (entry?.type === 'rival') {
-          const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(entry.rivalId));
-          const rivalKey = rival ? String(rival.id) : '';
-          if (rival && !usedRivalIds.has(rivalKey)) {
-            usedRivalIds.add(rivalKey);
-            const samePreview = storyPreviewHasValidCards(entry.preview);
-            normalized = {
-              type:'rival', rivalId:rival.id, intelligence:rival.intelligence || entry.intelligence || 'normal',
-              preview: storyMaterializeDraftOpponent({...entry, type:'rival', rivalId:rival.id}, i, !samePreview)
-            };
+          const rival = rivals.find(r => String(r.id) === String(entry.rivalId));
+          if (rival && !usedRivalIds.has(String(rival.id))) {
+            usedRivalIds.add(String(rival.id));
+            const candidate = {...entry,type:'rival',rivalId:rival.id};
+            const refresh = oldVersion < 8 || !storyDraftPreviewMatchesEntry(candidate,entry.preview);
+            normalized = {type:'rival',rivalId:rival.id,
+              intelligence:storyValidAiLevel(rival.intelligence)?rival.intelligence:(storyValidAiLevel(entry.intelligence)?entry.intelligence:'normal'),
+              selectionSource:sourceMarker,
+              preview:storyMaterializeDraftOpponent(candidate,i,refresh)};
           }
         } else if (entry?.type === 'instant') {
           const intelligence = storyValidAiLevel(entry.intelligence) ? entry.intelligence : storyGeneratedAi(i);
-          normalized = {type:'instant', intelligence,
-            preview: storyMaterializeDraftOpponent({...entry, type:'instant', intelligence}, i, !storyPreviewHasValidCards(entry.preview))};
+          const candidate = {...entry,type:'instant',intelligence};
+          const refresh = oldVersion < 8 || !storyDraftPreviewMatchesEntry(candidate,entry.preview);
+          normalized = {type:'instant',intelligence,selectionSource:sourceMarker,
+            preview:storyMaterializeDraftOpponent(candidate,i,refresh)};
         }
         if (!normalized) {
-          const fallback = regeneratedAt(i) || {type:'instant',intelligence:storyGeneratedAi(i)};
+          const fallback = regeneratedAt(i) || {type:'instant',intelligence:storyGeneratedAi(i),selectionSource:'auto'};
           normalized = {...fallback};
           if (normalized.type === 'rival' && usedRivalIds.has(String(normalized.rivalId))) {
-            normalized = {type:'instant',intelligence:storyGeneratedAi(i),preview:storyMaterializeDraftOpponent({type:'instant',intelligence:storyGeneratedAi(i)},i,true)};
+            normalized = {type:'instant',intelligence:storyGeneratedAi(i),selectionSource:'auto',
+              preview:storyMaterializeDraftOpponent({type:'instant',intelligence:storyGeneratedAi(i)},i,true)};
           }
           if (normalized.type === 'rival') usedRivalIds.add(String(normalized.rivalId));
           changed = true;
         }
-        if (!storyPreviewHasValidCards(normalized.preview)) {
+        if (!storyDraftPreviewMatchesEntry(normalized,normalized.preview)) {
           normalized.preview = storyMaterializeDraftOpponent(normalized,i,true);
           changed = true;
         }
-        if (!entry || entry.type !== normalized.type || String(entry.rivalId||'') !== String(normalized.rivalId||'') ||
-            entry.intelligence !== normalized.intelligence || JSON.stringify(entry.preview||null) !== JSON.stringify(normalized.preview||null)) changed = true;
+        const original = source[i];
+        if (!original || original.type!==normalized.type || String(original.rivalId||'')!==String(normalized.rivalId||'') ||
+            original.intelligence!==normalized.intelligence || original.selectionSource!==normalized.selectionSource ||
+            JSON.stringify(original.preview||null)!==JSON.stringify(normalized.preview||null)) changed=true;
         opponents.push(normalized);
       }
       const playerDeck = raw.playerDeck && typeof raw.playerDeck === 'object' ? raw.playerDeck : {unitIds:[],magicIds:[]};
       const deployment = raw.playerDeployment && typeof raw.playerDeployment === 'object' ? raw.playerDeployment : {active:[],reserve:[]};
-      const next = {
-        ...raw, version:7, opponents,
+      const next = {...raw,version:8,opponents,
         initialUnitIds:Array.isArray(raw.initialUnitIds)?raw.initialUnitIds:[],
         initialMagicIds:Array.isArray(raw.initialMagicIds)?raw.initialMagicIds:[],
         playerDeck:{unitIds:Array.isArray(playerDeck.unitIds)?playerDeck.unitIds:[],magicIds:Array.isArray(playerDeck.magicIds)?playerDeck.magicIds:[]},
-        playerDeployment:{active:Array.isArray(deployment.active)?deployment.active:[],reserve:Array.isArray(deployment.reserve)?deployment.reserve:[]}
-      };
-      if (JSON.stringify(raw.playerDeck||{}) !== JSON.stringify(next.playerDeck) || JSON.stringify(raw.playerDeployment||{}) !== JSON.stringify(next.playerDeployment)) changed = true;
-      storyModeDraft = next;
-      if (changed) saveStoryModeDraft().catch(err => console.error('[CardAI] story draft save failed',err));
+        playerDeployment:{active:Array.isArray(deployment.active)?deployment.active:[],reserve:Array.isArray(deployment.reserve)?deployment.reserve:[]}};
+      if (JSON.stringify(raw.playerDeck||{}) !== JSON.stringify(next.playerDeck) || JSON.stringify(raw.playerDeployment||{}) !== JSON.stringify(next.playerDeployment)) changed=true;
+      storyModeDraft=next;
+      if(changed) saveStoryModeDraft().catch(err=>console.error('[CardAI] story draft save failed',err));
       return storyModeDraft;
     }
     function storyPrepareDraftCards(){
@@ -2801,11 +2843,15 @@
       if (!box) return;
       box.innerHTML = '';
       const draft = storyEnsureDraft();
+      let repaired = false;
       for (let i=0; i<5; i++) {
         try {
-          const entry = draft.opponents[i] || {type:'instant',intelligence:storyGeneratedAi(i)};
-          const preview = storyMaterializeDraftOpponent(entry,i,false);
-          entry.preview = preview;
+          const entry = draft.opponents[i] || {type:'instant',intelligence:storyGeneratedAi(i),selectionSource:'auto'};
+          let preview = entry.preview;
+          if (!storyDraftPreviewMatchesEntry(entry,preview)) {
+            preview = storyMaterializeDraftOpponent(entry,i,true);
+            entry.preview = preview; repaired = true;
+          }
           const selectedRival = entry.type === 'rival'
             ? (Array.isArray(allRivals) ? allRivals.find(r => r && String(r.id) === String(entry.rivalId)) : null)
             : null;
@@ -2826,14 +2872,14 @@
             <select aria-label="第${i+1}戦の相手" class="w-full mt-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[9px] font-bold" onchange="storySetDraftOpponent(${i},this.value)">${opts}</select>`;
           box.appendChild(card);
         } catch (error) {
-          // 1戦分の旧データが壊れていても、残り4戦を巻き添えにしない。
           console.error(`[CardAI] 第${i+1}戦の予定表示を復旧します`, error);
           const fallback = document.createElement('div');
           fallback.className = 'rounded-xl border border-amber-800 bg-slate-950 p-3';
-          fallback.innerHTML = `<div class="text-[10px] font-black text-amber-300">第${i+1}戦</div><div class="text-sm font-bold text-white mt-2">即席ライバル ${String(i+1).padStart(2,'0')}</div><div class="text-[10px] text-amber-200 mt-1">対戦予定データを自動修復しました</div>`;
+          fallback.innerHTML = `<div class="text-[10px] font-black text-amber-300">第${i+1}戦</div><div class="text-sm font-bold text-white mt-2">対戦予定を修復中</div><div class="text-[10px] text-amber-200 mt-1">この戦だけのデータを再生成します</div>`;
           box.appendChild(fallback);
         }
       }
+      if (repaired) saveStoryModeDraft().catch(err=>console.error('[CardAI] story draft save failed',err));
       if (box.children.length !== 5) console.error('[CardAI] 5戦予定の描画件数が一致しません',box.children.length);
     }
     function storySetDraftOpponent(index,value) {
@@ -2841,39 +2887,31 @@
       const idx = Math.max(0,Math.min(4,Number(index)||0));
       let next;
       if (value === 'instant') {
-        next = {type:'instant', intelligence:storyGeneratedAi(idx)};
+        next = {type:'instant',intelligence:storyGeneratedAi(idx),selectionSource:'manual-instant'};
+        next.preview = storyMaterializeDraftOpponent(next,idx,true);
       } else {
         const rivalId = String(value||'').replace(/^rival:/,'');
         const rival = (Array.isArray(allRivals)?allRivals:[]).find(r=>r && String(r.id)===rivalId);
-        if (!rival) { storyEnsureDraft(); storyRenderStartOpponents(); return; }
-        next = {type:'rival',rivalId:rival.id,intelligence:rival.intelligence||'normal'};
+        if (!rival) { storyRenderStartOpponents(); return; }
+        next = {type:'rival',rivalId:rival.id,intelligence:storyValidAiLevel(rival.intelligence)?rival.intelligence:'normal',selectionSource:'manual-rival'};
+        next.preview = storyMaterializeDraftOpponent(next,idx,true);
       }
       if (next.type === 'rival') {
         const duplicate = draft.opponents.findIndex((e,i)=>i!==idx&&e?.type==='rival'&&String(e.rivalId)===String(next.rivalId));
         if (duplicate >= 0) {
-          const old = draft.opponents[idx];
-          draft.opponents[idx] = draft.opponents[duplicate];
-          draft.opponents[duplicate] = old;
-        } else {
-          draft.opponents[idx] = {...next,preview:storyMaterializeDraftOpponent(next,idx,true)};
-        }
-      } else {
-        draft.opponents[idx] = {...next,preview:storyMaterializeDraftOpponent(next,idx,true)};
-      }
-      // 既存仕様どおりAI難易度の低い順に整列する。プレビューもエントリと一緒に移動する。
+          const old = draft.opponents[idx]; draft.opponents[idx] = draft.opponents[duplicate]; draft.opponents[duplicate] = old;
+        } else draft.opponents[idx] = next;
+      } else draft.opponents[idx] = next;
       draft.opponents = draft.opponents.map((entry,i)=>({entry,i,rank:storyDraftEntryRank(entry,i)}))
         .sort((a,b)=>a.rank-b.rank||a.i-b.i).map(x=>x.entry);
-      // 即席ライバルの難易度は並び順に合わせる。変更があった相手だけデッキを再抽選する。
+      // 並び替え後は名前・AIだけを追従させ、対戦相手デッキを描画ごとに再抽選しない。
       draft.opponents = draft.opponents.map((entry,i)=>{
-        if (entry.type !== 'instant') return entry;
-        const intelligence = storyGeneratedAi(i);
-        if (entry.intelligence !== intelligence || !storyPreviewHasValidCards(entry.preview)) {
-          const value = {type:'instant',intelligence};
-          return {...value,preview:storyMaterializeDraftOpponent(value,i,true)};
-        }
-        return entry;
+        if(entry.type==='rival') return {...entry,preview:storyMaterializeDraftOpponent(entry,i,false)};
+        const intelligence=storyGeneratedAi(i);
+        const preview=storyMaterializeDraftOpponent({...entry,intelligence},i,false);
+        return {...entry,intelligence,preview:{...preview,intelligence}};
       });
-      draft.opponents = draft.opponents.map((entry,i)=>({...entry, preview:storyMaterializeDraftOpponent(entry,i,false)}));
+      draft.version=8;
       saveStoryModeDraft().catch(err=>console.error('[CardAI] story draft save failed',err));
       renderStoryMode();
     }
@@ -2889,12 +2927,27 @@
 
     function storyBuildFiveOpponents(){
       const draft=storyEnsureDraft();
-      return draft.opponents.slice(0,5).map((entry,i)=>{
-        const p=storyMaterializeDraftOpponent(entry,i,false);
-        // 事前プレビューと開始後の対戦相手が別抽選にならないよう、同じ相手データを使う。
-        entry.preview=storyCloneParticipant(p);
-        return storyCloneParticipant(p);
-      });
+      const opponents=[];
+      for(let i=0;i<5;i++){
+        const entry=draft.opponents[i];
+        let p=entry?.preview;
+        if(!storyDraftPreviewMatchesEntry(entry,p)){
+          p=storyMaterializeDraftOpponent(entry||{type:'instant',intelligence:storyGeneratedAi(i)},i,true);
+          if(entry)entry.preview=storyCloneParticipant(p);
+        }
+        // UIプレビューと状態・戦闘に渡すデッキを完全に同一スナップショットにする。
+        const snapshot=storyCloneParticipant(p);
+        snapshot.type=entry.type;
+        snapshot.storySelectionType=entry.type;
+        if(entry.type==='instant'){delete snapshot.rivalId;delete snapshot.deckId;snapshot.name=`即席ライバル ${String(i+1).padStart(2,'0')}`;}
+        else {snapshot.rivalId=entry.rivalId;}
+        snapshot.intelligence=entry.intelligence||snapshot.intelligence||'normal';
+        entry.preview=storyCloneParticipant(snapshot);
+        opponents.push(snapshot);
+      }
+      draft.version=8;
+      saveStoryModeDraft().catch(err=>console.error('[CardAI] story draft save failed',err));
+      return opponents;
     }
     function storyRenderOpponentSequence(){
       const box=document.getElementById('story-opponent-sequence');if(!box)return;
@@ -2924,7 +2977,7 @@
     }
     function storyRenderConfirmed(){const a=document.getElementById('story-confirmed-active'),r=document.getElementById('story-confirmed-reserve');if(!a||!r)return;storyNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeState.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeState.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
 
-    function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
+    function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const availableUnits=storyUnitIds(),availableMagics=storyMagicIds();if(!availableUnits.length)ul.innerHTML='<div class="col-span-full text-xs text-amber-300">キャラクター候補が読み込めていません。再表示してください。</div>';if(!availableMagics.length)ml.innerHTML='<div class="col-span-full text-xs text-amber-300">マジック候補が読み込めていません。再表示してください。</div>';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));availableUnits.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});availableMagics.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
 
     function storyResolveCardId(id, type) {
       const key = String(id ?? '');
@@ -2946,6 +2999,16 @@
         Array.isArray(p.magicIds) && storyCardIdArrayIsValid(p.magicIds, 'magic', 0);
     }
     function storyLoadedStateReferencesAreValid(state) {
+      const participantMatchesIdentity = p => {
+        if (!storyParticipantCardRefsAreValid(p)) return false;
+        if (p.storySelectionType === 'instant') return p.type === 'instant' && !p.rivalId && !p.deckId;
+        if (p.storySelectionType === 'rival') return p.type === 'rival' && !!p.rivalId;
+        // V3.27.6以前は表示種別と内部種別が食い違うデータが保存されていた。
+        if (/^即席ライバル\s*\d{2}$/.test(String(p.name||''))) return p.type === 'instant' && !p.rivalId && !p.deckId;
+        if (p.type === 'rival') return !!p.rivalId;
+        if (p.type === 'instant') return !p.rivalId && !p.deckId;
+        return true;
+      };
       if (!state || !storyCardIdArrayIsValid(state.availableUnitIds, 'unit', 3) ||
           !storyCardIdArrayIsValid(state.availableMagicIds, 'magic', 0)) return false;
       if (!storyCardIdArrayIsValid(state.initialUnitIds, 'unit', 3) ||
@@ -2953,18 +3016,41 @@
       if (!state.playerDeck || !storyCardIdArrayIsValid(state.playerDeck.unitIds, 'unit', 3) ||
           !storyCardIdArrayIsValid(state.playerDeck.magicIds, 'magic', 0)) return false;
       if (!Array.isArray(state.opponents) || state.opponents.length !== 5 ||
-          !state.opponents.every(storyParticipantCardRefsAreValid)) return false;
+          !state.opponents.every(participantMatchesIdentity)) return false;
       if (Array.isArray(state.participants) && !state.participants.every(storyParticipantCardRefsAreValid)) return false;
-      if (state.currentOpponent && !storyParticipantCardRefsAreValid(state.currentOpponent)) return false;
-      // 完了時に次の相手がいないのは正常。進行中／敗退時は現在の相手を保持する。
+      if (state.currentOpponent && !participantMatchesIdentity(state.currentOpponent)) return false;
       if (state.active && !state.completed && !state.defeated && !state.currentOpponent) return false;
       if (state.completed && state.currentOpponent) return false;
       return true;
     }
 
     function storyRepairParticipantCardRefs(participant, index) {
-      const original = participant && typeof participant === 'object' ? participant : {};
-      const rival = original.type === 'rival' ? allRivals.find(r => String(r.id) === String(original.rivalId)) : null;
+      const original = participant && typeof participant === 'object' ? storyCloneParticipant(participant) : {};
+      const idsAreValid = storyParticipantCardRefsAreValid(original);
+      const looksInstant = original.storySelectionType === 'instant' || (original.storySelectionType !== 'rival' && (original.type === 'instant' || /^即席ライバル\s*\d{2}$/.test(String(original.name||'')) || String(original.id||'').startsWith('story_instant_')));
+      if (original.storySelectionType === 'rival' && original.type !== 'rival') {
+        original.type='rival';
+        if (!original.rivalId) {
+          const inferred=(Array.isArray(allRivals)?allRivals:[]).find(r=>String(original.id||'')===`story_rival_${r.id}`);
+          if (inferred) original.rivalId=inferred.id;
+        }
+        if (idsAreValid && original.rivalId) return original;
+      }
+      if (looksInstant) {
+        // 旧materializerが即席表示にrivalId/typeだけを残したデータを正規化する。
+        original.type='instant'; original.storySelectionType='instant'; delete original.rivalId; delete original.deckId;
+        original.name = original.name || `即席ライバル ${String(index+1).padStart(2,'0')}`;
+        if (idsAreValid) return original;
+      } else if (idsAreValid) {
+        // 有効なデッキは作成済みライバル側の最新デッキで上書きせず、予定時点のスナップショットを維持する。
+        if (original.type === 'rival') original.storySelectionType='rival';
+        if (original.type === 'rival' && !original.rivalId) {
+          const inferred = (Array.isArray(allRivals)?allRivals:[]).find(r=>String(original.id||'')===`story_rival_${r.id}`);
+          if (inferred) original.rivalId=inferred.id;
+        }
+        return original;
+      }
+      const rival = !looksInstant && original.type === 'rival' ? (Array.isArray(allRivals)?allRivals:[]).find(r => String(r.id) === String(original.rivalId)) : null;
       if (rival) {
         const fixed = storyBuildFixedParticipant(rival, index + 1);
         if (fixed && storyParticipantCardRefsAreValid(fixed)) return fixed;
@@ -2980,19 +3066,18 @@
         return ids;
       };
       const generated = storyMakeInstantRival(index + 1, original.intelligence || storyGeneratedAi(index));
-      return {
-        ...generated,
-        ...original,
+      const repaired = {...generated,...original,
         id: original.id || generated.id,
-        type: original.type || 'instant',
+        type: looksInstant ? 'instant' : (original.type || 'instant'),
+        storySelectionType: looksInstant ? 'instant' : (original.storySelectionType || original.type || 'instant'),
         name: original.name || generated.name,
         iconImage: original.iconImage || null,
         intelligence: original.intelligence || generated.intelligence,
         unitIds: repairIds(original.unitIds, 'unit', 3, 5),
-        magicIds: repairIds(original.magicIds, 'magic', 0, 10)
-      };
+        magicIds: repairIds(original.magicIds, 'magic', 0, 10)};
+      if (repaired.type === 'instant') { delete repaired.rivalId; delete repaired.deckId; }
+      return repaired;
     }
-
     function storyRepairLoadedState(){
       if(!storyModeState)return false;
       const validMode=storyModeState.mode==='five_match' && Number(storyModeState.version)>=6 && Array.isArray(storyModeState.opponents) && storyModeState.opponents.length===5;
@@ -3035,7 +3120,7 @@
 
       const completed=!!old.completed || wins>=5;
       storyModeState={
-        version:6,mode:'five_match',active:old.active!==false&&!completed&&!old.defeated,completed,defeated:!!old.defeated,
+        version:7,mode:'five_match',active:old.active!==false&&!completed&&!old.defeated,completed,defeated:!!old.defeated,
         currentMatchIndex:Math.min(4,Math.max(0,Number(old.currentMatchIndex ?? wins)||0)),wins,
         availableUnitIds:[...existingUnits],availableMagicIds:[...existingMagics],
         initialUnitIds:[...new Set((old.initialUnitIds||[]).map(id=>storyResolveCardId(id,'unit')).filter(id=>id&&allUnitIds.has(id)))].slice(0,5),
@@ -3090,7 +3175,7 @@
       const magics=storyShuffle(allCards.filter(c=>c.cardType==='magic')).slice(0,10).map(c=>c.id);
       const opponents=storyBuildFiveOpponents();
       const participant={id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:[...units],magicIds:[...magics]};
-      storyModeState={version:6,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};
+      storyModeState={version:7,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};
       await saveStoryModeState();await saveStoryModeDraft();hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();storyRenderInitialRewardModal();
     }
     function storyRenderInitialRewardModal() {
@@ -3126,7 +3211,11 @@
       }
       modal.classList.remove('hidden');
     }
-    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');switchView('story');if(window.__cardBattleAppReady)renderStoryMode();}
+    function closeStoryInitialReward(){
+      document.getElementById('story-initial-reward-modal')?.classList.add('hidden');
+      switchView('story');
+      if(window.__cardBattleAppReady){renderStoryMode();document.getElementById('story-main-panel')?.scrollIntoView({block:'start',behavior:'auto'});}
+    }
 
     function storyGrantVictoryReward(){const remU=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().some(id=>String(id)===String(c.id)));const remM=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().some(id=>String(id)===String(c.id)));const us=storyShuffle(remU).slice(0,3),ms=storyShuffle(remM).slice(0,5);storyModeState.availableUnitIds.push(...us.map(c=>c.id));storyModeState.availableMagicIds.push(...ms.map(c=>c.id));return {units:us,magics:ms};}
     function storyRecordReward(reward){storyModeState.rewardHistory=storyModeState.rewardHistory||[];storyModeState.rewardHistory.unshift({win:storyModeState.wins,names:[...(reward.units||[]),...(reward.magics||[])].map(c=>c?.name).filter(Boolean),at:Date.now()});storyModeState.rewardHistory=storyModeState.rewardHistory.slice(0,10);}
