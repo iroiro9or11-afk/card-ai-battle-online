@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.28.2';
+const SERVER_VERSION = '3.28.3';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -661,9 +661,17 @@ function effectResultSucceeded(result) {
   if (/^.+は既に.+中$/.test(text)) return false;
   return true;
 }
-function pushPassiveEvent(b, u, sk, result, target=null) {
+function passiveTargetDetails(units, beforeMap) {
+  const seen = new Set();
+  return (Array.isArray(units) ? units : []).filter(u => u && !u.__playerTarget && u.instanceId != null && !seen.has(String(u.instanceId)) && seen.add(String(u.instanceId))).map(u => ({
+    entity:pubUnit(u,false), hpBefore:beforeMap?.get(u.instanceId) || hpSnapshot(u), hpAfter:hpSnapshot(u)
+  }));
+}
+function pushPassiveEvent(b, u, sk, result, target=null, targetDetails=[]) {
   b.pendingEvents = b.pendingEvents || [];
-  b.pendingEvents.push({ type:'PASSIVE_USE', actor:pubUnit(u,false), target:target && !target.__playerTarget ? pubUnit(target,false) : null, actionName:sk.name, effect:result || 'パッシブ効果', result:result || '発動', description:sk.desc || sk.description || '', cardId:u.cardId });
+  const ev={ type:'PASSIVE_USE', actor:pubUnit(u,false), target:target && !target.__playerTarget ? pubUnit(target,false) : null, actionName:sk.name, effect:result || 'パッシブ効果', result:result || '発動', description:sk.desc || sk.description || '', cardId:u.cardId };
+  if (Array.isArray(targetDetails) && targetDetails.length) ev.targetDetails=targetDetails;
+  b.pendingEvents.push(ev);
 }
 function triggerPassiveTiming(b, timing, subject=null) {
   b._passiveTriggerDepth = Number(b._passiveTriggerDepth||0) + 1;
@@ -684,19 +692,21 @@ function triggerPassiveTiming(b, timing, subject=null) {
         b._statusApplicationTiming = timing;
         const before = u.currentHp;
         const ts = targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
+        const touched=[]; const targetBefore=new Map();
+        const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!targetBefore.has(t.instanceId))targetBefore.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
         const lines=[];
         let mainEffectSucceeded = false;
-        for (const t of ts) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(effectResultSucceeded(r)) { mainEffectSucceeded = true; }
+        for (const t of ts) { trackTarget(t); const r=applyEffect(b,sk.mainEffect,t,u,false); if(effectResultSucceeded(r)) { mainEffectSucceeded = true; }
         if(r) lines.push(r); }
         if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
           const subType = sk.subEffect.targetType || sk.targetType;
           const subTargets = subType === 'same_main_target'
             ? ts
             : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
-          for (const t of subTargets) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
+          for (const t of subTargets) { trackTarget(t); const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
         }
         b._statusApplicationTiming = null;
-        pushPassiveEvent(b,u,sk,lines.join('\n')||`HP ${before} → ${u.currentHp}`,ts[0]);
+        pushPassiveEvent(b,u,sk,lines.join('\n')||`HP ${before} → ${u.currentHp}`,ts[0],passiveTargetDetails(touched,targetBefore));
       }
     }
   } finally { b._statusApplicationTiming = null; b._passiveTriggerDepth--; }
@@ -882,10 +892,12 @@ function passiveOne(b, timing, u) {
   for (const sk of u.skills || []) {
     if (sk.type !== 'passive' || sk.timing !== timing || !evalCond(b, sk.selfCond, u)) continue;
     b._statusApplicationTiming = timing;
-    const lines=[];
+    const lines=[]; const touched=[]; const targetBefore=new Map();
+    const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!targetBefore.has(t.instanceId))targetBefore.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
     const mainTargets=targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
     let mainEffectSucceeded=false;
     for (const t of mainTargets) {
+      trackTarget(t);
       const r=applyEffect(b,sk.mainEffect,t,u,false);
       if (effectResultSucceeded(r)) mainEffectSucceeded=true;
       if (r) lines.push(r);
@@ -896,12 +908,13 @@ function passiveOne(b, timing, u) {
         ? mainTargets
         : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
       for (const t of subTargets) {
+        trackTarget(t);
         const r=applyEffect(b,sk.subEffect,t,u,false);
         if(r) lines.push(r);
       }
     }
     b._statusApplicationTiming = null;
-    pushPassiveEvent(b,u,sk,lines.join('\n')||'発動',mainTargets[0]);
+    pushPassiveEvent(b,u,sk,lines.join('\n')||'発動',mainTargets[0],passiveTargetDetails(touched,targetBefore));
   }
 }
 function passive(b, timing) { for (const u of allUnits(b)) passiveOne(b, timing, u); }
@@ -933,13 +946,17 @@ function processEndTurnAbnormalities(r) {
 function replaceDead(b) {
   for (const side of ['player1','player2']) {
     const pl = battlePlayer(b, side);
-    for (const u of pl.units.filter(x => x.isActive && x.currentHp <= 0)) {
-      u.isActive = false;
-      const id = pl.reserveQueue.shift();
-      if (id) {
-        const n = pl.units.find(x => x.cardId === id && !x.isActive && x.currentHp > 0);
-        if (n) { n.isActive = true; passiveOne(b, 'deploy', n); }
+    const fallen=pl.units.filter(x => x.isActive && x.currentHp <= 0);
+    fallen.forEach(u => { u.isActive = false; });
+    for (const _dead of fallen) {
+      let n=null;
+      while (Array.isArray(pl.reserveQueue) && pl.reserveQueue.length && !n) {
+        const id=pl.reserveQueue.shift();
+        n=pl.units.find(x => String(x.cardId) === String(id) && !x.isActive && x.currentHp > 0) || null;
       }
+      // Old saved IDs / inconsistent queue must not strand living reserve units off-field.
+      if (!n) n=pl.units.find(x => !x.isActive && x.currentHp > 0) || null;
+      if (n) { n.isActive = true; passiveOne(b, 'deploy', n); }
     }
   }
 }
@@ -1364,14 +1381,15 @@ function executeMagic(b, side, card, selectedTargetId=null, selectedSubTargetId=
   const main = targets(b, actor, eff.targetType, eff.targetCond, selectedTargetId, true);
   if (['select_enemy_1','select_ally_1'].includes(eff.targetType) && !main.length) return {type:'MAGIC_USE',actor:{side,name:resource.name},actionName:card.name,effect:'指定対象なし',result:'不発',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
   resource.ap -= cost;
-  const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
+  const before = new Map(); const touched=[];
+  const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!before.has(t.instanceId))before.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
   const lines = [];
   let mainEffectSucceeded=false;
-  for (const t of main) { const r = applyEffect(b, eff.mainEffect, t, actor, true); if (effectResultSucceeded(r)) mainEffectSucceeded=true; if(r) lines.push(r); }
+  for (const t of main) { trackTarget(t); const r = applyEffect(b, eff.mainEffect, t, actor, true); if (effectResultSucceeded(r)) mainEffectSucceeded=true; if(r) lines.push(r); }
   if (mainEffectSucceeded && eff.hasSubEffect && eff.subEffect) {
     const subType=eff.subEffect.targetType||'same_main_target';
     const sub = subType==='same_main_target' ? main : targets(b, actor, subType, eff.subEffect.targetCond || {type:'none'}, selectedSubTargetId, true);
-    for (const t of sub) { const r = applyEffect(b, eff.subEffect, t, actor, true); if (r) lines.push(r); }
+    for (const t of sub) { trackTarget(t); const r = applyEffect(b, eff.subEffect, t, actor, true); if (r) lines.push(r); }
   }
   const tar = main[0];
   return {
@@ -1379,7 +1397,7 @@ function executeMagic(b, side, card, selectedTargetId=null, selectedSubTargetId=
     target:tar?pubUnit(tar,false):null, actionName:card.name,
     effect:lines.join('\n') || '効果なし', result:lines.join('\n') || '変化なし', description:card.desc || '',
     card:sanitizeCardNoImage(card,true), targetHpBefore:tar?before.get(tar.instanceId):null,
-    targetHpAfter:tar?hpSnapshot(tar):null, cardId:card.id
+    targetHpAfter:tar?hpSnapshot(tar):null, targetDetails:passiveTargetDetails(touched,before), cardId:card.id
   };
 }
 function executeAction(b, side, u, action) {
@@ -1402,10 +1420,15 @@ function executeAction(b, side, u, action) {
     }
     const hp = hpSnapshot(t);
     const r = damage(t, finiteNumber(effAtk(u),0));
+    // 通常攻撃もダメージ適用直後にHP減少時パッシブを発動する。
+    const actionAfter=hpSnapshot(t);
+    if (r.damage > 0) triggerPassiveTiming(b,'hp_decrease',t);
+    if (hp.current > 0 && t.currentHp <= 0) { triggerPassiveTiming(b,'death',t); triggerPassiveTiming(b,'ally_death',t); }
     return {
       type:'CHARACTER_ATTACK', actor:pubUnit(u,false), target:pubUnit(t,false),
       actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
-      targetHpBefore:hp, targetHpAfter:hpSnapshot(t),
+      targetHpBefore:hp, targetHpAfter:actionAfter,
+      targetDetails:[{entity:pubUnit(t,false),hpBefore:hp,hpAfter:actionAfter}],
       actionName:'通常攻撃', effect:`基礎攻撃力 ${effAtk(u)}`, result:`${r.damage} ダメージ${t.currentHp<=0?'／撃破！':''}`
     };
   }
@@ -1418,16 +1441,17 @@ function executeAction(b, side, u, action) {
   const main = targets(b,u,sk.targetType,sk.targetCond,action.targetInstanceId,false);
   if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !main.length) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'指定対象なし',result:'不発',description:sk.desc || ''};
   resource.ap -= cost;
-  const before = new Map(main.map(t => [t.instanceId,hpSnapshot(t)]));
+  const before = new Map(); const touched=[];
+  const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!before.has(t.instanceId))before.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
   const lines=[];
   let mainEffectSucceeded = false;
-  for (const t of main) { const r=applyEffect(b,sk.mainEffect,t,u,false); if(effectResultSucceeded(r)) mainEffectSucceeded = true; if(r) lines.push(r); }
+  for (const t of main) { trackTarget(t); const r=applyEffect(b,sk.mainEffect,t,u,false); if(effectResultSucceeded(r)) mainEffectSucceeded = true; if(r) lines.push(r); }
   if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
     const subType=sk.subEffect.targetType||'same_main_target';
     const sub=subType==='same_main_target'
       ? main
       : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},action.subTargetInstanceId || null,false);
-    for (const t of sub) { const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
+    for (const t of sub) { trackTarget(t); const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
   }
   const tar=main[0];
   return {
@@ -1435,7 +1459,7 @@ function executeAction(b, side, u, action) {
     actionName:sk.name, effect:lines.join('\n')||'効果なし', result:lines.join('\n')||'変化なし', description:sk.desc || sk.description || '',
     actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
     targetHpBefore:tar?before.get(tar.instanceId):null, targetHpAfter:tar?hpSnapshot(tar):null,
-    cardId:u.cardId
+    targetDetails:passiveTargetDetails(touched,before), cardId:u.cardId
   };
 }
 function executeTurn(r) {
