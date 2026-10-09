@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.2 - カード配置・検索・ライバルアイコン修正</title>
+  <title>カードAI対戦ゲーム v3.28.3 - ライバル表示・パッシブ・控え・対象表示修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -86,15 +86,18 @@
         <!-- 対象：右 -->
         <div id="popup-target-panel" class="rounded-2xl border-4 border-rose-500 bg-rose-950/30 p-3 sm:p-5 min-w-0">
           <div id="popup-target-side" class="inline-flex px-3 py-1 rounded-full bg-rose-600 text-white text-xs sm:text-sm font-black mb-3">敵</div>
-          <div class="w-full aspect-square max-w-[280px] mx-auto rounded-2xl overflow-hidden border-4 border-rose-400 bg-slate-900 shadow-xl">
-            <img id="popup-target-img" class="w-full h-full object-cover" src="" alt="target">
-            <div id="popup-target-placeholder" class="w-full h-full hidden items-center justify-center text-6xl">🎯</div>
+          <div id="popup-target-single">
+            <div class="w-full aspect-square max-w-[280px] mx-auto rounded-2xl overflow-hidden border-4 border-rose-400 bg-slate-900 shadow-xl">
+              <img id="popup-target-img" class="w-full h-full object-cover" src="" alt="target">
+              <div id="popup-target-placeholder" class="w-full h-full hidden items-center justify-center text-6xl">🎯</div>
+            </div>
+            <div id="popup-target-name" class="mt-3 text-lg sm:text-2xl font-black text-rose-200 break-words leading-tight">対象なし</div>
+            <div id="popup-target-hp-wrap" class="popup-hp-wrap text-left">
+              <div class="flex items-center justify-between text-xs sm:text-sm font-black mb-1"><span class="text-slate-300">HP</span><span id="popup-target-hp-text" class="text-white">—</span></div>
+              <div class="popup-hp-track"><div id="popup-target-hp-fill" class="popup-hp-fill hp-alive" style="width:0%"></div></div>
+            </div>
           </div>
-          <div id="popup-target-name" class="mt-3 text-lg sm:text-2xl font-black text-rose-200 break-words leading-tight">対象なし</div>
-          <div id="popup-target-hp-wrap" class="popup-hp-wrap text-left">
-            <div class="flex items-center justify-between text-xs sm:text-sm font-black mb-1"><span class="text-slate-300">HP</span><span id="popup-target-hp-text" class="text-white">—</span></div>
-            <div class="popup-hp-track"><div id="popup-target-hp-fill" class="popup-hp-fill hp-alive" style="width:0%"></div></div>
-          </div>
+          <div id="popup-target-cards" class="hidden grid grid-cols-2 gap-2 max-h-[52vh] overflow-y-auto custom-scrollbar text-left"></div>
           <div class="mt-4 bg-slate-900/90 rounded-xl border border-slate-700 px-3 py-3 text-left">
             <div class="text-xs sm:text-sm text-slate-400 font-black">対象</div>
             <div id="popup-target" class="text-sm sm:text-lg text-white font-bold mt-1 whitespace-pre-wrap break-words leading-relaxed">対象なし</div>
@@ -165,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.2</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.3</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -643,6 +646,7 @@
         <div>
           <div class="text-xs font-bold text-rose-400 mb-1">🔴 敵フィールド</div>
           <div id="field-enemy" class="grid grid-cols-3 gap-2 sm:gap-4"></div>
+          <div class="mt-2"><div class="text-[10px] text-rose-300 font-bold mb-1">敵の控え（死亡時・ターン終了時に順番に登場）</div><div id="reserve-enemy" class="grid grid-cols-2 sm:grid-cols-5 gap-2"></div></div>
         </div>
 
         <!-- リアルタイムタイムライン -->
@@ -2714,8 +2718,15 @@
       const img = document.getElementById('rival-icon-preview');
       const placeholder = document.getElementById('rival-icon-placeholder');
       if (!img || !placeholder) return;
-      if (src) { img.src = src; img.classList.remove('hidden'); placeholder.classList.add('hidden'); }
-      else { img.removeAttribute('src'); img.classList.add('hidden'); placeholder.classList.remove('hidden'); }
+      img.onload = () => { img.classList.remove('hidden'); placeholder.classList.add('hidden'); };
+      img.onerror = () => { img.onerror = null; img.removeAttribute('src'); img.classList.add('hidden'); placeholder.classList.remove('hidden'); };
+      if (typeof src === 'string' && src.length) {
+        img.src = src;
+        if (img.complete && img.naturalWidth > 0) { img.classList.remove('hidden'); placeholder.classList.add('hidden'); }
+        else { img.classList.add('hidden'); placeholder.classList.remove('hidden'); }
+      } else {
+        img.removeAttribute('src'); img.classList.add('hidden'); placeholder.classList.remove('hidden');
+      }
     }
     function resetRivalForm() {
       editingRivalId = null;
@@ -2798,13 +2809,17 @@
       const newRival = { ...(existing || {}), id: existing?.id || generateUniqueId("rival"), name, deckId, iconImage: tempRivalIcon || null, intelligence };
       await saveToStore("rivals", newRival);
       allRivals = await getAllFromStore("rivals");
+      // 新規作成でも編集でも、設定済みライバル一覧と戦闘準備の選択肢を同じ保存済みデータから更新する。
+      // 以前は新規ライバルがメインのselectへ追加されず、選択前のアイコンがそのまま残る経路があった。
+      renderRivalList();
+      renderBattleSetup();
       const selectedPreset = document.getElementById('select-rival-preset');
-      if (selectedPreset && String(selectedPreset.value) === String(newRival.id)) {
-        // 選択中ライバルの画像変更を戦闘準備画面にも即時反映。
+      if (selectedPreset && findRivalById(newRival.id)) {
+        selectedPreset.value = String(newRival.id);
         applyRivalPreset();
       }
+      if (storyModeState && !document.getElementById('view-story')?.classList.contains('hidden')) renderStoryMode();
       resetRivalForm();
-      renderRivalList();
       alert(existing ? "ライバルを更新しました。" : "ライバルを登録しました。");
     }
 
@@ -2829,7 +2844,7 @@
         item.innerHTML = `
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 rounded-full overflow-hidden bg-slate-950 border border-rose-500 square-aspect flex-shrink-0">
-              ${r.iconImage ? `<img src="${r.iconImage}" class="w-full h-full object-cover">` : `<div class="w-full h-full flex items-center justify-center text-xs">🤖</div>`}
+              ${r.iconImage ? `<img src="${r.iconImage}" class="w-full h-full object-cover" onerror="this.onerror=null;this.remove();this.parentElement.innerHTML='🤖'">` : `<div class="w-full h-full flex items-center justify-center text-xs">🤖</div>`}
             </div>
             <div>
               <div class="font-bold text-rose-300">${r.name}</div>
@@ -2850,15 +2865,21 @@
       const eDeckSel = document.getElementById("select-enemy-deck");
       const rPresetSel = document.getElementById("select-rival-preset");
 
+      const previousPlayerDeckId = pDeckSel.value;
+      const previousEnemyDeckId = eDeckSel.value;
+      const previousRivalId = rPresetSel.value;
       pDeckSel.innerHTML = allDecks.map(d => `<option value="${d.id}">${d.name}</option>`).join("");
       eDeckSel.innerHTML = allDecks.map(d => `<option value="${d.id}">${d.name}</option>`).join("");
-
       rPresetSel.innerHTML = `<option value="">-- ライバルを選択 --</option>` + allRivals.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+      if ([...pDeckSel.options].some(o => String(o.value) === String(previousPlayerDeckId))) pDeckSel.value = previousPlayerDeckId;
+      if ([...eDeckSel.options].some(o => String(o.value) === String(previousEnemyDeckId))) eDeckSel.value = previousEnemyDeckId;
+      if ([...rPresetSel.options].some(o => String(o.value) === String(previousRivalId))) rPresetSel.value = previousRivalId;
 
       const pd=getSelectedPlayerDeck();
       if (pd) normalizeDeploymentForDeck(pd);
       previewPlayerDeck();
-      previewEnemyDeck();
+      if (rPresetSel.value) applyRivalPreset();
+      else { previewEnemyDeck(); setRivalSetupIcon(null); }
     }
 
     function getSelectedPlayerDeck() {
@@ -2905,25 +2926,37 @@
       ids.forEach((id,i)=>{const u=allCards.find(c=>c.id===id); if(!u)return; const div=document.createElement('div'); div.innerHTML=getCardHTML({id:u.id,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.stats.hp,atk:u.stats.atk,prio:u.stats.priority,rank:u.rank,img:getCardImage(u)})+`<div class="text-center text-[10px] text-rose-300 font-bold mt-1">${i<3?`出撃 ${i+1}`:`控え ${i-2}`}</div>`; container.appendChild(div);});
     }
 
+    function findRivalById(id) {
+      if (id == null || id === '') return null;
+      return (Array.isArray(allRivals) ? allRivals : []).find(r => String(r.id) === String(id)) || null;
+    }
+    function setRivalSetupIcon(src) {
+      const img = document.getElementById('setup-rival-icon');
+      const ph = document.getElementById('setup-rival-icon-ph');
+      if (!img || !ph) return;
+      img.onerror = () => { img.onerror = null; img.removeAttribute('src'); img.classList.add('hidden'); ph.classList.remove('hidden'); };
+      img.onload = () => { img.classList.remove('hidden'); ph.classList.add('hidden'); };
+      if (typeof src === 'string' && src.length > 0) {
+        img.src = src;
+        // data URLや既にキャッシュ済みの画像はloadイベントが遅れる場合もある。
+        if (img.complete && img.naturalWidth > 0) { img.classList.remove('hidden'); ph.classList.add('hidden'); }
+      } else {
+        img.removeAttribute('src'); img.classList.add('hidden'); ph.classList.remove('hidden');
+      }
+    }
     function applyRivalPreset() {
-      const rId = document.getElementById("select-rival-preset").value;
-      const rival = allRivals.find(r => r.id === rId);
-      const rIcon = document.getElementById("setup-rival-icon");
-      const rPh = document.getElementById("setup-rival-icon-ph");
-
+      const rId = document.getElementById('select-rival-preset')?.value || '';
+      const rival = findRivalById(rId);
       if (rival) {
-        if (rival.deckId) {
-          document.getElementById("select-enemy-deck").value = rival.deckId;
+        const eDeck = document.getElementById('select-enemy-deck');
+        if (eDeck && rival.deckId && [...eDeck.options].some(o => String(o.value) === String(rival.deckId))) {
+          eDeck.value = String(rival.deckId);
           previewEnemyDeck();
         }
-        if (rival.iconImage) {
-          rIcon.src = rival.iconImage; rIcon.classList.remove("hidden"); rPh.classList.add("hidden");
-        } else {
-          rIcon.removeAttribute('src'); rIcon.classList.add("hidden"); rPh.classList.remove("hidden");
-        }
+        setRivalSetupIcon(rival.iconImage || null);
       } else {
-        // 「ライバルを選択」に戻した際、前のライバル画像を残さない。
-        rIcon.removeAttribute('src'); rIcon.classList.add("hidden"); rPh.classList.remove("hidden");
+        // 「ライバル未選択」時に前回の画像を残さない。
+        setRivalSetupIcon(null);
       }
     }
 
@@ -3634,9 +3667,10 @@
     }
     function storyRenderConfirmedDeck(){storyRenderConfirmed();}
     function storyRenderOpponent(){storyRenderOpponentDetail();}
-    function showStoryMatchIntro(){const modal=document.getElementById('story-match-intro-modal');if(!modal||!storyPendingBattle)return;const o=storyPendingBattle.opponent;document.getElementById('story-intro-round').innerText=`第${(storyModeState.currentMatchIndex||0)+1}戦 / 全5戦`;document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${storyAiName(o.intelligence)}`;const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph');if(playerIcon){pi.src=playerIcon;pi.classList.remove('hidden');pp.classList.add('hidden');}else{pi.classList.add('hidden');pp.classList.remove('hidden');}const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');const opponentIcon=storyResolveParticipantIcon(o);if(opponentIcon){oi.src=opponentIcon;oi.classList.remove('hidden');op.classList.add('hidden');}else{oi.classList.add('hidden');op.classList.remove('hidden');}modal.classList.remove('hidden');}
+    function setStoryIconImage(img,placeholder,src){if(!img||!placeholder)return;img.onload=()=>{img.classList.remove('hidden');placeholder.classList.add('hidden');};img.onerror=()=>{img.onerror=null;if(img.removeAttribute)img.removeAttribute('src');else img.src='';img.classList.add('hidden');placeholder.classList.remove('hidden');};if(typeof src==='string'&&src.length){img.src=src;if(img.complete&&img.naturalWidth>0){img.classList.remove('hidden');placeholder.classList.add('hidden');}else{img.classList.add('hidden');placeholder.classList.remove('hidden');}}else{if(img.removeAttribute)img.removeAttribute('src');else img.src='';img.classList.add('hidden');placeholder.classList.remove('hidden');}}
+    function showStoryMatchIntro(){const modal=document.getElementById('story-match-intro-modal');if(!modal||!storyPendingBattle)return;const o=storyPendingBattle.opponent;document.getElementById('story-intro-round').innerText=`第${(storyModeState.currentMatchIndex||0)+1}戦 / 全5戦`;document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${storyAiName(o.intelligence)}`;const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph');setStoryIconImage(pi,pp,playerIcon);const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');setStoryIconImage(oi,op,storyResolveParticipantIcon(o));modal.classList.remove('hidden');}
     function closeStoryMatchIntro(){document.getElementById('story-match-intro-modal')?.classList.add('hidden');storyPendingBattle=null;}
-    async function confirmStoryBattleStart(){if(!storyPendingBattle)return;const o=storyPendingBattle.opponent;storyPendingBattle=null;document.getElementById('story-match-intro-modal')?.classList.add('hidden');const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();storyBattleOverride={playerDeck:{id:`story_p_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]},enemyDeck:{id:`story_e_${Date.now()}`,name:`${o.name}のデッキ`,unitIds:[...o.unitIds],magicIds:[...o.magicIds]},enemyIntelligence:o.intelligence||'normal',enemyName:o.name,enemyIconUrl:storyResolveParticipantIcon(o)||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};switchView('battle');startBattle();}
+    async function confirmStoryBattleStart(){if(!storyPendingBattle)return;const o=storyPendingBattle.opponent;storyPendingBattle=null;document.getElementById('story-match-intro-modal')?.classList.add('hidden');const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();storyBattleOverride={playerDeck:{id:`story_p_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]},enemyDeck:{id:`story_e_${Date.now()}`,name:`${o.name}のデッキ`,unitIds:[...o.unitIds],magicIds:[...o.magicIds]},enemyIntelligence:o.intelligence||'normal',enemyName:o.name,enemyRivalId:o.rivalId||null,enemyIconUrl:storyResolveParticipantIcon(o)||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};switchView('battle');startBattle();}
     async function startStoryBattle(){
       if(!storyModeState||storyModeState.completed||storyModeState.defeated)return;
       if(storyRepairLoadedState())await saveStoryModeState();
@@ -3663,22 +3697,39 @@
       const pDeck=override?.playerDeck || allDecks.find(d=>d.id===pDeckId);
       const eDeck=override?.enemyDeck || allDecks.find(d=>d.id===eDeckId);
       if(!pDeck||!eDeck){alert('デッキを正しく選択してください。');return;}
+      const canonicalIds = (ids, allowed) => (Array.isArray(ids) ? ids : []).map(id => (allowed || []).find(x => String(x) === String(id))).filter(id => id != null);
       if (override) {
-        deploymentSelection.player = { active:[...(override.playerActive||pDeck.unitIds||[]).slice(0,3)], reserve:[...(override.playerReserve||pDeck.unitIds||[]).slice(3,5)] };
+        const canonicalDeckUnits = canonicalIds(pDeck.unitIds, pDeck.unitIds);
+        const active = canonicalIds(override.playerActive, canonicalDeckUnits).slice(0,3);
+        canonicalDeckUnits.forEach(id=>{if(active.length<3&&!active.some(a=>String(a)===String(id)))active.push(id);});
+        const reserve = canonicalIds(override.playerReserve, canonicalDeckUnits).filter(id => !active.some(a => String(a) === String(id))).slice(0,2);
+        canonicalDeckUnits.forEach(id=>{if(reserve.length<2&&!active.some(a=>String(a)===String(id))&&!reserve.some(r=>String(r)===String(id)))reserve.push(id);});
+        // 旧ストーリー保存データのIDが文字列/数値で混在しても、デッキの実IDへ正規化する。
+        deploymentSelection.player = { active, reserve };
       } else {
         normalizeDeploymentForDeck(pDeck);
+        deploymentSelection.player = {
+          active: canonicalIds(deploymentSelection.player.active, pDeck.unitIds).slice(0,3),
+          reserve: canonicalIds(deploymentSelection.player.reserve, pDeck.unitIds).slice(0,2)
+        };
       }
       if(deploymentSelection.player.active.length!==3){alert('戦闘開始前に出撃する3体を選択してください。');return;}
-      const enemyIds=eDeck.unitIds||[]; const enemyActive=enemyIds.slice(0,3), enemyReserve=enemyIds.slice(3,5);
+      const enemyIds=canonicalIds(eDeck.unitIds,eDeck.unitIds); const enemyActive=enemyIds.slice(0,3), enemyReserve=enemyIds.slice(3,5);
+      const pUnits = canonicalIds(pDeck.unitIds,pDeck.unitIds).map(id=>createBattleUnit(id,'player',deploymentSelection.player.active.some(a=>String(a)===String(id)))).filter(Boolean);
+      const eUnits = enemyIds.map(id=>createBattleUnit(id,'enemy',enemyActive.some(a=>String(a)===String(id)))).filter(Boolean);
+      const selectedRival = override ? findRivalById(override.enemyRivalId) : findRivalById(document.getElementById('select-rival-preset')?.value);
+      const resolvedEnemyIcon = override
+        ? (selectedRival ? (selectedRival.iconImage || null) : (override.enemyIconUrl || null))
+        : (selectedRival?.iconImage || null);
       battleState={phase:'decision',turn:1,playerAp:0,enemyAp:0,
-        playerUnits:(pDeck.unitIds||[]).map(id=>createBattleUnit(id,'player',deploymentSelection.player.active.includes(id))),
-        enemyUnits:enemyIds.map(id=>createBattleUnit(id,'enemy',enemyActive.includes(id))),
-        magicHand:(pDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),
-        enemyMagicHand:(eDeck.magicIds||[]).map(id=>allCards.find(c=>c.id===id)).filter(Boolean),
+        playerUnits:pUnits,
+        enemyUnits:eUnits,
+        magicHand:canonicalIds(pDeck.magicIds,pDeck.magicIds).map(id=>allCards.find(c=>String(c.id)===String(id))).filter(Boolean),
+        enemyMagicHand:canonicalIds(eDeck.magicIds,eDeck.magicIds).map(id=>allCards.find(c=>String(c.id)===String(id))).filter(Boolean),
         usedMagicCardIds:new Set(),enemyUsedMagicCardIds:new Set(),reservedMagic:null,reservedEnemyMagic:null,selectedPlayerInstanceId:null,
-        enemyIntelligence:override?.enemyIntelligence || (allRivals.find(r=>r.id===document.getElementById('select-rival-preset')?.value)?.intelligence)||'normal',
-        playerName:playerName,enemyName:override?.enemyName || (allRivals.find(r=>r.id===document.getElementById('select-rival-preset')?.value)?.name)||'ライバル',playerIconUrl:playerIcon,
-        enemyIconUrl:override?.enemyIconUrl || (allRivals.find(r=>r.id===document.getElementById('select-rival-preset')?.value)?.iconImage)||null,
+        enemyIntelligence:override?.enemyIntelligence || selectedRival?.intelligence || 'normal',
+        playerName:playerName,enemyName:override?.enemyName || selectedRival?.name || 'ライバル',playerIconUrl:playerIcon,
+        enemyIconUrl:resolvedEnemyIcon,
         playerReserveQueue:[...deploymentSelection.player.reserve],enemyReserveQueue:[...enemyReserve],resultWinner:null, storyMode:!!override};
       battleState.selectedPlayerInstanceId = getActiveUnits('player')[0]?.instanceId || null;
       runPassiveSkills('battle_start');
@@ -3689,7 +3740,8 @@
     }
 
     function createBattleUnit(cardId, side, active=false) {
-      const template = allCards.find(c => c.id === cardId);
+      const template = allCards.find(c => String(c.id) === String(cardId));
+      if (!template) return null;
       return {
         instanceId: generateUniqueId("unit_inst"),
         cardId: template.id,
@@ -3724,8 +3776,12 @@
 
       const eIcon = document.getElementById("battle-enemy-icon");
       const ePh = document.getElementById("battle-enemy-icon-ph");
-      if (battleState.enemyIconUrl) { eIcon.src = battleState.enemyIconUrl; eIcon.classList.remove("hidden"); ePh.classList.add("hidden"); }
-      else { eIcon.classList.add("hidden"); ePh.classList.remove("hidden"); }
+      eIcon.onerror = () => { eIcon.onerror = null; eIcon.removeAttribute('src'); eIcon.classList.add('hidden'); ePh.classList.remove('hidden'); };
+      eIcon.onload = () => { eIcon.classList.remove('hidden'); ePh.classList.add('hidden'); };
+      if (battleState.enemyIconUrl) {
+        eIcon.src = battleState.enemyIconUrl;
+        if (eIcon.complete && eIcon.naturalWidth > 0) { eIcon.classList.remove('hidden'); ePh.classList.add('hidden'); }
+      } else { eIcon.removeAttribute('src'); eIcon.classList.add("hidden"); ePh.classList.remove("hidden"); }
 
       document.getElementById("battle-log").innerHTML = `<div class="text-slate-500">--- 戦闘開始 ---</div>`;
     }
@@ -3774,12 +3830,18 @@
     }
     function deployNextReserve(side){
       const queue=side==='player'?battleState.playerReserveQueue:battleState.enemyReserveQueue;
-      if(!queue||!queue.length)return null;
       const units=side==='player'?battleState.playerUnits:battleState.enemyUnits;
+      if(!Array.isArray(queue)) return null;
       while(queue.length){
-        const id=queue.shift(); const u=units.find(x=>x.cardId===id && !x.isActive && x.currentHp>0);
+        const id=queue.shift();
+        const u=units.find(x=>String(x.cardId)===String(id) && !x.isActive && x.currentHp>0);
         if(u){u.isActive=true;u.reservedAction={type:'attack',targetInstanceId:null};logBattle(`🔄 ${u.name} が控えから登場！`);runPassiveSkills('deploy',u);return u;}
-      } return null;
+      }
+      // IDが旧形式だった場合の救済：控えキューに残る不正IDで交代が止まらないよう、
+      // 生存している非アクティブ個体をデッキ順で登場させる。
+      const fallback=units.find(x=>!x.isActive&&x.currentHp>0);
+      if(fallback){fallback.isActive=true;fallback.reservedAction={type:'attack',targetInstanceId:null};logBattle(`🔄 ${fallback.name} が控えから登場！（控え情報を復旧）`);runPassiveSkills('deploy',fallback);return fallback;}
+      return null;
     }
     function replaceDeadUnitsAtTurnEnd(){
       ['player','enemy'].forEach(side=>{const units=side==='player'?battleState.playerUnits:battleState.enemyUnits; const deadActive=units.filter(u=>u.isActive&&u.currentHp<=0); deadActive.forEach(u=>{u.isActive=false;}); deadActive.forEach(()=>deployNextReserve(side));});
@@ -3812,11 +3874,16 @@
         const isSelected = side === 'player' && u.instanceId === battleState.selectedPlayerInstanceId;
         const hpPercent = Math.max(0, Math.min(100, (u.currentHp / u.maxHp) * 100));
 
-        let actionBadge = "";
-        if (u.reservedAction.type === 'attack') actionBadge = "⚔️ 通常攻撃";
-        else if (u.reservedAction.type === 'skill') {
-          const sk = u.skills[u.reservedAction.skillIndex];
-          actionBadge = `✨ ${sk ? sk.name : 'スキル'}`;
+        // 敵の予約行動は行動実行まで秘匿する。味方側のみ選択中の行動を表示。
+        let actionBadge = '';
+        if (side === 'player') {
+          if (u.reservedAction.type === 'attack') actionBadge = '⚔️ 通常攻撃';
+          else if (u.reservedAction.type === 'skill') {
+            const sk = u.skills[u.reservedAction.skillIndex];
+            actionBadge = `✨ ${sk ? sk.name : 'スキル'}`;
+          }
+        } else {
+          actionBadge = '？？？';
         }
 
         const cardEl = document.createElement("div");
@@ -3883,8 +3950,24 @@
     }
 
     function renderReserveUnits(){
-      const box=document.getElementById('reserve-player'); if(!box)return; box.innerHTML='';
-      const q=battleState.playerReserveQueue||[]; q.forEach((id,i)=>{const u=battleState.playerUnits.find(x=>x.cardId===id&&!x.isActive&&x.currentHp>0); if(!u)return; const div=document.createElement('div'); div.className='bg-slate-950 border border-slate-800 rounded-lg p-1.5 flex items-center gap-2 opacity-80'; div.innerHTML=`<div class="w-10">${getCardHTML({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.maxHp,atk:u.atk,prio:u.priority,rank:u.rank,img:getCardImage(u)})}</div><div class="text-[10px] text-amber-200 font-bold">控え ${i+1}<br>${u.name}</div>`; box.appendChild(div);});
+      const renderSide=(side,boxId)=>{
+        const box=document.getElementById(boxId); if(!box)return; box.innerHTML='';
+        const units=side==='player'?battleState.playerUnits:battleState.enemyUnits;
+        const queue=side==='player'?(battleState.playerReserveQueue||[]):(battleState.enemyReserveQueue||[]);
+        const reserve=queue.map(id=>units.find(x=>String(x.cardId)===String(id)&&!x.isActive&&x.currentHp>0)).filter(Boolean);
+        // キュー不整合でも生存控えカードを隠さない。
+        units.filter(x=>!x.isActive&&x.currentHp>0&&!reserve.some(r=>r.instanceId===x.instanceId)).forEach(x=>reserve.push(x));
+        reserve.forEach((u,i)=>{
+          const div=document.createElement('div');
+          div.className=`bg-slate-950 border ${side==='player'?'border-amber-800':'border-rose-900'} rounded-lg p-2 min-w-0`;
+          div.innerHTML=`<div class="text-[10px] ${side==='player'?'text-amber-200':'text-rose-200'} font-bold mb-1">控え ${i+1}：${u.name}</div><div class="cursor-pointer" data-reserve-detail="${u.instanceId}">${getCardHTML({id:u.cardId,cardType:'unit',name:u.name,mainAttr:u.mainAttr,subAttrs:u.subAttrs,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u),rank:u.rank,img:getCardImage(u)})}</div><div class="text-[10px] text-slate-400 mt-1">HP ${u.currentHp}/${u.maxHp}</div>`;
+          div.querySelector('[data-reserve-detail]')?.addEventListener('click',()=>openBattleUnitDetail(u.instanceId));
+          box.appendChild(div);
+        });
+        if(!reserve.length){const empty=document.createElement('div');empty.className='text-[10px] text-slate-600';empty.textContent='控えなし';box.appendChild(empty);}
+      };
+      renderSide('enemy','reserve-enemy');
+      renderSide('player','reserve-player');
     }
 
     function renderTimeline() {
@@ -3895,9 +3978,7 @@
       if (battleState.reservedMagic) {
         queue.push({ type: 'magic', name: battleState.reservedMagic.name, speed: battleState.reservedMagic.stats?.priority ?? 999, side: 'player' });
       }
-      if (battleState.reservedEnemyMagic) {
-        queue.push({ type: 'magic', name: battleState.reservedEnemyMagic.name, speed: battleState.reservedEnemyMagic.stats?.priority ?? 999, side: 'enemy' });
-      }
+      // 敵の予約マジック名・発動予定は実行されるまでタイムラインへ表示しない。
       [...getActiveUnits('player'), ...getActiveUnits('enemy')].forEach(u => {
         queue.push({ type: 'unit', name: u.name, speed: getEffectiveSpeed(u), side: u.side });
       });
@@ -4965,8 +5046,7 @@
       const pendingUnits = new Set(getActiveUnits('player').concat(getActiveUnits('enemy')));
       const magic = battleState.reservedMagic ? battleState.reservedMagic : null;
       const enemyMagic = battleState.reservedEnemyMagic ? battleState.reservedEnemyMagic : null;
-      if (magic) battleState.usedMagicCardIds.add(magic.id);
-      if (enemyMagic) battleState.enemyUsedMagicCardIds.add(enemyMagic.id);
+      // マジックの使用済み表示は予約時ではなく、実際に解決を開始した時点で更新する。
 
       let magicPending = !!magic;
       let enemyMagicPending = !!enemyMagic;
@@ -5062,10 +5142,14 @@
 
     async function executeMagicCard(card, side = 'player') {
       if (!card) return;
+      // 敵のマジックは解決が始まるまで使用済み表示にせず、選択内容を隠す。
+      if (side === 'enemy') { battleState.enemyUsedMagicCardIds.add(card.id); renderEnemyMagicHand(); }
+      else { battleState.usedMagicCardIds.add(card.id); }
       const effectLines = [];
       const resultLines = [];
       const targetNames = [];
       const targetEntities = [];
+      const targetHpBeforeMap = new Map();
       const actor = { side, currentHp: 1, maxHp: 1 };
       const isPlayerActor = side === 'player';
       const cost = Number(card.effect?.cost || 0);
@@ -5082,7 +5166,7 @@
         let mainEffectSucceeded=false;
         mainTargets.forEach(t => {
           targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
-          if (t && !t.__playerTarget) targetEntities.push(t);
+          if (t && !t.__playerTarget) { if(!targetHpBeforeMap.has(t.instanceId))targetHpBeforeMap.set(t.instanceId,{current:t.currentHp,max:t.maxHp}); if(!targetEntities.some(x=>x.instanceId===t.instanceId))targetEntities.push(t); }
           const r = applyEffect(eff.mainEffect, t, isPlayerActor, true, actor);
           if (effectResultSucceeded(r)) mainEffectSucceeded=true; if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
         });
@@ -5091,6 +5175,7 @@
           const subTargets = subType==='same_main_target' ? mainTargets : resolveTargets(subType, eff.subEffect.targetCond || {type:'none'}, actor, isPlayerActor, battleState.reservedMagicSubTargetInstanceId || null, true);
           subTargets.forEach(t => {
             targetNames.push(t?.name || (t?.__playerTarget ? 'プレイヤー' : '対象'));
+            if (t && !t.__playerTarget) { if(!targetHpBeforeMap.has(t.instanceId))targetHpBeforeMap.set(t.instanceId,{current:t.currentHp,max:t.maxHp}); if(!targetEntities.some(x=>x.instanceId===t.instanceId))targetEntities.push(t); }
             const r = applyEffect(eff.subEffect, t, isPlayerActor, true, actor);
             if (r) { effectLines.push(r.effect); resultLines.push(r.result); }
           });
@@ -5104,6 +5189,7 @@
         effect: effectLines.length ? effectLines.join('\n') : '効果なし',
         result: resultLines.length ? resultLines.join('\n') : '変化なし',
         targetEntity: targetEntities[0] || null,
+        targetDetails: [...new Map(targetEntities.map(entity=>[String(entity.instanceId),entity])).values()].map(entity=>({entity,hpBefore:targetHpBeforeMap.get(entity.instanceId)||{current:entity.currentHp,max:entity.maxHp},hpAfter:{current:entity.currentHp,max:entity.maxHp}})),
         description: card.desc || card.description || buildAutoSkillDescriptionFromData(card)
       });
     }
@@ -5130,7 +5216,7 @@
         dealDamage(target, raw);
         const dealt = before - target.currentHp;
         logBattle(`⚔️ ${unit.name} の通常攻撃！ ${target.name} に ${dealt} ダメージ！`);
-        await showActionPopup(unit, "通常攻撃", {cardType:'unit',name:unit.name,image:getCardImage(unit)||unit.image,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit)}, {
+        const attackPopup = showActionPopup(unit, "通常攻撃", {cardType:'unit',name:unit.name,image:getCardImage(unit)||unit.image,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit)}, {
           target: target.name + ` (HP ${before} → ${target.currentHp})`,
           effect: `基礎攻撃力 ${raw} = ${raw} ダメージ`,
           result: `${dealt} ダメージ${target.currentHp <= 0 ? '／撃破！' : ''}`,
@@ -5138,8 +5224,18 @@
           actorHpBefore,
           actorHpAfter: { current: unit.currentHp, max: unit.maxHp },
           targetHpBefore: { current: before, max: target.maxHp },
-          targetHpAfter: { current: target.currentHp, max: target.maxHp }
+          targetHpAfter: { current: target.currentHp, max: target.maxHp },
+          targetDetails: [{ entity:target, hpBefore:{current:before,max:target.maxHp}, hpAfter:{current:target.currentHp,max:target.maxHp} }]
         });
+        // 通常攻撃でもHPが実際に減った瞬間に反応パッシブを解決する。
+        // 通常攻撃ポップアップを先にキューへ積み、反応パッシブの演出はその後に続ける。
+        if (target.currentHp < before) triggerPassiveEvent('hp_decrease', target);
+        if (before > 0 && target.currentHp <= 0) {
+          triggerPassiveEvent('death', target);
+          [...getActiveUnits(target.side === 'player' ? 'player' : 'enemy')].filter(x => x !== target).forEach(x => triggerPassiveEvent('ally_death', x));
+        }
+        await attackPopup;
+        await actionPopupQueue;
         return;
       }
       if (act.type !== 'skill') return;
@@ -5181,6 +5277,7 @@
         effect: effectLines.length ? effectLines.join('\n') : '効果なし',
         result: resultLines.length ? resultLines.join('\n') : '変化なし',
         targetEntity: targetEntities[0] || null,
+        targetDetails: [...new Map(targetEntities.map(entity=>[String(entity.instanceId),entity])).values()].map(entity=>({entity,hpBefore:targetHpBeforeMap.get(entity.instanceId)||{current:entity.currentHp,max:entity.maxHp},hpAfter:{current:entity.currentHp,max:entity.maxHp}})),
         description: sk.desc || sk.description || buildAutoSkillDescriptionFromData(sk),
         actorHpBefore,
         actorHpAfter: { current: unit.currentHp, max: unit.maxHp },
@@ -5491,17 +5588,17 @@
             const isPlayer=u.side==='player';
             const previousTiming = battleState._statusApplicationTiming;
             battleState._statusApplicationTiming = timing;
-            const effectLines=[]; let firstTarget=null; let mainEffectSucceeded=false;
+            const effectLines=[]; let firstTarget=null; let mainEffectSucceeded=false; const passiveTargets=[]; const passiveTargetBefore=new Map();
             try {
               const mainTargets=resolveTargets(sk.targetType,sk.targetCond,u,isPlayer,sk.targetInstanceId);
-              mainTargets.forEach(t=>{ if(!firstTarget&&!t.__playerTarget)firstTarget=t; const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(effectResultSucceeded(r)){mainEffectSucceeded=true;} if(r){effectLines.push(r.result||r.effect||r);} });
+              mainTargets.forEach(t=>{ if(!t.__playerTarget){if(!firstTarget)firstTarget=t;if(!passiveTargetBefore.has(t.instanceId))passiveTargetBefore.set(t.instanceId,{current:t.currentHp,max:t.maxHp});if(!passiveTargets.some(x=>x.instanceId===t.instanceId))passiveTargets.push(t);} const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(effectResultSucceeded(r)){mainEffectSucceeded=true;} if(r){effectLines.push(r.result||r.effect||r);} });
               if(mainEffectSucceeded&&sk.hasSubEffect&&sk.subEffect){
-                const subType=sk.subEffect.targetType||sk.targetType;
+                const subType=sk.subEffect.targetType||'same_main_target';
                 const subTargets=subType==='same_main_target'?mainTargets:resolveTargets(subType,sk.subEffect.targetCond||{type:'none'},u,isPlayer);
-                subTargets.forEach(t=>{ const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
+                subTargets.forEach(t=>{if(t&&!t.__playerTarget){if(!passiveTargetBefore.has(t.instanceId))passiveTargetBefore.set(t.instanceId,{current:t.currentHp,max:t.maxHp});if(!passiveTargets.some(x=>x.instanceId===t.instanceId))passiveTargets.push(t);} const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
               }
             } finally { battleState._statusApplicationTiming = previousTiming; }
-            showActionPopup(u, sk.name, {cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)}, {target:firstTarget?.name||'対象なし',effect:effectLines.join('\n')||'効果なし',result:effectLines.join('\n')||'発動',targetEntity:firstTarget||null,description:sk.desc||sk.description||buildAutoSkillDescriptionFromData(sk),actorHpBefore:{current:u.currentHp,max:u.maxHp},actorHpAfter:{current:u.currentHp,max:u.maxHp}});
+            showActionPopup(u, sk.name, {cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)}, {target:passiveTargets.map(x=>x.name).join(' / ')||'対象なし',effect:effectLines.join('\n')||'効果なし',result:effectLines.join('\n')||'発動',targetEntity:firstTarget||null,targetDetails:passiveTargets.map(entity=>({entity,hpBefore:passiveTargetBefore.get(entity.instanceId)||{current:entity.currentHp,max:entity.maxHp},hpAfter:{current:entity.currentHp,max:entity.maxHp}})),description:sk.desc||sk.description||buildAutoSkillDescriptionFromData(sk),actorHpBefore:{current:u.currentHp,max:u.maxHp},actorHpAfter:{current:u.currentHp,max:u.maxHp}});
           }
         });
       });
@@ -5609,6 +5706,7 @@
       if (battleState.resultWinner) return true;
       const playerAliveCount=battleState.playerUnits.filter(u=>u.currentHp>0).length;
       const enemyAliveCount=battleState.enemyUnits.filter(u=>u.currentHp>0).length;
+      // 生存中の控えは交代可能なので敗北判定に含める。控えID不一致は deployNextReserve の復旧経路で解消する。
       const playerAlive=playerAliveCount>0, enemyAlive=enemyAliveCount>0;
       let winner=null;
       if(!playerAlive||!enemyAlive) winner=playerAlive&&!enemyAlive?'player':(!playerAlive&&enemyAlive?'enemy':'draw');
@@ -5707,23 +5805,46 @@
         };
         setHp('actor',info.actorHpBefore,info.actorHpAfter,actor);
 
-        const targetImg=document.getElementById("popup-target-img"),targetPlaceholder=document.getElementById("popup-target-placeholder");
-        if(target){
-          if(targetPlaceholder){targetPlaceholder.classList.add('hidden');targetPlaceholder.classList.remove('flex');}
-          if(targetImg){
-            targetImg.classList.remove('hidden');
-            const targetDead=(info.targetHpAfter?.current??target.currentHp??1)<=0;
-            targetImg.classList.toggle('popup-dead-image',targetDead);
-            targetImg.onerror=()=>{targetImg.onerror=null;targetImg.classList.add('hidden');if(targetPlaceholder){targetPlaceholder.classList.remove('hidden');targetPlaceholder.classList.add('flex');}};
-            targetImg.src=target.image||target.iconImage||getCardImage(target)||createDummyCardImage(targetIsPlayer?"👤":"👹",targetIsPlayer?"#075985":"#9f1239");
+        const targetSingle=document.getElementById('popup-target-single');
+        const targetCards=document.getElementById('popup-target-cards');
+        const providedDetails=Array.isArray(info.targetDetails)?info.targetDetails:[];
+        const normalizedDetails=providedDetails.map(d=>({entity:d?.entity||d?.target||d?.unit,hpBefore:d?.hpBefore||null,hpAfter:d?.hpAfter||null})).filter(d=>d.entity);
+        if(normalizedDetails.length>1 && targetCards && targetSingle){
+          targetSingle.classList.add('hidden'); targetCards.classList.remove('hidden'); targetCards.innerHTML='';
+          normalizedDetails.forEach((detail,index)=>{
+            const entity=detail.entity; const isPlayerTarget=entity.side==='player'||entity.__playerTarget==='self';
+            const card=document.createElement('div');card.className=`min-w-0 rounded-xl border ${isPlayerTarget?'border-cyan-700 bg-cyan-950/40':'border-rose-700 bg-rose-950/40'} p-1.5`;
+            const imgBox=document.createElement('div');imgBox.className='w-full aspect-square max-w-[112px] mx-auto rounded-lg overflow-hidden border border-slate-600 bg-slate-900';
+            const img=document.createElement('img');img.className='w-full h-full object-cover';img.alt=entity.name||'対象';
+            const hpAfter=detail.hpAfter||{current:entity.currentHp,max:entity.maxHp};
+            const dead=Number(hpAfter?.current??entity.currentHp??1)<=0;img.classList.toggle('popup-dead-image',dead);
+            img.onerror=()=>{img.onerror=null;img.src=createDummyCardImage(isPlayerTarget?'👤':'👹',isPlayerTarget?'#075985':'#9f1239');};
+            const publicTargetCard=entity.cardId?getOnlinePublicCard(entity.cardId):null;
+            img.src=entity.image||entity.iconImage||getCardImage(publicTargetCard)||getCardImage(entity)||createDummyCardImage(isPlayerTarget?'👤':'👹',isPlayerTarget?'#075985':'#9f1239');imgBox.appendChild(img);card.appendChild(imgBox);
+            const name=document.createElement('div');name.className=`mt-1 text-[10px] sm:text-xs font-black break-words ${isPlayerTarget?'text-cyan-200':'text-rose-200'}`;name.textContent=entity.name||`対象${index+1}`;card.appendChild(name);
+            const hp=document.createElement('div');hp.className='text-[9px] leading-tight text-slate-200 mt-1';
+            const before=detail.hpBefore;hp.textContent=hpAfter?.max>0?`${before&&before.current!=null?`${before.current}/${before.max} → `:''}${hpAfter.current}/${hpAfter.max}`:'HP —';card.appendChild(hp);
+            if(hpAfter?.max>0){const track=document.createElement('div');track.className='w-full h-1.5 rounded bg-slate-800 mt-1 overflow-hidden';const fill=document.createElement('div');fill.className=`h-full ${dead?'bg-rose-600':'bg-emerald-500'}`;fill.style.width=`${Math.max(0,Math.min(100,Number(hpAfter.current||0)/Number(hpAfter.max)*100))}%`;track.appendChild(fill);card.appendChild(track);}
+            targetCards.appendChild(card);
+          });
+          if(targetSide){targetSide.innerText='複数対象';targetSide.className='inline-flex px-3 py-1 rounded-full bg-slate-700 text-white text-xs sm:text-sm font-black mb-3';}
+        } else {
+          if(targetSingle)targetSingle.classList.remove('hidden');
+          if(targetCards){targetCards.classList.add('hidden');targetCards.innerHTML='';}
+          const single=normalizedDetails[0]||null;
+          const targetImg=document.getElementById('popup-target-img'),targetPlaceholder=document.getElementById('popup-target-placeholder');
+          const singleTarget=single?.entity||target;
+          const beforeSnap=single?.hpBefore||info.targetHpBefore,afterSnap=single?.hpAfter||info.targetHpAfter;
+          if(singleTarget){
+            if(targetPlaceholder){targetPlaceholder.classList.add('hidden');targetPlaceholder.classList.remove('flex');}
+            if(targetImg){targetImg.classList.remove('hidden');const targetDead=(afterSnap?.current??singleTarget.currentHp??1)<=0;targetImg.classList.toggle('popup-dead-image',targetDead);targetImg.onerror=()=>{targetImg.onerror=null;targetImg.classList.add('hidden');if(targetPlaceholder){targetPlaceholder.classList.remove('hidden');targetPlaceholder.classList.add('flex');}};targetImg.src=singleTarget.image||singleTarget.iconImage||getCardImage(singleTarget)||createDummyCardImage(targetIsPlayer?'👤':'👹',targetIsPlayer?'#075985':'#9f1239');}
+            const targetName=document.getElementById('popup-target-name');if(targetName)targetName.innerText=singleTarget.name||(targetIsPlayer?'プレイヤー':'対象');
+            setHp('target',beforeSnap,afterSnap,singleTarget);
+          }else{
+            if(targetImg)targetImg.classList.add('hidden');if(targetPlaceholder){targetPlaceholder.classList.remove('hidden');targetPlaceholder.classList.add('flex');}
+            const targetName=document.getElementById('popup-target-name');if(targetName)targetName.innerText=info.target||'対象なし';document.getElementById('popup-target-hp-wrap')?.classList.add('hidden');
           }
-          const targetName=document.getElementById("popup-target-name");if(targetName)targetName.innerText=target.name||(targetIsPlayer?'プレイヤー':'対象');
-          setHp('target',info.targetHpBefore,info.targetHpAfter,target);
-        }else{
-          if(targetImg)targetImg.classList.add('hidden');
-          if(targetPlaceholder){targetPlaceholder.classList.remove('hidden');targetPlaceholder.classList.add('flex');}
-          const targetName=document.getElementById("popup-target-name");if(targetName)targetName.innerText=info.target||'対象なし';
-          document.getElementById('popup-target-hp-wrap')?.classList.add('hidden');
+          if(targetSide){targetSide.className=`inline-flex px-3 py-1 rounded-full text-white text-xs sm:text-sm font-black mb-3 ${targetIsPlayer?'bg-cyan-600':'bg-rose-600'}`;targetSide.innerText=singleTarget?(targetIsPlayer?'味方':'敵'):'対象';}
         }
       }catch(popupError){
         console.error('Action popup detail error:',popupError);
@@ -6487,6 +6608,11 @@
       const targetCard=ev.target?.cardId?getOnlinePublicCard(ev.target.cardId):null;
       const actorCard=ev.actor?.cardId?getOnlinePublicCard(ev.actor.cardId):null;
       const target=ev.target?{...ev.target,side:mapSide(ev.target.side),image:ev.target.image||targetCard?.image||targetCard?.imageUrl||null}:null;
+      const targetDetails=(Array.isArray(ev.targetDetails)?ev.targetDetails:[]).map(d=>{
+        const raw=d?.entity||d?.target||d?.unit; if(!raw)return null;
+        const c=raw.cardId?getOnlinePublicCard(raw.cardId):null;
+        return {entity:{...raw,side:mapSide(raw.side),image:raw.image||c?.image||c?.imageUrl||null},hpBefore:d.hpBefore||null,hpAfter:d.hpAfter||null};
+      }).filter(Boolean);
       let actor=ev.actor?.side?{...ev.actor,side:mapSide(ev.actor.side),image:ev.actor.image||actorCard?.image||actorCard?.imageUrl||null}:ev.actor;
       const card=ev.card||getOnlinePublicCard(ev.cardId)||((allCards||[]).find(c=>c.id===ev.cardId)||null);
       let cardData;
@@ -6494,7 +6620,7 @@
         cardData=card||{cardType:'magic',name:ev.actionName,image:ev.actor?.image||null,desc:ev.description||''};
         actor={...(actor||{}),side:mapSide(ev.actor?.side||'player1'),name:ev.actor?.name||'プレイヤー',image:cardData.image||ev.actor?.image||null};
       }else cardData=card||{cardType:'unit',name:ev.actor?.name,image:actor?.image};
-      await showActionPopup(actor,ev.actionName,cardData,{target:target?.name||'対象なし',effect:ev.effect||'効果なし',result:ev.result||'変化なし',targetEntity:target,description:ev.description||'',actorHpBefore:ev.actorHpBefore,actorHpAfter:ev.actorHpAfter,targetHpBefore:ev.targetHpBefore,targetHpAfter:ev.targetHpAfter});
+      await showActionPopup(actor,ev.actionName,cardData,{target:targetDetails.length?targetDetails.map(d=>d.entity.name).filter(Boolean).join(' / '):(target?.name||'対象なし'),effect:ev.effect||'効果なし',result:ev.result||'変化なし',targetEntity:targetDetails[0]?.entity||target,targetDetails,description:ev.description||'',actorHpBefore:ev.actorHpBefore,actorHpAfter:ev.actorHpAfter,targetHpBefore:ev.targetHpBefore,targetHpAfter:ev.targetHpAfter});
     }catch(e){console.error('Online popup error:',e);await new Promise(r=>setTimeout(r,500));}
   }
   async function processOnlineEventQueue(){
