@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.28.3';
+const SERVER_VERSION = '3.28.4';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -439,7 +439,8 @@ function createRoom(owner, cfg) {
     battle: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    timer: null
+    timer: null,
+    rematchVotes: new Set()
   };
   room.players[0] = { sessionId: owner.sessionId, name: owner.name, ws: owner.ws, ready: false, online: true, lastSeen: Date.now(), assetsReady: profileAssetsReady(owner) };
   copySessionProfileToRoom(room, owner);
@@ -1105,13 +1106,15 @@ function checkWin(r, includeTurnLimit=false) {
   }
 }
 function finishBattle(r, winner, reason=null) {
-  if (!r?.battle) return;
+  if (!r?.battle || r.battle.phase === 'finished') return;
   clearTimeout(r.battle.timer);
   r.battle.timer = null;
   r.battle.phase = 'finished';
   r.battle.deadline = null;
   r.battle.winner = winner;
   r.status = 'finished';
+  r.updatedAt = Date.now();
+  r.rematchVotes = new Set();
   broadcastBattle(r, 'battle_end', { winner, reason });
 }
 function forfeitBattle(r, sid, reason='プレイヤーが退出しました。') {
@@ -1699,16 +1702,59 @@ server.on('upgrade',(req,socket) => {
     const r = roomBySession(sid);
     if (!r && type !== 'room_leave') return send(ws,'error',{code:'NOT_IN_ROOM',message:'部屋に参加していません。'});
 
+    if (type === 'rematch_request') {
+      if (!r?.battle || r.battle.phase !== 'finished' || r.status !== 'finished') {
+        return send(ws,'error',{code:'REMATCH_UNAVAILABLE',message:'再戦を開始できる状態ではありません。'});
+      }
+      if (playerSlot(r,sid) < 0) return send(ws,'error',{code:'REMATCH_UNAVAILABLE',message:'対戦プレイヤーのみ再戦を選択できます。'});
+      if (!bothPlayersOnline(r)) return send(ws,'error',{code:'REMATCH_UNAVAILABLE',message:'両プレイヤーの接続を確認できないため、再戦できません。'});
+      r.rematchVotes = r.rematchVotes instanceof Set ? r.rematchVotes : new Set();
+      r.rematchVotes.add(sid);
+      const playerIds = r.players.filter(Boolean).map(p=>p.sessionId);
+      const allVoted = playerIds.length === 2 && playerIds.every(id=>r.rematchVotes.has(id));
+      if (!allVoted) {
+        for (const player of r.players.filter(Boolean)) {
+          send(player.ws,'rematch_update',{ready:r.rematchVotes.has(player.sessionId),votes:r.rematchVotes.size,total:2});
+        }
+        return;
+      }
+      // Both players explicitly accepted. Rebuild a fresh battle using the same confirmed decks,
+      // deployment order and (for rental lottery modes) the same candidate pools.
+      r.rematchVotes = new Set();
+      r.updatedAt = Date.now();
+      broadcastRoom(r,'rematch_starting',{roomId:r.roomId});
+      try {
+        startBattle(r);
+        broadcastPlayers(r);
+      } catch (err) {
+        r.status = 'finished';
+        broadcastRoom(r,'error',{code:'REMATCH_START_FAILED',message:`再戦を開始できませんでした：${err.message}`});
+      }
+      return;
+    }
+
     if (type === 'room_leave') {
       if (!r) return send(ws,'left_room');
       if (isSpectator(r,sid)) {
         r.spectators.delete(sid); setSessionRoom(sid,null); send(ws,'left_room'); broadcastPlayers(r); return;
       }
-      if (r.battle && playerSlot(r,sid)>=0) {
-        const slot = playerSlot(r,sid);
-        if (slot >= 0 && r.players[slot]) r.players[slot].online = false;
+      const leavingSlot = playerSlot(r,sid);
+      if (r.battle && r.battle.phase !== 'finished' && leavingSlot >= 0) {
+        if (r.players[leavingSlot]) r.players[leavingSlot].online = false;
         forfeitBattle(r,sid,'プレイヤーが退出したため敗北しました。');
         setSessionRoom(sid,null); send(ws,'left_room'); broadcastPlayers(r); return;
+      }
+      if (r.battle?.phase === 'finished' || r.status === 'finished') {
+        // After a result screen, leaving closes the rematch room for both players instead of
+        // rewriting the already-finished winner as a second forfeit result.
+        const slot=playerSlot(r,sid);
+        if(slot>=0)r.players[slot]=null;
+        r.status='closed';r.updatedAt=Date.now();r.rematchVotes=new Set();
+        broadcastRoom(r,'room_closed',{reason:'対戦終了後にプレイヤーが退出したため部屋を終了しました。'});
+        for(const player of r.players.filter(Boolean))setSessionRoom(player.sessionId,null);
+        for(const spectatorId of r.spectators)setSessionRoom(spectatorId,null);
+        rooms.delete(r.roomId);
+        setSessionRoom(sid,null);send(ws,'left_room');return;
       }
       const idx = playerSlot(r,sid);
       if (idx < 0) return send(ws,'left_room');

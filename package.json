@@ -1,15 +1,15 @@
 {
   "name": "card-ai-online",
-  "version": "3.28.3",
+  "version": "3.28.4",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.28.3（ライバル画像・パッシブ・控え・対象表示修正）",
+  "description": "カードAIバトル オンライン対戦 v3.28.4（控え表示・オンライン戦闘結果・相互再戦修正）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/v3280-online-image-regression.js && node tests/v3281-online-turn-regression.js && node tests/v3282-card-browser-regression.js && node tests/v3283-battle-flow-regression.js",
+    "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/v3280-online-image-regression.js && node tests/v3281-online-turn-regression.js && node tests/v3282-card-browser-regression.js && node tests/v3283-battle-flow-regression.js && node tests/v3284-online-result-reserve-regression.js",
     "test:card-id": "node tests/card-id-migration-test.js",
     "test:offline": "node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js",
-    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js && node tests/story-mode-v3277-regression.js && node tests/story-mode-v3278-scope-regression.js && node tests/story-mode-v3279-ui-regression.js && node tests/v3280-online-image-regression.js && node tests/v3281-online-turn-regression.js && node tests/v3282-card-browser-regression.js && node tests/v3283-battle-flow-regression.js",
+    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js && node tests/story-mode-v3277-regression.js && node tests/story-mode-v3278-scope-regression.js && node tests/story-mode-v3279-ui-regression.js && node tests/v3280-online-image-regression.js && node tests/v3281-online-turn-regression.js && node tests/v3282-card-browser-regression.js && node tests/v3283-battle-flow-regression.js && node tests/v3284-online-result-reserve-regression.js",
     "test:ai": "node tests/offline-ai-v321-regression.js",
     "test:story": "node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js && node tests/story-mode-v3275-recovery-regression.js && node tests/story-mode-v3276-runtime-regression.js && node tests/story-mode-v3277-regression.js && node tests/story-mode-v3278-scope-regression.js && node tests/story-mode-v3279-ui-regression.js"
   },
