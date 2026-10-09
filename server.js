@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.27.9';
+const SERVER_VERSION = '3.28.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -106,6 +106,16 @@ function sanitizeCardNoImage(c, includePrivate=false) {
   const x = sanitizeCard(c, includePrivate);
   if (x) { delete x.image; delete x.imageUrl; }
   return x;
+}
+function cardImageValue(c) {
+  if (typeof c?.image === 'string' && c.image) return c.image;
+  if (typeof c?.imageUrl === 'string' && c.imageUrl) return c.imageUrl;
+  return null;
+}
+function cardWithoutImage(c) {
+  const out = sanitizeCard(c, true);
+  if (out) { delete out.image; delete out.imageUrl; }
+  return out;
 }
 function sanitizeDeck(d) {
   if (!d?.id) return null;
@@ -490,7 +500,7 @@ function sendDeploymentOptions(r, sid) {
   const stripImage = c => { const x=clone(c); if (x) { delete x.image; delete x.imageUrl; } return x; };
   const light={...opts,units:(opts.units||[]).map(stripImage),magics:(opts.magics||[]).map(stripImage)};
   send(s.ws, 'deployment_options', light);
-  const assets=[...(opts.units||[]),...(opts.magics||[])].filter(c=>typeof c?.image==='string' && c.image).map(c=>({id:String(c.id),image:c.image}));
+  const assets=[...(opts.units||[]),...(opts.magics||[])].map(c=>({id:String(c?.id||''),image:cardImageValue(c)})).filter(a=>a.id&&a.image);
   sendChunkedJson(s.ws,'deployment_assets',assets,256*1024);
 }
 function prepareCandidatePools(r) {
@@ -503,13 +513,50 @@ function prepareCandidatePools(r) {
   const mags = source.filter(isMagicCard);
   if (chars.length < 10) throw new Error('候補抽選に必要なキャラクターカードが10枚未満です。');
   if (mags.length < 20) throw new Error('候補抽選に必要なマジックカードが20枚未満です。');
-  r.pools[p1.sessionId] = { units: sample(chars, 10), magics: sample(mags, 20) };
-  r.pools[p2.sessionId] = { units: sample(chars, 10), magics: sample(mags, 20) };
+  // プロフィール更新後に参照先が差し替わっても候補抽選の内容が変わらないよう、
+  // 抽選したカードはスナップショットとして保管する。
+  r.pools[p1.sessionId] = { units: sample(chars, 10).map(clone), magics: sample(mags, 20).map(clone) };
+  r.pools[p2.sessionId] = { units: sample(chars, 10).map(clone), magics: sample(mags, 20).map(clone) };
   for (const p of [p1, p2]) {
+    const pool = r.pools[p.sessionId];
+    const all = [...pool.units, ...pool.magics];
+    const assetsById = new Map();
+    for (const card of all) {
+      const image = cardImageValue(card);
+      if (image && card?.id) assetsById.set(String(card.id), {id:String(card.id), image});
+    }
+    // カード本体(ランク・効果等)と画像を別送する。画像が大きくてもpool_readyが
+    // WebSocketの単一フレーム上限を超えず、画像の到着後に同じ候補カードへ結合できる。
     send(p.ws, 'pool_ready', {
-      units: r.pools[p.sessionId].units.map(c => sanitizeCard(c, true)),
-      magics: r.pools[p.sessionId].magics.map(c => sanitizeCard(c, true))
+      units: pool.units.map(cardWithoutImage),
+      magics: pool.magics.map(cardWithoutImage)
     });
+    sendChunkedJson(p.ws, 'pool_assets', [...assetsById.values()], 256*1024);
+  }
+}
+
+function maybePrepareCandidatePools(r) {
+  if (!r || r.battle || !['super_rental','random_pot'].includes(r.rule)) return false;
+  if (!r.players.every(Boolean) || !r.players.every(p => p.ready)) return false;
+  if (r.players.every(p => r.pools[p.sessionId])) { r.status = 'preparing'; return false; }
+  if (!allBattlePrerequisitesReady(r)) {
+    r.status = 'preparing';
+    broadcastRoom(r, 'battle_preparing', {message:'両プレイヤーのカード画像を同期しています…'});
+    broadcastPlayers(r);
+    return false;
+  }
+  try {
+    prepareCandidatePools(r);
+    r.status = 'preparing';
+    r.updatedAt = Date.now();
+    broadcastPlayers(r);
+    return true;
+  } catch (err) {
+    r.status = 'waiting';
+    for (const p of r.players.filter(Boolean)) p.ready = false;
+    broadcastRoom(r, 'error', {code:'POOL_FAILED',message:err.message});
+    broadcastPlayers(r);
+    return false;
   }
 }
 
@@ -910,7 +957,7 @@ function pubUnit(u, includeImage=false) {
 function publicMagicCards(pl, includeImage=false) {
   return (pl.magicIds || []).map(id => pl.magicCards?.[id]).filter(Boolean).map(c => {
     const x = sanitizeCard(c, true);
-    if (!includeImage) { x.image = null; x.imageUrl = null; }
+    if (!includeImage) { delete x.image; delete x.imageUrl; }
     return x;
   });
 }
@@ -945,8 +992,8 @@ function publicBattleAssets(b) {
   const map = new Map();
   for (const pl of [b?.p1,b?.p2]) {
     if (!pl) continue;
-    for (const u of pl.units || []) if (u.cardId && typeof u.image === 'string' && u.image) map.set(String(u.cardId), {id:String(u.cardId), image:u.image});
-    for (const id of pl.magicIds || []) { const c=pl.magicCards?.[id]; if (c?.id && typeof c.image==='string' && c.image) map.set(String(c.id), {id:String(c.id),image:c.image}); }
+    for (const u of pl.units || []) { const image=cardImageValue(u); if (u.cardId && image) map.set(String(u.cardId), {id:String(u.cardId), image}); }
+    for (const id of pl.magicIds || []) { const c=pl.magicCards?.[id]; const image=cardImageValue(c); if (c?.id && image) map.set(String(c.id), {id:String(c.id),image}); }
   }
   return [...map.values()];
 }
@@ -1480,7 +1527,7 @@ server.on('upgrade',(req,socket) => {
       if (r) r.profiles[sid] = clone(s.profile);
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
       if (r) { for (const p of r.players.filter(Boolean)) if (r.deckSelections[p.sessionId]) sendDeploymentOptions(r,p.sessionId); }
-      if (r) maybeStartBattle(r);
+      if (r) { if (r.rule === 'super_rental' || r.rule === 'random_pot') maybePrepareCandidatePools(r); else maybeStartBattle(r); }
       return;
     }
 
@@ -1492,7 +1539,7 @@ server.on('upgrade',(req,socket) => {
       if (r) r.profiles[sid] = clone(s.profile);
       markAssetReadyForRoom(r, sid);
       const ready = profileAssetsReady(s);
-      const done = ready || (Number(m.batch||0) + 1 >= Number(m.total||1));
+      const done = Number(m.batch||0) + 1 >= Number(m.total||1);
       send(ws,'profile_assets_ack',{done,batch:Number(m.batch||0),total:Number(m.total||1),count,ready});
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
       if (r) {
@@ -1500,7 +1547,7 @@ server.on('upgrade',(req,socket) => {
           if (r.deckSelections[p.sessionId]) sendDeploymentOptions(r,p.sessionId);
         }
       }
-      if (r && ready) maybeStartBattle(r);
+      if (r && ready) { if (r.rule === 'super_rental' || r.rule === 'random_pot') maybePrepareCandidatePools(r); else maybeStartBattle(r); }
       return;
     }
 
@@ -1641,11 +1688,7 @@ server.on('upgrade',(req,socket) => {
       }
       if (r.players.every(Boolean) && r.players.every(x=>x.ready)) {
         if (r.rule==='super_rental'||r.rule==='random_pot') {
-          if (!r.pools[r.players[0].sessionId] || !r.pools[r.players[1].sessionId]) {
-            try { r.status='preparing'; prepareCandidatePools(r); } catch (err) { r.status='waiting'; for (const q of r.players) q.ready=false; broadcastRoom(r,'error',{code:'POOL_FAILED',message:err.message}); }
-          } else {
-            r.status='preparing';
-          }
+          maybePrepareCandidatePools(r);
         } else {
           r.status='preparing';
           if (r.selected[r.players[0].sessionId] && r.selected[r.players[1].sessionId]) {
