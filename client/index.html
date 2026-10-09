@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.4 - 5戦ストーリーモード</title>
+  <title>カードAI対戦ゲーム v3.27.5 - ストーリー表示修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.4</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.5</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -1448,6 +1448,34 @@
       return {cards:nextCards, decks:nextDecks, idMap};
     }
 
+    // カードID移行時に、IndexedDBへ保存済みのストーリー状態／編成案が古いIDを
+    // 持ち続けないようにする。デッキ本体と違い、これらはカードストア外に保存される。
+    function remapStoryCardReferences(value, idMap, parentKey = '') {
+      if (Array.isArray(value)) {
+        if (['unitIds','magicIds','availableUnitIds','availableMagicIds','initialUnitIds','initialMagicIds'].includes(parentKey) ||
+            (['active','reserve'].includes(parentKey))) {
+          return value.map(id => String(idMap.get(String(id)) || id));
+        }
+        return value.map(item => remapStoryCardReferences(item, idMap, parentKey));
+      }
+      if (!value || typeof value !== 'object') return value;
+      const out = {...value};
+      for (const [key, child] of Object.entries(out)) {
+        out[key] = remapStoryCardReferences(child, idMap, key);
+      }
+      return out;
+    }
+
+    async function remapPersistedStoryCardReferences(idMap) {
+      if (!idMap || idMap.size === 0) return;
+      for (const key of ['story_mode_state', 'story_mode_draft']) {
+        const record = await getFromStore('settings', key);
+        if (!record || !record.value) continue;
+        const value = remapStoryCardReferences(record.value, idMap);
+        await saveToStore('settings', {key, value});
+      }
+    }
+
     async function normalizeLoadedCards() {
       const beforeCards = allCards;
       const beforeDecks = allDecks;
@@ -1480,6 +1508,8 @@
         if (String(oldId) !== String(newId)) await deleteFromStore('cards', oldId);
       }
       for (const deck of migration.decks) await saveToStore('decks', deck);
+      // カードID移行は story_mode_state / story_mode_draft の参照も同時に移行する。
+      await remapPersistedStoryCardReferences(migration.idMap);
       allCards = await getAllFromStore('cards');
       allDecks = await getAllFromStore('decks');
     }
@@ -2626,16 +2656,83 @@
 
     function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
 
+    function storyResolveCardId(id, type) {
+      const key = String(id ?? '');
+      const direct = allCards.find(c => String(c.id) === key && c.cardType === type);
+      if (direct) return String(direct.id);
+      // 旧ビルトインカードは systemKey に旧IDが残るため、すでに移行済みの保存データも復元できる。
+      const legacy = key.replace(/^builtin:/, '');
+      const bySystemKey = allCards.find(c => c.cardType === type && c.systemKey === `builtin:${legacy}`);
+      return bySystemKey ? String(bySystemKey.id) : null;
+    }
+    function storyCardIdArrayIsValid(ids, type, minCount = 0) {
+      if (!Array.isArray(ids) || ids.length < minCount) return false;
+      const unique = new Set(ids.map(String));
+      if (unique.size !== ids.length) return false;
+      return ids.every(id => storyCardById(id)?.cardType === type);
+    }
+    function storyParticipantCardRefsAreValid(p) {
+      return !!p && storyCardIdArrayIsValid(p.unitIds, 'unit', 3) &&
+        Array.isArray(p.magicIds) && storyCardIdArrayIsValid(p.magicIds, 'magic', 0);
+    }
+    function storyLoadedStateReferencesAreValid(state) {
+      if (!state || !storyCardIdArrayIsValid(state.availableUnitIds, 'unit', 3) ||
+          !storyCardIdArrayIsValid(state.availableMagicIds, 'magic', 0)) return false;
+      if (!storyCardIdArrayIsValid(state.initialUnitIds, 'unit', 3) ||
+          !storyCardIdArrayIsValid(state.initialMagicIds, 'magic', 0)) return false;
+      if (!state.playerDeck || !storyCardIdArrayIsValid(state.playerDeck.unitIds, 'unit', 3) ||
+          !storyCardIdArrayIsValid(state.playerDeck.magicIds, 'magic', 0)) return false;
+      if (!Array.isArray(state.opponents) || state.opponents.length !== 5 ||
+          !state.opponents.every(storyParticipantCardRefsAreValid)) return false;
+      if (Array.isArray(state.participants) && !state.participants.every(storyParticipantCardRefsAreValid)) return false;
+      if (state.currentOpponent && !storyParticipantCardRefsAreValid(state.currentOpponent)) return false;
+      // 完了時に次の相手がいないのは正常。進行中／敗退時は現在の相手を保持する。
+      if (state.active && !state.completed && !state.defeated && !state.currentOpponent) return false;
+      if (state.completed && state.currentOpponent) return false;
+      return true;
+    }
+
+    function storyRepairParticipantCardRefs(participant, index) {
+      const original = participant && typeof participant === 'object' ? participant : {};
+      const rival = original.type === 'rival' ? allRivals.find(r => String(r.id) === String(original.rivalId)) : null;
+      if (rival) {
+        const fixed = storyBuildFixedParticipant(rival, index + 1);
+        if (fixed && storyParticipantCardRefsAreValid(fixed)) return fixed;
+      }
+      const repairIds = (rawIds, type, minCount, maxCount) => {
+        const pool = allCards.filter(c => c.cardType === type);
+        const poolIds = new Set(pool.map(c => String(c.id)));
+        const raw = Array.isArray(rawIds) ? rawIds : [];
+        const ids = [...new Set(raw.map(id => storyResolveCardId(id, type)).filter(id => id && poolIds.has(id)))].slice(0, maxCount);
+        const desired = Math.min(pool.length, Math.max(minCount, Math.min(maxCount, raw.length || minCount)));
+        const candidates = storyShuffle(pool.filter(c => !ids.includes(String(c.id))));
+        ids.push(...candidates.slice(0, Math.max(0, desired - ids.length)).map(c => String(c.id)));
+        return ids;
+      };
+      const generated = storyMakeInstantRival(index + 1, original.intelligence || storyGeneratedAi(index));
+      return {
+        ...generated,
+        ...original,
+        id: original.id || generated.id,
+        type: original.type || 'instant',
+        name: original.name || generated.name,
+        iconImage: original.iconImage || null,
+        intelligence: original.intelligence || generated.intelligence,
+        unitIds: repairIds(original.unitIds, 'unit', 3, 5),
+        magicIds: repairIds(original.magicIds, 'magic', 0, 10)
+      };
+    }
+
     function storyRepairLoadedState(){
       if(!storyModeState)return false;
       const validMode=storyModeState.mode==='five_match' && Number(storyModeState.version)>=6 && Array.isArray(storyModeState.opponents) && storyModeState.opponents.length===5;
-      if(validMode && storyModeState.currentOpponent && storyModeState.playerDeck && Array.isArray(storyModeState.availableUnitIds) && Array.isArray(storyModeState.availableMagicIds))return false;
+      if(validMode && storyLoadedStateReferencesAreValid(storyModeState))return false;
 
       const old=storyModeState||{};
       const allUnitIds=new Set(allCards.filter(c=>c.cardType==='unit').map(c=>String(c.id)));
       const allMagicIds=new Set(allCards.filter(c=>c.cardType==='magic').map(c=>String(c.id)));
-      const existingUnits=[...new Set((old.availableUnitIds||[]).map(String).filter(id=>allUnitIds.has(id)))];
-      const existingMagics=[...new Set((old.availableMagicIds||[]).map(String).filter(id=>allMagicIds.has(id)))];
+      const existingUnits=[...new Set((old.availableUnitIds||[]).map(id=>storyResolveCardId(id,'unit')).filter(id=>id&&allUnitIds.has(id)))];
+      const existingMagics=[...new Set((old.availableMagicIds||[]).map(id=>storyResolveCardId(id,'magic')).filter(id=>id&&allMagicIds.has(id)))];
       const fillUnique=(arr,type,want)=>{
         const pool=allCards.filter(c=>c.cardType===type&&!arr.includes(String(c.id)));
         arr.push(...storyShuffle(pool).slice(0,Math.max(0,want-arr.length)).map(c=>String(c.id)));
@@ -2648,30 +2745,34 @@
       for(const entry of draft){
         if(opponents.length>=5)break;
         let p=null;
-        if(entry.type==='rival'){const r=allRivals.find(x=>x.id===entry.rivalId);if(r)p=storyBuildFixedParticipant(r,opponents.length+1);}
+        if(entry.type==='rival'){const r=allRivals.find(x=>String(x.id)===String(entry.rivalId));if(r)p=storyBuildFixedParticipant(r,opponents.length+1);}
         else p=storyMakeInstantRival(opponents.length+1,entry.intelligence||storyGeneratedAi(opponents.length));
         if(p)opponents.push(p);
       }
       while(opponents.length<5)opponents.push(storyMakeInstantRival(opponents.length+1,storyGeneratedAi(opponents.length)));
+      // 古い保存データではカードID移行後も相手デッキのIDが旧値のまま残ることがある。
+      // 全5戦の相手を検査し、名前・難易度を保ちながら有効なカードIDへ修復する。
+      opponents=opponents.slice(0,5).map((p,i)=>storyRepairParticipantCardRefs(p,i));
 
       const wins=Math.min(5,Math.max(0,Number(old.wins)||0));
-      const rawDeckUnits=[...(old.playerDeck?.unitIds||[])].map(String).filter(id=>existingUnits.includes(id)).slice(0,5);
-      const rawDeckMagics=[...(old.playerDeck?.magicIds||[])].map(String).filter(id=>existingMagics.includes(id)).slice(0,10);
+      const rawDeckUnits=[...new Set([...(old.playerDeck?.unitIds||[])].map(id=>storyResolveCardId(id,'unit')).filter(id=>id&&existingUnits.includes(id)))].slice(0,5);
+      const rawDeckMagics=[...new Set([...(old.playerDeck?.magicIds||[])].map(id=>storyResolveCardId(id,'magic')).filter(id=>id&&existingMagics.includes(id)))].slice(0,10);
       const units=rawDeckUnits.length>=3?rawDeckUnits:existingUnits.slice(0,5);
       const magics=rawDeckMagics.length?rawDeckMagics:existingMagics.slice(0,10);
-      const rawActive=[...(old.playerDeployment?.active||[])].map(String).filter(id=>units.includes(id));
-      const rawReserve=[...(old.playerDeployment?.reserve||[])].map(String).filter(id=>units.includes(id)&&!rawActive.includes(id));
+      const rawActive=[...(old.playerDeployment?.active||[])].map(id=>storyResolveCardId(id,'unit')).filter(id=>id&&units.includes(id));
+      const rawReserve=[...(old.playerDeployment?.reserve||[])].map(id=>storyResolveCardId(id,'unit')).filter(id=>id&&units.includes(id)&&!rawActive.includes(id));
       const deployment={active:rawActive.length===3?rawActive.slice(0,3):units.slice(0,3),reserve:rawReserve.length===Math.max(0,units.length-3)?rawReserve.slice(0,2):units.slice(3,5)};
 
+      const completed=!!old.completed || wins>=5;
       storyModeState={
-        version:6,mode:'five_match',active:old.active!==false&&!old.completed&&!old.defeated,completed:!!old.completed,defeated:!!old.defeated,
-        currentMatchIndex:Math.min(4,wins),wins,
+        version:6,mode:'five_match',active:old.active!==false&&!completed&&!old.defeated,completed,defeated:!!old.defeated,
+        currentMatchIndex:Math.min(4,Math.max(0,Number(old.currentMatchIndex ?? wins)||0)),wins,
         availableUnitIds:[...existingUnits],availableMagicIds:[...existingMagics],
-        initialUnitIds:(old.initialUnitIds||[]).filter(id=>allUnitIds.has(String(id))).slice(0,5).map(String),
-        initialMagicIds:(old.initialMagicIds||[]).filter(id=>allMagicIds.has(String(id))).slice(0,10).map(String),
+        initialUnitIds:[...new Set((old.initialUnitIds||[]).map(id=>storyResolveCardId(id,'unit')).filter(id=>id&&allUnitIds.has(id)))].slice(0,5),
+        initialMagicIds:[...new Set((old.initialMagicIds||[]).map(id=>storyResolveCardId(id,'magic')).filter(id=>id&&allMagicIds.has(id)))].slice(0,10),
         playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:deployment,
         participants:[{id:'story_player',type:'player',name:playerName,iconImage:playerIcon,intelligence:'master',unitIds:[...units],magicIds:[...magics]}],
-        opponents,currentOpponent:opponents[Math.min(4,wins)]||null,rewardHistory:old.rewardHistory||[]
+        opponents,currentOpponent:completed?null:(opponents[Math.min(4,Math.max(0,Number(old.currentMatchIndex ?? wins)||0))]||null),rewardHistory:old.rewardHistory||[]
       };
       if(storyModeState.initialUnitIds.length!==5)storyModeState.initialUnitIds=existingUnits.slice(0,5);
       if(storyModeState.initialMagicIds.length!==10)storyModeState.initialMagicIds=existingMagics.slice(0,10);
