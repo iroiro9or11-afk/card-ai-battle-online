@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.27.3';
+const SERVER_VERSION = '3.27.4';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -24,9 +24,15 @@ const ABNORMALITY_DEFS = Object.freeze({
   paralysis: { name:'麻痺', kind:'debuff' },
   freeze: { name:'凍結', kind:'debuff' },
   slow: { name:'鈍足', kind:'debuff' },
-  weak: { name:'虚弱', kind:'debuff' }
+  weak: { name:'虚弱', kind:'debuff' },
+  taunt: { name:'挑発', kind:'debuff' },
+  stealth: { name:'隠密', kind:'buff' }
 });
 function abnormalityName(type) { return ABNORMALITY_DEFS[type]?.name || String(type || '状態異常'); }
+function durationActive(value) { const n = Number(value); return n === -1 || n > 0; }
+function normalizeDuration(value) { const n = Number(value); return n === -1 ? -1 : Math.max(1, Number.isFinite(n) && n > 0 ? n : 1); }
+function durationText(value) { return Number(value) === -1 ? '永続' : `${Math.max(1, Number(value)||1)}ターン`; }
+function randomItem(items) { return items.length ? items[crypto.randomInt(items.length)] : null; }
 
 function uid(prefix='id') { return `${prefix}_${Date.now()}_${crypto.randomBytes(5).toString('hex')}`; }
 function clone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
@@ -50,6 +56,13 @@ function sample(arr, n) {
 }
 function isUnitCard(c) { return c?.cardType === 'unit'; }
 function isMagicCard(c) { return c?.cardType === 'magic'; }
+function estimateUnitRank(stats={}) {
+  const hp = Math.max(1000, Math.min(10000, Number.isFinite(Number(stats.hp)) ? Number(stats.hp) : 3000));
+  const atk = Math.max(500, Math.min(5000, Number.isFinite(Number(stats.atk)) ? Number(stats.atk) : 1500));
+  const priority = Math.max(0, Math.min(100, Number.isFinite(Number(stats.priority)) ? Number(stats.priority) : 50));
+  const total = hp + atk * 2 + priority * 50;
+  return Math.round((1 + total / 25000 * 5) * 10) / 10;
+}
 function cardIdsUnique(ids) {
   return Array.isArray(ids) && ids.every((v, i) => ids.indexOf(v) === i);
 }
@@ -65,12 +78,25 @@ function sanitizeCard(c, includePrivate=false) {
       ? [...new Set(c.subAttrs.map(x => String(x || '').trim()).filter(x => x && !MAIN_ATTRIBUTES.includes(x) && x !== String(c.mainAttr || '').trim()))].slice(0, 2)
       : [],
     stats: clone(c.stats || {}),
+    rank: isUnitCard(c) ? (c.rank != null && Number.isFinite(Number(c.rank)) && Number(c.rank) > 0 ? Number(c.rank) : estimateUnitRank(c.stats || {})) : null,
     image: typeof c.image === 'string' ? c.image : null,
     imageUrl: typeof c.imageUrl === 'string' ? c.imageUrl : null
   };
   if (includePrivate) {
-    base.skills = clone(c.skills || []);
-    base.effect = clone(c.effect || null);
+    const normalizeEffect = effect => {
+      if (!effect || typeof effect !== 'object') return effect;
+      const out = clone(effect);
+      if (out.type === 'damage_cut_ratio') { out.type = 'damage_taken_ratio'; out.val = -(Number(out.val) || 0); }
+      return out;
+    };
+    const normalizeSkill = skill => {
+      const out = clone(skill || {});
+      out.mainEffect = normalizeEffect(out.mainEffect);
+      out.subEffect = normalizeEffect(out.subEffect);
+      return out;
+    };
+    base.skills = (Array.isArray(c.skills) ? c.skills : []).map(normalizeSkill);
+    base.effect = c.effect ? normalizeSkill(c.effect) : null;
     base.desc = String(c.desc ?? c.description ?? '').slice(0, 5000);
     base.description = base.desc;
   }
@@ -504,6 +530,7 @@ function buildUnit(card, side, active) {
     instanceId: uid('unit'),
     cardId: String(card.id),
     name: card.name,
+    rank: Number(card.rank)||null,
     mainAttr: card.mainAttr,
     subAttrs: card.subAttrs || [],
     baseMaxHp:maxHp,
@@ -551,12 +578,17 @@ function effSpeed(u) {
   const base = Number(u.priority || 0) + [...(u.buffs || []), ...(u.debuffs || [])]
     .filter(x => x.type === 'speed')
     .reduce((a, x) => a + Number(x.val || 0), 0);
-  return (u.statuses || []).some(x => x.type === 'slow' && x.duration > 0) ? Math.floor(base / 2) : base;
+  return (u.statuses || []).some(x => x.type === 'slow' && durationActive(x.duration)) ? Math.floor(base / 2) : base;
 }
-function damage(u, amount) {
-  let cut = 0;
-  for (const a of (u.buffs || [])) if (a.type === 'dmg_cut') cut = Math.max(cut, Number(a.val) || 0);
-  const d = Math.max(0, Math.round(Number(amount || 0) * (1 - Math.min(100, cut) / 100)));
+function damage(u, amount, bypassReceivedDamageModifiers=false) {
+  let finalAmount = Math.max(0, Number(amount) || 0);
+  if (!bypassReceivedDamageModifiers) {
+    const receivedRatio = [...(u.buffs || []), ...(u.debuffs || [])]
+      .filter(x => x.type === 'damage_taken_ratio' || x.type === 'dmg_cut')
+      .reduce((sum, x) => sum + (x.type === 'dmg_cut' ? -(Number(x.val)||0) : (Number(x.val)||0)), 0);
+    finalAmount *= Math.max(0, 1 + receivedRatio / 100);
+  }
+  const d = Math.max(0, Math.round(finalAmount));
   const before = u.currentHp;
   u.currentHp = Math.max(0, u.currentHp - d);
   return { before, after: u.currentHp, damage: d };
@@ -568,12 +600,12 @@ function addStatus(t, s, isBuff) {
 function addAbnormality(t, status, duration, appliedTurn) {
   if (!t) return false;
   t.statuses = t.statuses || [];
-  if (t.statuses.some(x => x.type === status && Number(x.duration) > 0)) return false;
-  t.statuses.push({ type:status, duration:Math.max(1, Number(duration)||1), appliedTurn:appliedTurn ?? null });
+  if (t.statuses.some(x => x.type === status && durationActive(x.duration))) return false;
+  t.statuses.push({ type:status, duration:normalizeDuration(duration), appliedTurn:appliedTurn ?? null });
   return true;
 }
-function hasStatus(t, status) { return !!(t?.statuses || []).some(x => x.type === status && Number(x.duration) > 0); }
-function hasAnyStatus(t) { return !!(t?.statuses || []).some(x => Number(x.duration) > 0); }
+function hasStatus(t, status) { return !!(t?.statuses || []).some(x => x.type === status && durationActive(x.duration)); }
+function hasAnyStatus(t) { return !!(t?.statuses || []).some(x => durationActive(x.duration)); }
 function effectResultSucceeded(result) {
   if (result == null) return false;
   const text = String(result);
@@ -665,18 +697,51 @@ function evalCond(b, cond, actor) {
   if (cond.type === 'enemy_has_any_status') return enemies.some(u => hasAnyStatus(u));
   return true;
 }
+function resolveSingleTarget(b, actor, type, pool, selectedTarget=null) {
+  if (!pool.length) return [];
+  const isManual = type === 'select_enemy_1' || type === 'select_ally_1';
+  // 敵味方からのランダム1体は、陣営を問わず挑発中の対象を優先する。
+  if (type === 'random_all_1') {
+    const taunts = pool.filter(t => hasStatus(t, 'taunt'));
+    if (taunts.length) return [randomItem(taunts)];
+  }
+  if (isManual) {
+    const picked = selectedTarget;
+    if (!picked) return [];
+    if (actor && actor.side !== picked.side) {
+      // 明示的に挑発個体Aを指定した場合、別の挑発個体Bには移さない。
+      if (hasStatus(picked, 'taunt')) return [picked];
+      // 隠密中の敵は、唯一の出撃個体であっても指定対象にできない。
+      if (hasStatus(picked, 'stealth')) return [];
+      const taunts = pool.filter(t => t.side === picked.side && hasStatus(t, 'taunt'));
+      if (taunts.length) return [randomItem(taunts)];
+    }
+    return [picked];
+  }
+  if (!type.startsWith('random_')) return [];
+  const hostileTaunts = pool.filter(t => actor && t.side !== actor.side && hasStatus(t, 'taunt'));
+  if (hostileTaunts.length) return [randomItem(hostileTaunts)];
+  const eligible = pool.filter(t => {
+    if (!actor || actor.side === t.side || !hasStatus(t, 'stealth')) return true;
+    // 隠密は、相手陣営にほかの出撃個体がいる間はランダム対象から除外。
+    return activeUnits(b, t.side).filter(x => x.currentHp > 0).length <= 1;
+  });
+  if (!eligible.length) return [];
+  return [randomItem(eligible)];
+}
 function targets(b, actor, type, cond, selected, isMagic=false) {
   if (type === 'same_main_target') return [];
-  if (type === 'player_self') return [{ __playerTarget: 'self', name: actor.side === 'player1' ? b.p1.name : b.p2.name }];
-  if (type === 'player_opp') return [{ __playerTarget: 'opp', name: actor.side === 'player1' ? b.p2.name : b.p1.name }];
+  if (type === 'player_self') return [{ __playerTarget: 'self', side:actor.side, name: actor.side === 'player1' ? b.p1.name : b.p2.name }];
+  if (type === 'player_opp') return [{ __playerTarget: 'opp', side:actor.side === 'player1' ? 'player2' : 'player1', name: actor.side === 'player1' ? b.p2.name : b.p1.name }];
   if (type === 'self') return [actor];
   const pool = targetPool(b, actor, type).filter(t => matchesTarget(t, cond));
   if (!pool.length) return [];
   if (type === 'select_enemy_1' || type === 'select_ally_1') {
     const x = pool.find(t => t.instanceId === selected);
-    return x ? [x] : (isMagic ? [pool[0]] : []);
+    if (!x) return isMagic ? resolveSingleTarget(b, actor, type, pool, null) : [];
+    return resolveSingleTarget(b, actor, type, pool, x);
   }
-  if (type.startsWith('random_')) return [pool[crypto.randomInt(pool.length)]];
+  if (type.startsWith('random_')) return resolveSingleTarget(b, actor, type, pool, null);
   return pool;
 }
 function applyEffect(b, eff, target, actor, isMagic=false) {
@@ -689,7 +754,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
     return `AP ${eff.val >= 0 ? '+' : ''}${eff.val}`;
   }
   if (target.__playerTarget) return null;
-  const duration = Math.max(1, Number(eff.duration) || 1);
+  const duration = normalizeDuration(eff.duration);
   const appliedTurn = b._statusApplicationTiming === 'battle_start' ? b.turn - 1 : b.turn;
   if (eff.type === 'dmg_atk_ratio') {
     if (isMagic) return null;
@@ -698,23 +763,25 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
     if (target.currentHp <= 0 && r.before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
     return `${target.name}に${r.damage}ダメージ`;
   }
-  if (eff.type === 'dmg_fixed') {
-    const r = damage(target, Number(eff.val) || 0);
+  if (eff.type === 'dmg_fixed' || eff.type === 'dmg_fixed_pierce') {
+    const r = damage(target, Number(eff.val) || 0, eff.type === 'dmg_fixed_pierce');
     if (r.damage > 0) triggerPassiveTiming(b,'hp_decrease',target);
     if (target.currentHp <= 0 && r.before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
-    return `${target.name}に${r.damage}ダメージ`;
+    return `${target.name}に${r.damage}${eff.type === 'dmg_fixed_pierce' ? 'の固定貫通ダメージ' : 'ダメージ'}`;
   }
   if (eff.type === 'heal_fixed' || eff.type === 'heal_max_hp_ratio') {
-    if ((target.debuffs || []).some(x => x.type === 'heal_block' && x.duration > 0)) return '回復禁止中';
+    if ((target.debuffs || []).some(x => x.type === 'heal_block' && durationActive(x.duration))) return '回復禁止中';
     const v = eff.type === 'heal_fixed' ? Number(eff.val) || 0 : Math.round(target.maxHp * Number(eff.val || 0) / 100);
     const before = target.currentHp;
     target.currentHp = Math.min(target.maxHp, target.currentHp + v);
     if (target.currentHp > before) triggerPassiveTiming(b,'hp_increase',target);
     return `${target.name}のHP +${target.currentHp - before}`;
   }
-  if (eff.type === 'damage_cut_ratio') {
-    addStatus(target, { type:'dmg_cut', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
-    return `被ダメージ${eff.val}%カット`;
+  if (eff.type === 'damage_taken_ratio' || eff.type === 'damage_cut_ratio') {
+    // 新仕様: 正数=被ダメージ増加(デバフ)、負数=被ダメージ減少(バフ)。
+    const val = eff.type === 'damage_cut_ratio' ? -(Number(eff.val)||0) : (Number(eff.val)||0);
+    addStatus(target, { type:'damage_taken_ratio', val, duration, source:val < 0?'buff':'debuff', appliedTurn }, val < 0);
+    return `受けるダメージ ${val>=0?'+':''}${val}%（${val>0?'増加・デバフ':val<0?'減少・バフ':'変化なし'}） / ${durationText(duration)}`;
   }
   if (eff.type === 'mod_atk_ratio' || eff.type === 'mod_atk_val') {
     addStatus(target, { type:eff.type==='mod_atk_ratio'?'atk_ratio':'atk_val', val:Number(eff.val)||0, duration, source:Number(eff.val)>=0?'buff':'debuff', appliedTurn }, Number(eff.val)>=0);
@@ -749,7 +816,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   if (eff.type === 'status_apply') {
     const ok = addAbnormality(target, eff.status || 'poison', duration, appliedTurn);
     const name = abnormalityName(eff.status || 'poison');
-    return ok ? `${target.name}に${name}を${duration}ターン付与` : `${target.name}は既に${name}中`;
+    return ok ? `${target.name}に${name}を${durationText(duration)}付与` : `${target.name}は既に${name}中`;
   }
   if (eff.type === 'status_remove') {
     target.statuses = (target.statuses || []).filter(x => x.type !== (eff.status || 'poison'));
@@ -758,7 +825,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   if (eff.type === 'clear_statuses') { target.statuses = []; return `${target.name}の全状態異常を解除`; }
   if (eff.type === 'heal_block' || eff.type === 'skill_block') {
     addStatus(target, { type:eff.type, duration, source:'debuff', appliedTurn }, false);
-    return eff.type === 'heal_block' ? `回復禁止${duration}ターン` : `スキル使用禁止${duration}ターン`;
+    return eff.type === 'heal_block' ? `回復禁止 ${durationText(duration)}` : `スキル使用禁止 ${durationText(duration)}`;
   }
   return null;
 }
@@ -792,9 +859,10 @@ function passiveOne(b, timing, u) {
 function passive(b, timing) { for (const u of allUnits(b)) passiveOne(b, timing, u); }
 function tickStatuses(b) {
   for (const u of allUnits(b)) {
-    u.buffs = (u.buffs || []).map(x => ({...x, duration:Number(x.duration)-1})).filter(x => x.duration > 0);
-    u.debuffs = (u.debuffs || []).map(x => ({...x, duration:Number(x.duration)-1})).filter(x => x.duration > 0);
-    u.statuses = (u.statuses || []).map(x => ({...x, duration:Number(x.duration)-1})).filter(x => x.duration > 0);
+    const tick = arr => (arr || []).map(x => Number(x.duration) === -1 ? x : ({...x, duration:Number(x.duration)-1})).filter(x => durationActive(x.duration));
+    u.buffs = tick(u.buffs);
+    u.debuffs = tick(u.debuffs);
+    u.statuses = tick(u.statuses);
     const before = u.currentHp;
     refreshEffectiveMaxHp(u, false);
     if (u.currentHp < before) triggerPassiveTiming(b,'hp_decrease',u);
@@ -831,7 +899,7 @@ function pubUnit(u, includeImage=false) {
   const hp = hpSnapshot(u);
   const out = {
     instanceId:String(u.instanceId), cardId:String(u.cardId), name:String(u.name || ''), mainAttr:u.mainAttr || '', subAttrs:Array.isArray(u.subAttrs)?clone(u.subAttrs):[],
-    baseMaxHp:Math.max(0, finiteNumber(u.baseMaxHp ?? u.maxHp,0)), maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0),
+    baseMaxHp:Math.max(0, finiteNumber(u.baseMaxHp ?? u.maxHp,0)), maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0), rank:u.rank != null && Number.isFinite(Number(u.rank)) ? Number(u.rank) : null,
     effectiveAtk:finiteNumber(effAtk(u),0), effectiveSpeed:finiteNumber(effSpeed(u),0), side:u.side, isActive:!!u.isActive,
     buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []),
     skills:clone(u.skills || [])
@@ -861,8 +929,8 @@ function publicBattleCards(b) {
     for (const u of pl.units || []) {
       if (!u.cardId || map.has(String(u.cardId))) continue;
       map.set(String(u.cardId), sanitizeCard({
-        id:u.cardId, cardType:'unit', name:u.name, mainAttr:u.mainAttr, subAttrs:u.subAttrs,
-        stats:{hp:u.maxHp,atk:u.atk,priority:u.priority}, skills:u.skills || [], image:u.image || null
+        id:u.cardId, cardType:'unit', name:u.name, mainAttr:u.mainAttr, subAttrs:u.subAttrs, rank:u.rank,
+        stats:{hp:u.baseMaxHp ?? u.maxHp,atk:u.atk,priority:u.priority}, skills:u.skills || [], image:u.image || null
       }, true));
     }
     for (const id of pl.magicIds || []) {
@@ -1057,7 +1125,7 @@ function chooseAutoForSide(b, side) {
 
   for (const u of activeUnits(b, side)) {
     let picked = {type:'attack', targetInstanceId:null};
-    const blocked = (u.debuffs || []).some(x => x.type === 'skill_block' && x.duration > 0);
+    const blocked = (u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration));
     if (!blocked) {
       for (let i=0; i<(u.skills || []).length; i++) {
         const sk = u.skills[i];
@@ -1123,6 +1191,9 @@ function expireDecision(r) {
     scheduleDecision(r);
   }
 }
+function isForbiddenStealthSelection(actor, target) {
+  return !!(actor && target && actor.side !== target.side && hasStatus(target, 'stealth'));
+}
 function validateActionSet(b, side, actions) {
   const pl = battlePlayer(b, side);
   const units = activeUnits(b, side);
@@ -1144,18 +1215,22 @@ function validateActionSet(b, side, actions) {
     if (a.type !== 'skill') throw new Error('不正な行動タイプです。');
     const sk = u.skills?.[Number(a.skillIndex)];
     if (!sk || sk.type !== 'active') throw new Error('存在しないスキルが指定されています。');
-    if ((u.debuffs || []).some(x => x.type === 'skill_block' && x.duration > 0)) throw new Error(`「${u.name}」はスキル使用禁止中です。`);
+    if ((u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration))) throw new Error(`「${u.name}」はスキル使用禁止中です。`);
     if (!evalCond(b, sk.selfCond, u)) throw new Error(`「${sk.name}」の発動条件を満たしていません。`);
     const cost = Number(sk.cost || 0);
     totalCost += cost;
     const pool = targetPool(b, u, sk.targetType).filter(t => matchesTarget(t, sk.targetCond));
     if (sk.targetType === 'select_enemy_1' || sk.targetType === 'select_ally_1') {
-      if (!a.targetInstanceId || !pool.some(t => t.instanceId === a.targetInstanceId)) throw new Error(`「${sk.name}」のメイン効果対象が不正です。`);
+      const chosen = pool.find(t => t.instanceId === a.targetInstanceId);
+      if (!chosen || isForbiddenStealthSelection(u, chosen)) throw new Error(`「${sk.name}」のメイン効果対象が不正です。隠密中の敵は指定できません。`);
     }
     if (!pool.length && !['self','player_self','player_opp'].includes(sk.targetType)) throw new Error(`「${sk.name}」の対象が存在しません。`);
     if (sk.hasSubEffect && sk.subEffect && sk.subEffect.targetType !== 'same_main_target') {
       const sp = targetPool(b,u,sk.subEffect.targetType).filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}));
-      if ((sk.subEffect.targetType === 'select_enemy_1' || sk.subEffect.targetType === 'select_ally_1') && (!a.subTargetInstanceId || !sp.some(t => t.instanceId === a.subTargetInstanceId))) throw new Error(`「${sk.name}」の追加効果対象が不正です。`);
+      if (sk.subEffect.targetType === 'select_enemy_1' || sk.subEffect.targetType === 'select_ally_1') {
+        const chosenSub = sp.find(t => t.instanceId === a.subTargetInstanceId);
+        if (!chosenSub || isForbiddenStealthSelection(u, chosenSub)) throw new Error(`「${sk.name}」の追加効果対象が不正です。隠密中の敵は指定できません。`);
+      }
       if (!sp.length && !['self','player_self','player_opp'].includes(sk.subEffect.targetType)) throw new Error(`「${sk.name}」の追加効果対象が存在しません。`);
     }
     out.units.push({unitInstanceId:u.instanceId,type:'skill',skillIndex:Number(a.skillIndex),targetInstanceId:a.targetInstanceId || null,subTargetInstanceId:a.subTargetInstanceId || null});
@@ -1171,11 +1246,11 @@ function validateActionSet(b, side, actions) {
     const actor = {side, name:pl.name, currentHp:1, maxHp:1};
     const pool = targetPool(b, actor, eff.targetType).filter(t => matchesTarget(t, eff.targetCond));
     if ((eff.targetType === 'select_enemy_1' || eff.targetType === 'select_ally_1') && !out.magicTargetInstanceId) throw new Error(`「${card.name}」の対象を選択してください。`);
-    if (out.magicTargetInstanceId && !pool.some(t => t.instanceId === out.magicTargetInstanceId)) throw new Error(`「${card.name}」の対象が不正です。`);
+    if (out.magicTargetInstanceId) { const chosen = pool.find(t => t.instanceId === out.magicTargetInstanceId); if (!chosen || isForbiddenStealthSelection(actor, chosen)) throw new Error(`「${card.name}」の対象が不正です。隠密中の敵は指定できません。`); }
     if (!pool.length && !['player_self','player_opp','self'].includes(eff.targetType)) throw new Error(`「${card.name}」の対象が存在しません。`);
     if (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target') {
       const sp=targetPool(b,actor,eff.subEffect.targetType).filter(t=>matchesTarget(t,eff.subEffect.targetCond||{type:'none'}));
-      if ((eff.subEffect.targetType==='select_enemy_1'||eff.subEffect.targetType==='select_ally_1') && (!out.magicSubTargetInstanceId || !sp.some(t=>t.instanceId===out.magicSubTargetInstanceId))) throw new Error(`「${card.name}」の追加効果対象が不正です。`);
+      if (eff.subEffect.targetType==='select_enemy_1'||eff.subEffect.targetType==='select_ally_1') { const chosenSub=sp.find(t=>t.instanceId===out.magicSubTargetInstanceId); if(!chosenSub||isForbiddenStealthSelection(actor,chosenSub)) throw new Error(`「${card.name}」の追加効果対象が不正です。隠密中の敵は指定できません。`); }
       if (!sp.length && !['player_self','player_opp','self'].includes(eff.subEffect.targetType)) throw new Error(`「${card.name}」の追加効果対象が存在しません。`);
     }
     out.magicId = magicId;
@@ -1221,7 +1296,15 @@ function executeAction(b, side, u, action) {
   if (action.type === 'attack') {
     const enemies = activeUnits(b, side === 'player1' ? 'player2' : 'player1');
     if (!enemies.length) return null;
-    const t = action.targetInstanceId && enemies.find(x => x.instanceId === action.targetInstanceId) || enemies[crypto.randomInt(enemies.length)];
+    const t = resolveSingleTarget(b, u, 'random_enemy_1', enemies, null)[0];
+    if (!t) {
+      return {
+        type:'CHARACTER_ATTACK', actor:pubUnit(u,false), target:null,
+        actorHpBefore:hpSnapshot(u), actorHpAfter:hpSnapshot(u),
+        targetHpBefore:null, targetHpAfter:null,
+        actionName:'通常攻撃', effect:'隠密により対象なし', result:'攻撃対象がいないため不発'
+      };
+    }
     const hp = hpSnapshot(t);
     const r = damage(t, finiteNumber(effAtk(u),0));
     return {
@@ -1234,7 +1317,7 @@ function executeAction(b, side, u, action) {
   if (action.type !== 'skill') return null;
   const sk = u.skills?.[action.skillIndex];
   if (!sk) return null;
-  if ((u.debuffs || []).some(x => x.type === 'skill_block' && x.duration > 0)) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'スキル使用禁止',result:'不発',description:sk.desc || ''};
+  if ((u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration))) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'スキル使用禁止',result:'不発',description:sk.desc || ''};
   const cost = Number(sk.cost || 0);
   if (resource.ap < cost) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'AP不足',result:'不発',description:sk.desc || ''};
   const main = targets(b,u,sk.targetType,sk.targetCond,action.targetInstanceId,false);

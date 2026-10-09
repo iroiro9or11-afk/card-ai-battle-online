@@ -1,15 +1,15 @@
 {
   "name": "card-ai-online",
-  "version": "3.27.3",
+  "version": "3.27.4",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.27.3（5戦ストーリーモード）",
+  "description": "カードAIバトル オンライン対戦 v3.27.4（挑発・隠密・固定貫通・永続効果・ランク機能）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js && node tests/v3272-regression.js && node tests/v3273-regression.js",
+    "test:online": "node tests/online-smoke-test.js && node tests/client-online-regression.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js",
     "test:card-id": "node tests/card-id-migration-test.js",
     "test:offline": "node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js",
-    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js",
+    "test:all": "node tests/card-id-migration-test.js && node tests/feature-smoke-test.js && node tests/offline-battle-regression.js && node tests/offline-battle-v320-regression.js && node tests/offline-ai-v321-regression.js && node tests/client-online-regression.js && node tests/online-smoke-test.js && node tests/v3272-regression.js && node tests/v3273-regression.js && node tests/v3274-regression.js && node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js",
     "test:ai": "node tests/offline-ai-v321-regression.js",
     "test:story": "node tests/story-mode-v325-regression.js && node tests/story-mode-v325-logic-test.js && node tests/story-mode-v326-regression.js"
   },
