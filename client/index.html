@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.1 - オンライン戦闘ターン同期修正</title>
+  <title>カードAI対戦ゲーム v3.28.2 - カード配置・検索・ライバルアイコン修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.1</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.2</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -339,23 +339,35 @@
         </div>
         <div class="flex gap-2 w-full pt-2">
           <button onclick="cancelCrop()" class="w-1/2 py-2 bg-slate-800 rounded text-xs text-slate-300 font-bold">キャンセル</button>
-          <button onclick="applyCrop()" class="w-1/2 py-2 bg-amber-500 rounded text-xs text-slate-950 font-black">確定</button>
+          <button id="crop-apply-btn" onclick="applyCrop()" class="w-1/2 py-2 bg-amber-500 rounded text-xs text-slate-950 font-black">トリミングを適用</button>
         </div>
+      </div>
+    </div>
+
+    <!-- カード一覧／デッキ編集 共通の並べ替え・絞り込みポップアップ -->
+    <div id="card-browser-settings-popover" class="fixed z-[75] hidden" style="width:min(460px, calc(100vw - 20px)); max-height:84vh;">
+      <div class="bg-slate-900 border border-cyan-500/70 rounded-xl shadow-2xl overflow-hidden flex flex-col" style="max-height:84vh">
+        <div class="flex items-center justify-between gap-3 p-3 border-b border-slate-700">
+          <div><div id="card-browser-settings-title" class="text-sm font-black text-cyan-200">並べ替え・絞り込み</div><div id="card-browser-settings-subtitle" class="text-[9px] text-slate-400 mt-1"></div></div>
+          <button type="button" data-cb-action="close" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs font-black">閉じる</button>
+        </div>
+        <div id="card-browser-settings-body" class="p-3 space-y-4 overflow-y-auto custom-scrollbar"></div>
       </div>
     </div>
 
     <!-- カード一覧画面 -->
     <section id="view-deck" class="view-section hidden">
-      <div class="flex justify-between items-center mb-4">
-        <div class="flex gap-4 items-center">
+      <div class="flex justify-between items-center gap-2 mb-4">
+        <div class="flex flex-wrap gap-3 items-center">
           <h2 class="text-lg font-bold text-amber-400 border-l-4 border-amber-400 pl-2">登録カード一覧</h2>
           <div class="flex gap-2">
             <button id="deck-tab-char" onclick="filterDeckType('unit')" class="px-3 py-1 bg-amber-600 text-xs font-bold rounded">キャラ</button>
             <button id="deck-tab-magic" onclick="filterDeckType('magic')" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-xs font-bold rounded">マジック</button>
           </div>
         </div>
+        <button type="button" class="card-browser-settings-trigger shrink-0 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-[10px] sm:text-xs font-black" onclick="openCardBrowserSettings('deck-list', this)">⚙ 並べ替え・絞り込み</button>
       </div>
-      <div id="deck-card-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"></div>
+      <div id="deck-card-list" class="grid grid-cols-5 gap-2"></div>
     </section>
 
     <!-- デッキ編成画面 -->
@@ -380,12 +392,20 @@
             <input type="text" id="deck-input-name" class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-xs">
           </div>
           <div>
-            <div class="text-xs font-bold text-amber-400 mb-2">1. キャラカード（3～5枚）</div>
-            <div id="modal-unit-selector" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <div class="text-xs font-bold text-amber-400">1. キャラカード（3～5枚）</div>
+              <button type="button" class="card-browser-settings-trigger shrink-0 px-2 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-[9px] font-black" onclick="openCardBrowserSettings('deck-editor-unit', this)">⚙ 並べ替え・絞り込み</button>
+            </div>
+            <div id="modal-unit-filter-notice" class="text-[9px] text-slate-500 mb-2"></div>
+            <div id="modal-unit-selector" class="grid grid-cols-5 gap-2"></div>
           </div>
           <div>
-            <div class="text-xs font-bold text-purple-400 mb-2">2. マジックカード (最大10枚)</div>
-            <div id="modal-magic-selector" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <div class="text-xs font-bold text-purple-400">2. マジックカード (最大10枚)</div>
+              <button type="button" class="card-browser-settings-trigger shrink-0 px-2 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-[9px] font-black" onclick="openCardBrowserSettings('deck-editor-magic', this)">⚙ 並べ替え・絞り込み</button>
+            </div>
+            <div id="modal-magic-filter-notice" class="text-[9px] text-slate-500 mb-2"></div>
+            <div id="modal-magic-selector" class="grid grid-cols-5 gap-2"></div>
           </div>
         </div>
         <div class="pt-3 border-t border-slate-800 flex justify-end gap-3">
@@ -565,7 +585,7 @@
           </div>
           <div class="w-full bg-slate-900 border border-cyan-700/50 rounded-2xl p-4">
             <div class="flex flex-col sm:flex-row justify-between gap-2 items-start sm:items-center mb-3"><div><div class="text-xs font-black text-cyan-300 border-l-2 border-cyan-400 pl-2">ストーリー用デッキ編成</div><div class="text-[10px] text-slate-500 mt-1">キャラ3～5枚、マジック最大10枚。初期出撃3体＋控え最大2体を設定します。</div></div><button type="button" onclick="storyResetDeckToSafeDefault()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-[10px] font-bold text-slate-300">初期構成に戻す</button></div>
-            <div class="bg-slate-950 border border-amber-700/60 rounded-xl p-3 mb-4"><div class="flex flex-wrap justify-between items-center gap-2 mb-3"><div><div class="text-xs font-black text-amber-300">✅ 確定したストーリー用デッキ</div><div class="text-[10px] text-slate-500 mt-1">この編成が戦闘へ引き継がれます。</div></div><div id="story-deployment-validation" class="text-[10px] text-slate-400"></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-3"><div class="bg-cyan-950/20 border border-cyan-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-cyan-300 mb-2">🔵 初期出撃 3体</div><div id="story-confirmed-active" class="grid grid-cols-3 gap-2"></div></div><div class="bg-amber-950/20 border border-amber-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-amber-300 mb-2">🟡 控え（登場順）最大2体</div><div id="story-confirmed-reserve" class="grid grid-cols-2 gap-2"></div></div></div></div>
+            <div class="bg-slate-950 border border-amber-700/60 rounded-xl p-3 mb-4"><div class="flex flex-wrap justify-between items-center gap-2 mb-3"><div><div class="text-xs font-black text-amber-300">✅ 確定したストーリー用デッキ</div><div class="text-[10px] text-slate-500 mt-1">この編成が戦闘へ引き継がれます。</div></div><div id="story-deployment-validation" class="text-[10px] text-slate-400"></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-3"><div class="bg-cyan-950/20 border border-cyan-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-cyan-300 mb-2">🔵 初期出撃 3体</div><div id="story-confirmed-active" class="grid grid-cols-3 gap-2"></div></div><div class="bg-amber-950/20 border border-amber-900/60 rounded-xl p-2"><div class="text-[10px] font-black text-amber-300 mb-2">🟡 控え（登場順）最大2体</div><div id="story-confirmed-reserve" class="grid grid-cols-3 gap-2"></div></div></div></div>
             <div class="grid grid-cols-1 gap-5"><div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-amber-300">現在の所持キャラクター（横5枚）</span><span id="story-unit-selection-label" class="text-[10px] text-slate-400">0 / 5</span></div><div id="story-unit-pool" class="grid grid-cols-5 gap-2 max-h-[480px] overflow-y-auto pr-1"></div></div><div><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-purple-300">現在の所持マジック（横5枚）</span><span id="story-magic-selection-label" class="text-[10px] text-slate-400">0 / 10</span></div><div id="story-magic-pool" class="grid grid-cols-5 gap-2 max-h-[480px] overflow-y-auto pr-1"></div></div></div>
             <div class="mt-4 border-t border-slate-800 pt-3 flex flex-col sm:flex-row justify-between gap-3 items-center"><div id="story-deck-validation" class="text-xs text-slate-300"></div><button type="button" onclick="startStoryBattle()" class="w-full sm:w-auto px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl shadow-lg">⚔️ 対戦相手を確認して開始</button></div>
           </div>
@@ -735,7 +755,7 @@
           </div>
 
           <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-            <h4 class="text-xs font-bold text-rose-400 border-l-2 border-rose-400 pl-2">新規ライバル作成</h4>
+            <h4 id="rival-form-title" class="text-xs font-bold text-rose-400 border-l-2 border-rose-400 pl-2">新規ライバル作成</h4>
             <div class="flex items-center gap-4">
               <div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900 flex-shrink-0 square-aspect">
                 <img id="rival-icon-preview" class="w-full h-full object-cover hidden">
@@ -755,10 +775,11 @@
                 <div class="flex gap-2">
                   <input type="file" id="input-rival-icon-file" accept="image/*" onchange="handleIconUpload(event, 'rival')" class="hidden">
                   <button onclick="document.getElementById('input-rival-icon-file').click()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded text-slate-200">画像設定</button>
+                  <button type="button" onclick="clearRivalIcon()" class="px-3 py-1 bg-rose-950 hover:bg-rose-900 text-[10px] font-bold rounded text-rose-200">アイコン解除</button>
                 </div>
               </div>
             </div>
-            <button onclick="saveRival()" class="w-full py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded text-xs">登録</button>
+            <button id="rival-save-btn" onclick="saveRival()" class="w-full py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded text-xs">登録</button>
           </div>
 
           <div>
@@ -789,6 +810,10 @@
 
     let activeDeckFilter = "unit";
     let activeCreateType = "unit";
+    let editingRivalId = null;
+    let activeCardBrowserSettingsKey = null;
+    let activeCardBrowserSettingsAnchor = null;
+    const cardBrowserSettingsByKey = Object.create(null);
 
     let currentCropTargetType = 'unit';
     let cropState = { img: new Image(), x: 0, y: 0, scale: 1, isDragging: false, startX: 0, startY: 0 };
@@ -2058,11 +2083,17 @@
     function handleFileSelect(e, targetType) {
       const file = e.target.files[0]; if (!file) return;
       const reader = new FileReader(); reader.onload = (evt) => openCropModal(evt.target.result, targetType); reader.readAsDataURL(file);
+      // 同じ画像を続けて選び直してもchangeイベントが発生するようにする。
+      e.target.value = '';
     }
     function handleIconUpload(e, targetType) { handleFileSelect(e, targetType); }
 
     function openCropModal(src, targetType) {
       currentCropTargetType = targetType;
+      const cropTitle = document.getElementById('crop-modal-title');
+      const cropApply = document.getElementById('crop-apply-btn');
+      if (cropTitle) cropTitle.textContent = targetType === 'rival' ? 'ライバルアイコンの切り抜き位置を調整' : targetType === 'player' ? 'プレイヤーアイコンの切り抜き位置を調整' : 'カード画像の切り抜き位置を調整';
+      if (cropApply) cropApply.textContent = (targetType === 'rival' || targetType === 'player') ? 'この切り抜きをアイコンに適用' : 'この切り抜きを適用';
       cropState.img = new Image();
       cropState.img.onload = () => {
         const isSquare = targetType === 'player' || targetType === 'rival';
@@ -2133,7 +2164,7 @@
         saveToStore("settings", { key: "player_icon", value: playerIcon }).catch(() => {});
         updatePlayerProfileDisplay();
       }
-      else if (currentCropTargetType === 'rival') { tempRivalIcon = url; document.getElementById("rival-icon-preview").src = url; document.getElementById("rival-icon-preview").classList.remove("hidden"); document.getElementById("rival-icon-placeholder").classList.add("hidden"); }
+      else if (currentCropTargetType === 'rival') { tempRivalIcon = url; setRivalIconPreview(url); }
 
       document.getElementById("crop-modal").classList.add("hidden"); updatePreview();
     }
@@ -2146,15 +2177,228 @@
       renderDeckList();
     }
 
+    // カード一覧とデッキ編集で共用する並び替え／フィルター設定。
+    // null は「すべて表示」、配列は明示的に選択された値を表す。
+    function resolveCardBrowserKey(context) {
+      return context === 'deck-list' ? `deck-list-${activeDeckFilter}` : context;
+    }
+    function getCardBrowserSettings(context) {
+      const key = resolveCardBrowserKey(context);
+      if (!cardBrowserSettingsByKey[key]) cardBrowserSettingsByKey[key] = {
+        sort: 'default', direction: 'asc', ranks: null, attrs: null,
+        magicCategories: null, costBands: null
+      };
+      return { key, state: cardBrowserSettingsByKey[key] };
+    }
+    function cardBrowserIsUnit(key) { return String(key).endsWith('-unit'); }
+    function cardBrowserEscape(value) {
+      return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function cardBrowserAttributeOptions() {
+      const attrs = new Set(MAIN_ATTRIBUTES);
+      (Array.isArray(allCards) ? allCards : []).forEach(c => {
+        if (c?.mainAttr) attrs.add(String(c.mainAttr));
+        (Array.isArray(c?.subAttrs) ? c.subAttrs : []).forEach(a => { if (a) attrs.add(String(a)); });
+      });
+      return [...attrs].sort((a,b) => a.localeCompare(b, 'ja'));
+    }
+    function cardBrowserMagicCategories(card) {
+      const effect = card?.effect || {};
+      const effects = [effect.mainEffect?.type, ...(effect.hasSubEffect ? [effect.subEffect?.type] : [])].filter(Boolean);
+      const categories = new Set();
+      effects.forEach(type => {
+        if (String(type).startsWith('dmg_')) categories.add('ダメージ');
+        else if (String(type).startsWith('heal_')) categories.add('回復');
+        else if (['status_apply'].includes(type)) categories.add('状態異常付与');
+        else if (['status_remove','clear_statuses'].includes(type)) categories.add('状態異常解除');
+        else if (['clear_buffs','clear_debuffs'].includes(type)) categories.add('バフ・デバフ解除');
+        else if (['mod_atk_ratio','mod_atk_val','damage_taken_ratio','mod_speed','mod_max_hp_val','heal_block','skill_block'].includes(type)) categories.add('強化・弱体');
+        else if (type === 'mod_ap') categories.add('AP操作');
+        else categories.add('その他');
+      });
+      if (!categories.size) categories.add('その他');
+      return [...categories];
+    }
+    function cardBrowserMagicCostBand(card) {
+      const cost = Math.max(0, Number(card?.effect?.cost ?? card?.cost ?? 0) || 0);
+      return cost <= 1 ? '0～1 AP' : cost <= 3 ? '2～3 AP' : cost <= 5 ? '4～5 AP' : '6 AP以上';
+    }
+    function cardBrowserRank(card) {
+      return rankStarCount(card?.rank ?? estimateUnitRank(card?.stats || {}));
+    }
+    function cardBrowserFilterPasses(card, key, settings) {
+      if (cardBrowserIsUnit(key)) {
+        const rank = cardBrowserRank(card);
+        if (settings.ranks !== null && !settings.ranks.some(value => Number(value) === rank)) return false;
+        if (settings.attrs !== null) {
+          const cardAttrs = [card?.mainAttr, ...(Array.isArray(card?.subAttrs) ? card.subAttrs : [])].filter(Boolean).map(String);
+          if (!cardAttrs.some(a => settings.attrs.includes(a))) return false;
+        }
+        return true;
+      }
+      const cats = cardBrowserMagicCategories(card);
+      if (settings.magicCategories !== null && !cats.some(c => settings.magicCategories.includes(c))) return false;
+      if (settings.costBands !== null && !settings.costBands.includes(cardBrowserMagicCostBand(card))) return false;
+      return true;
+    }
+    function cardBrowserSortValue(card, sort, unit) {
+      if (unit) {
+        if (sort === 'rank') return cardBrowserRank(card);
+        if (sort === 'hp') return Number(card?.stats?.hp) || 0;
+        if (sort === 'atk') return Number(card?.stats?.atk) || 0;
+        if (sort === 'priority') return Number(card?.stats?.priority) || 0;
+        if (sort === 'name') return String(card?.name || '');
+      } else {
+        if (sort === 'cost') return Number(card?.effect?.cost ?? card?.cost ?? 0) || 0;
+        if (sort === 'priority') return Number(card?.stats?.priority ?? 999) || 0;
+        if (sort === 'effect') return cardBrowserMagicCategories(card).join('、');
+        if (sort === 'name') return String(card?.name || '');
+      }
+      return 0;
+    }
+    function filterAndSortCardBrowserItems(cards, context) {
+      const {key, state} = getCardBrowserSettings(context);
+      const unit = cardBrowserIsUnit(key);
+      const dir = state.direction === 'desc' ? -1 : 1;
+      const indexed = (cards || []).map((card,index)=>({card,index})).filter(x=>cardBrowserFilterPasses(x.card,key,state));
+      indexed.sort((a,b)=>{
+        if (state.sort === 'default') return (a.index-b.index)*dir;
+        const av = cardBrowserSortValue(a.card,state.sort,unit), bv = cardBrowserSortValue(b.card,state.sort,unit);
+        let cmp = typeof av === 'string' || typeof bv === 'string' ? String(av).localeCompare(String(bv),'ja',{numeric:true,sensitivity:'base'}) : (Number(av)-Number(bv));
+        if (!cmp) cmp = a.index-b.index;
+        return cmp*dir;
+      });
+      return indexed.map(x=>x.card);
+    }
+    function cardBrowserFilterOptions(key, group) {
+      if (group === 'ranks') return [1,2,3,4,5].map(x=>({value:String(x),label:`${'★'.repeat(x)}${'☆'.repeat(5-x)}`}));
+      if (group === 'attrs') return cardBrowserAttributeOptions().map(x=>({value:x,label:x}));
+      if (group === 'magicCategories') return ['ダメージ','回復','強化・弱体','状態異常付与','状態異常解除','バフ・デバフ解除','AP操作','その他'].map(x=>({value:x,label:x}));
+      if (group === 'costBands') return ['0～1 AP','2～3 AP','4～5 AP','6 AP以上'].map(x=>({value:x,label:x}));
+      return [];
+    }
+    function cardBrowserSelected(state, group, value) {
+      const selected = state[group];
+      return selected === null || (Array.isArray(selected) && selected.includes(value));
+    }
+    function renderCardBrowserChip(key, state, group, option) {
+      const selected = cardBrowserSelected(state,group,option.value);
+      return `<button type="button" class="px-2 py-1 rounded border text-[10px] font-bold ${selected?'bg-cyan-700/50 border-cyan-400 text-cyan-100':'bg-slate-950 border-slate-700 text-slate-500'}" data-cb-action="toggle" data-cb-group="${group}" data-cb-value="${cardBrowserEscape(option.value)}" aria-pressed="${selected}">${cardBrowserEscape(option.label)}</button>`;
+    }
+    function renderCardBrowserFilterGroup(key,state,group,title) {
+      const options = cardBrowserFilterOptions(key,group);
+      return `<section><div class="flex flex-wrap justify-between items-center gap-2 mb-2"><div class="text-[10px] font-black text-slate-200">${title}</div><div class="flex gap-1"><button type="button" data-cb-action="all" data-cb-group="${group}" class="px-2 py-1 bg-slate-800 rounded text-[9px] font-bold">すべて表示</button><button type="button" data-cb-action="none" data-cb-group="${group}" class="px-2 py-1 bg-slate-800 rounded text-[9px] font-bold">すべて非表示</button></div></div><div class="flex flex-wrap gap-1.5">${options.map(o=>renderCardBrowserChip(key,state,group,o)).join('')}</div></section>`;
+    }
+    function openCardBrowserSettings(context, anchor) {
+      const {key} = getCardBrowserSettings(context);
+      activeCardBrowserSettingsKey = key;
+      activeCardBrowserSettingsAnchor = anchor || null;
+      renderCardBrowserSettingsPopup();
+      const popup = document.getElementById('card-browser-settings-popover');
+      popup.classList.remove('hidden');
+      positionCardBrowserSettingsPopup();
+    }
+    function positionCardBrowserSettingsPopup() {
+      const popup = document.getElementById('card-browser-settings-popover');
+      if (!popup || popup.classList.contains('hidden')) return;
+      const margin = 10;
+      const rect = activeCardBrowserSettingsAnchor?.getBoundingClientRect?.();
+      const width = Math.min(460, window.innerWidth - margin*2);
+      let left = rect ? rect.right - width : window.innerWidth - width - margin;
+      left = Math.max(margin, Math.min(left, window.innerWidth-width-margin));
+      let top = rect ? rect.bottom + 6 : 70;
+      const estimatedHeight = Math.min(popup.scrollHeight || 560, window.innerHeight*0.84);
+      if (top + estimatedHeight > window.innerHeight-margin) top = Math.max(margin, window.innerHeight-estimatedHeight-margin);
+      popup.style.left = `${left}px`; popup.style.top = `${top}px`;
+    }
+    function closeCardBrowserSettings() {
+      document.getElementById('card-browser-settings-popover')?.classList.add('hidden');
+      activeCardBrowserSettingsKey = null; activeCardBrowserSettingsAnchor = null;
+    }
+    function renderCardBrowserSettingsPopup() {
+      const popup = document.getElementById('card-browser-settings-popover');
+      const body = document.getElementById('card-browser-settings-body');
+      if (!popup || !body || !activeCardBrowserSettingsKey) return;
+      const key = activeCardBrowserSettingsKey;
+      const {state} = getCardBrowserSettings(key);
+      const unit = cardBrowserIsUnit(key);
+      const choices = unit
+        ? [['default','デフォルト順'],['rank','ランク順'],['hp','HP順'],['atk','基礎攻撃力順'],['priority','行動値順'],['name','名前順']]
+        : [['default','デフォルト順'],['cost','消費AP順'],['priority','行動値順'],['effect','効果種別順'],['name','名前順']];
+      document.getElementById('card-browser-settings-title').textContent = unit ? 'キャラクターカード設定' : 'マジックカード設定';
+      document.getElementById('card-browser-settings-subtitle').textContent = key.startsWith('deck-editor') ? 'デッキ作成・編集のカード選択に適用' : 'カード一覧の表示に適用';
+      const sortHtml = `<section><div class="text-[10px] font-black text-slate-200 mb-2">並び替え</div><div class="flex gap-2"><select data-cb-sort class="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs">${choices.map(([v,label])=>`<option value="${v}" ${state.sort===v?'selected':''}>${label}</option>`).join('')}</select><button type="button" data-cb-action="direction" class="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-black">${state.direction==='asc'?'昇順 ↑':'降順 ↓'}</button></div><div class="text-[9px] text-slate-500 mt-1">${state.sort==='default'?'デフォルト順は登録・保存順です。':'選択した項目を数値または名前で並べ替えます。'}</div></section>`;
+      const filterHtml = unit
+        ? renderCardBrowserFilterGroup(key,state,'ranks','表示するランク') + renderCardBrowserFilterGroup(key,state,'attrs','表示する属性（メイン／サブ属性）')
+        : renderCardBrowserFilterGroup(key,state,'magicCategories','表示する効果カテゴリ') + renderCardBrowserFilterGroup(key,state,'costBands','表示する消費AP帯');
+      body.innerHTML = sortHtml + `<div class="border-t border-slate-700 pt-3 space-y-4">${filterHtml}</div>`;
+      positionCardBrowserSettingsPopup();
+    }
+    function setCardBrowserFilter(group, action, value) {
+      if (!activeCardBrowserSettingsKey) return;
+      const {state} = getCardBrowserSettings(activeCardBrowserSettingsKey);
+      const options = cardBrowserFilterOptions(activeCardBrowserSettingsKey,group).map(o=>o.value);
+      if (action === 'all') state[group] = null;
+      else if (action === 'none') state[group] = [];
+      else {
+        let selected = state[group] === null ? [...options] : [...state[group]];
+        const i = selected.indexOf(value);
+        if (i >= 0) selected.splice(i,1); else if (options.includes(value)) selected.push(value);
+        state[group] = selected.length === options.length ? null : selected;
+      }
+      refreshCardBrowserContext(activeCardBrowserSettingsKey);
+      renderCardBrowserSettingsPopup();
+    }
+    function refreshCardBrowserContext(key) {
+      if (String(key).startsWith('deck-list-')) renderDeckList();
+      else if (String(key).startsWith('deck-editor-')) renderDeckModalSelectors();
+    }
+    function setupCardBrowserSettingsPopover() {
+      const popup = document.getElementById('card-browser-settings-popover');
+      if (!popup) return;
+      popup.addEventListener('click', event => {
+        const button = event.target.closest('[data-cb-action]');
+        if (!button) return;
+        const action = button.dataset.cbAction;
+        if (action === 'close') { closeCardBrowserSettings(); return; }
+        if (action === 'direction') {
+          const {state} = getCardBrowserSettings(activeCardBrowserSettingsKey);
+          state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+          refreshCardBrowserContext(activeCardBrowserSettingsKey); renderCardBrowserSettingsPopup(); return;
+        }
+        if (action === 'all' || action === 'none' || action === 'toggle') setCardBrowserFilter(button.dataset.cbGroup,action,button.dataset.cbValue);
+      });
+      popup.addEventListener('change', event => {
+        if (!event.target.matches('[data-cb-sort]') || !activeCardBrowserSettingsKey) return;
+        const {state} = getCardBrowserSettings(activeCardBrowserSettingsKey);
+        state.sort = event.target.value;
+        refreshCardBrowserContext(activeCardBrowserSettingsKey); renderCardBrowserSettingsPopup();
+      });
+      document.addEventListener('pointerdown', event => {
+        if (popup.classList.contains('hidden')) return;
+        if (popup.contains(event.target) || event.target.closest?.('.card-browser-settings-trigger')) return;
+        closeCardBrowserSettings();
+      }, true);
+      document.addEventListener('keydown', event => { if (event.key === 'Escape') closeCardBrowserSettings(); });
+      window.addEventListener('resize', positionCardBrowserSettingsPopup);
+      window.addEventListener('scroll', positionCardBrowserSettingsPopup, true);
+    }
+    setupCardBrowserSettingsPopover();
+
     function renderDeckList() {
       const list = document.getElementById("deck-card-list"); list.innerHTML = "";
-      allCards.filter(c => (c.cardType || "unit") === activeDeckFilter).forEach(card => {
+      const source = allCards.filter(c => (c.cardType || "unit") === activeDeckFilter);
+      const cards = filterAndSortCardBrowserItems(source, `deck-list-${activeDeckFilter}`);
+      if (!cards.length) {
+        list.innerHTML = `<div class="col-span-5 bg-slate-900 border border-slate-800 rounded p-4 text-xs text-slate-400">条件に一致するカードがありません。並べ替え・絞り込み設定から「すべて表示」を選択してください。</div>`;
+        return;
+      }
+      cards.forEach(card => {
         const wrap = document.createElement("div");
-        wrap.innerHTML = getCardHTML({ id: card.id, cardType: card.cardType, name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: card.stats?.hp || 0, atk: card.stats?.atk || 0, prio: card.stats?.priority ?? 999, img: getCardImage(card), desc: card.desc });
+        wrap.className = 'min-w-0';
+        wrap.innerHTML = getCardHTML({ id: card.id, cardType: card.cardType, name: card.name, mainAttr: card.mainAttr, subAttrs: card.subAttrs, hp: card.stats?.hp || 0, atk: card.stats?.atk || 0, prio: card.stats?.priority ?? 999, rank: card.rank, img: getCardImage(card), desc: card.desc });
         const cardEl = wrap.querySelector(`[data-card-id="${card.id}"]`);
         if (cardEl) cardEl.addEventListener("click", (e) => {
-          // 通常画面では単押しで詳細表示。
-          // 長押し後のclickはグローバル側で抑止される。
           openCardDetail(card.id);
         });
         list.appendChild(wrap);
@@ -2398,14 +2642,22 @@
       uBox.innerHTML = "";
       mBox.innerHTML = "";
 
-      const units = allCards.filter(c => (c.cardType || "unit") === "unit");
-      const magics = allCards.filter(c => c.cardType === "magic");
+      const allUnits = allCards.filter(c => (c.cardType || "unit") === "unit");
+      const allMagics = allCards.filter(c => c.cardType === "magic");
+      const units = filterAndSortCardBrowserItems(allUnits, 'deck-editor-unit');
+      const magics = filterAndSortCardBrowserItems(allMagics, 'deck-editor-magic');
+      const unitHidden = editingDeck.unitIds.filter(id => !units.some(c => String(c.id) === String(id))).length;
+      const magicHidden = editingDeck.magicIds.filter(id => !magics.some(c => String(c.id) === String(id))).length;
+      const un = document.getElementById('modal-unit-filter-notice');
+      const mn = document.getElementById('modal-magic-filter-notice');
+      if (un) un.textContent = `表示 ${units.length}/${allUnits.length}枚${unitHidden ? ` ／ 選択済みで非表示 ${unitHidden}枚` : ''}`;
+      if (mn) mn.textContent = `表示 ${magics.length}/${allMagics.length}枚${magicHidden ? ` ／ 選択済みで非表示 ${magicHidden}枚` : ''}`;
 
       units.forEach(u => {
         const isSel = editingDeck.unitIds.includes(u.id);
         const div = document.createElement("div");
         div.className = `p-1.5 rounded border text-xs cursor-pointer select-none transition ${isSel ? 'border-amber-400 bg-amber-500/20' : 'border-slate-800 bg-slate-950 opacity-70'}`;
-        div.innerHTML = getCardHTML({ id: u.id, cardType: "unit", name: u.name, mainAttr: u.mainAttr, subAttrs: u.subAttrs, hp: u.stats.hp, atk: u.stats.atk, prio: u.stats.priority, img: getCardImage(u) });
+        div.innerHTML = getCardHTML({ id: u.id, cardType: "unit", name: u.name, mainAttr: u.mainAttr, subAttrs: u.subAttrs, hp: u.stats.hp, atk: u.stats.atk, prio: u.stats.priority, rank:u.rank, img: getCardImage(u) });
         div.onclick = () => {
           if (isSel) {
             editingDeck.unitIds = editingDeck.unitIds.filter(id => id !== u.id);
@@ -2458,9 +2710,25 @@
     }
 
     // 設定 / プロフィール・ライバル管理
+    function setRivalIconPreview(src) {
+      const img = document.getElementById('rival-icon-preview');
+      const placeholder = document.getElementById('rival-icon-placeholder');
+      if (!img || !placeholder) return;
+      if (src) { img.src = src; img.classList.remove('hidden'); placeholder.classList.add('hidden'); }
+      else { img.removeAttribute('src'); img.classList.add('hidden'); placeholder.classList.remove('hidden'); }
+    }
+    function resetRivalForm() {
+      editingRivalId = null;
+      tempRivalIcon = null;
+      document.getElementById('input-rival-name').value = '';
+      document.getElementById('input-rival-icon-file').value = '';
+      const title = document.getElementById('rival-form-title'); if (title) title.textContent = '新規ライバル作成';
+      const saveButton = document.getElementById('rival-save-btn'); if (saveButton) saveButton.textContent = '登録';
+      setRivalIconPreview(null);
+    }
     function openRivalModal() {
       document.getElementById("input-player-name").value = playerName;
-      tempRivalIcon = null;
+      resetRivalForm();
       renderRivalList();
       document.getElementById("rival-modal").classList.remove("hidden");
     }
@@ -2501,18 +2769,43 @@
       updatePlayerProfileDisplay();
     }
 
+    function editRival(id) {
+      const rival = allRivals.find(r => String(r.id) === String(id));
+      if (!rival) return;
+      editingRivalId = rival.id;
+      document.getElementById('input-rival-name').value = rival.name || '';
+      document.getElementById('select-rival-deck').value = rival.deckId || '';
+      document.getElementById('select-rival-intelligence').value = rival.intelligence || 'normal';
+      tempRivalIcon = rival.iconImage || null;
+      setRivalIconPreview(tempRivalIcon);
+      document.getElementById('rival-form-title').textContent = 'ライバル編集';
+      document.getElementById('rival-save-btn').textContent = '変更を保存';
+      document.getElementById('input-rival-icon-file').value = '';
+      document.getElementById('rival-modal').classList.remove('hidden');
+      document.getElementById('rival-form-title').scrollIntoView({block:'nearest',behavior:'smooth'});
+    }
+    function clearRivalIcon() {
+      tempRivalIcon = null;
+      setRivalIconPreview(null);
+      const input = document.getElementById('input-rival-icon-file'); if (input) input.value = '';
+    }
     async function saveRival() {
       const name = document.getElementById("input-rival-name").value.trim() || "ライバル";
       const deckId = document.getElementById("select-rival-deck").value;
       const intelligence = document.getElementById("select-rival-intelligence")?.value || "normal";
       if (!deckId) { alert("デッキを選択してください。"); return; }
-      const newRival = { id: generateUniqueId("rival"), name, deckId, iconImage: tempRivalIcon, intelligence };
+      const existing = editingRivalId ? allRivals.find(r => String(r.id) === String(editingRivalId)) : null;
+      const newRival = { ...(existing || {}), id: existing?.id || generateUniqueId("rival"), name, deckId, iconImage: tempRivalIcon || null, intelligence };
       await saveToStore("rivals", newRival);
       allRivals = await getAllFromStore("rivals");
-      document.getElementById("input-rival-name").value = "";
-      tempRivalIcon = null;
+      const selectedPreset = document.getElementById('select-rival-preset');
+      if (selectedPreset && String(selectedPreset.value) === String(newRival.id)) {
+        // 選択中ライバルの画像変更を戦闘準備画面にも即時反映。
+        applyRivalPreset();
+      }
+      resetRivalForm();
       renderRivalList();
-      alert("ライバルを保存しました。");
+      alert(existing ? "ライバルを更新しました。" : "ライバルを登録しました。");
     }
 
     async function deleteRival(id) {
@@ -2543,7 +2836,7 @@
               <div class="text-[10px] text-slate-400">使用デッキ: ${d ? d.name : '不明'} ／ AI: ${{novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[r.intelligence||'normal']||'凡人'}</div>
             </div>
           </div>
-          <button onclick="deleteRival('${r.id}')" class="px-2 py-1 bg-rose-900/80 hover:bg-rose-800 text-rose-200 rounded text-[10px] font-bold">削除</button>
+          <div class="flex gap-1"><button onclick="editRival('${r.id}')" class="px-2 py-1 bg-cyan-900 hover:bg-cyan-800 text-cyan-100 rounded text-[10px] font-bold">編集</button><button onclick="deleteRival('${r.id}')" class="px-2 py-1 bg-rose-900/80 hover:bg-rose-800 text-rose-200 rounded text-[10px] font-bold">削除</button></div>
         `;
         container.appendChild(item);
       });
@@ -2626,8 +2919,11 @@
         if (rival.iconImage) {
           rIcon.src = rival.iconImage; rIcon.classList.remove("hidden"); rPh.classList.add("hidden");
         } else {
-          rIcon.classList.add("hidden"); rPh.classList.remove("hidden");
+          rIcon.removeAttribute('src'); rIcon.classList.add("hidden"); rPh.classList.remove("hidden");
         }
+      } else {
+        // 「ライバルを選択」に戻した際、前のライバル画像を残さない。
+        rIcon.removeAttribute('src'); rIcon.classList.add("hidden"); rPh.classList.remove("hidden");
       }
     }
 
@@ -2645,6 +2941,12 @@
     function storyMagicIds(){return (storyModeState?.availableMagicIds||[]).filter(id=>storyCardById(id)?.cardType==='magic');}
     function storySelectedUnits(){return (storyModeState?.playerDeck?.unitIds||[]).filter(id=>storyUnitIds().some(x=>String(x)===String(id)));}
     function storySelectedMagics(){return (storyModeState?.playerDeck?.magicIds||[]).filter(id=>storyMagicIds().some(x=>String(x)===String(id)));}
+    function storyResolveParticipantIcon(participant){
+      if(!participant)return null;
+      const rivalId=participant.rivalId || (participant.type==='rival' ? String(participant.id||'').replace(/^story_rival_/,'') : null);
+      const rival=rivalId ? (Array.isArray(allRivals)?allRivals.find(r=>String(r.id)===String(rivalId)):null) : null;
+      return rival ? (rival.iconImage || null) : (participant.iconImage || null);
+    }
     function storyAiName(level){return ({novice:'素人',normal:'凡人',expert:'玄人',master:'達人'}[level]||'凡人');}
     function storyAiRank(level){return ({novice:0,normal:1,expert:2,master:3}[level]??1);}
     function storyGeneratedAi(index){return index<2?'novice':'normal';}
@@ -2896,8 +3198,9 @@
           const units = (Array.isArray(preview.unitIds)?preview.unitIds:[]).map(storyCardById).filter(c=>c?.cardType==='unit');
           const card = document.createElement('div');
           card.className = 'rounded-xl border border-slate-800 bg-slate-950 p-3 min-w-0';
+          const plannedRivalIcon = selectedRival ? (selectedRival.iconImage || null) : (preview.iconImage || null);
           card.innerHTML = `<div class="text-[10px] font-black text-amber-300 text-center mb-2">第${i+1}戦</div>
-            <div class="w-12 h-12 mx-auto rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${(selectedRival?.iconImage||preview.iconImage)?`<img src="${storyEscapeHtml(selectedRival?.iconImage||preview.iconImage)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'<div class="w-full h-full flex items-center justify-center">🤖</div>'}</div>
+            <div class="w-12 h-12 mx-auto rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${plannedRivalIcon?`<img src="${storyEscapeHtml(plannedRivalIcon)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'<div class="w-full h-full flex items-center justify-center">🤖</div>'}</div>
             <div class="text-sm font-black text-white text-center mt-2 break-words">${storyEscapeHtml(name)}</div>
             <div class="text-[10px] font-bold text-rose-300 text-center">AI：${storyAiName(ai)}</div>
             <div class="text-[9px] text-slate-500 text-center mt-1">キャラ ${units.length}枚 / マジック ${(preview.magicIds||[]).length}枚</div>
@@ -2992,7 +3295,8 @@
         const done=i<Number(storyModeState.currentMatchIndex||0);
         const d=document.createElement('div');
         d.className=`rounded-xl border p-3 min-w-0 ${active?'border-amber-500 bg-amber-950/30':'border-slate-800 bg-slate-950'} ${done?'opacity-65':''}`;
-        d.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center">第${i+1}戦 ${done?'✓':''} ${active?'◀ 次':''}</div><div class="w-10 h-10 mx-auto mt-2 rounded-full bg-slate-900 border border-rose-500 flex items-center justify-center overflow-hidden">${o.iconImage?`<img src="${storyEscapeHtml(o.iconImage)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'🤖'}</div><div class="text-xs font-black text-white text-center mt-2 truncate" title="${storyEscapeHtml(o.name||'対戦相手データを修復中')}">${storyEscapeHtml(o.name||'対戦相手データを修復中')}</div><div class="text-[9px] text-rose-300 font-bold text-center">AI：${storyAiName(o.intelligence)}</div>`;
+        const opponentIcon=storyResolveParticipantIcon(o);
+        d.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center">第${i+1}戦 ${done?'✓':''} ${active?'◀ 次':''}</div><div class="w-10 h-10 mx-auto mt-2 rounded-full bg-slate-900 border border-rose-500 flex items-center justify-center overflow-hidden">${opponentIcon?`<img src="${storyEscapeHtml(opponentIcon)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'🤖'}</div><div class="text-xs font-black text-white text-center mt-2 truncate" title="${storyEscapeHtml(o.name||'対戦相手データを修復中')}">${storyEscapeHtml(o.name||'対戦相手データを修復中')}</div><div class="text-[9px] text-rose-300 font-bold text-center">AI：${storyAiName(o.intelligence)}</div>`;
         box.appendChild(d);
       }
     }
@@ -3002,7 +3306,8 @@
       const box=document.getElementById('story-opponent-card'),ub=document.getElementById('story-opponent-unit-deck'),mb=document.getElementById('story-opponent-magic-deck');
       if(!box)return;
       if(!o){box.innerHTML='<div class="text-sm text-slate-500">次の対戦相手はありません。新しい5戦を準備すると対戦予定が表示されます。</div>';if(ub)ub.innerHTML='';if(mb)mb.innerHTML='';return;}
-      box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${o.iconImage?`<img src="${storyEscapeHtml(o.iconImage)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${storyEscapeHtml(o.name||'対戦相手')}</div><div class="text-xs font-bold text-rose-300 mt-1">AI：${storyAiName(o.intelligence)}</div><div class="text-[10px] text-slate-500 mt-1">第${idx+1}戦</div></div></div>`;
+      const opponentIcon=storyResolveParticipantIcon(o);
+      box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${opponentIcon?`<img src="${storyEscapeHtml(opponentIcon)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${storyEscapeHtml(o.name||'対戦相手')}</div><div class="text-xs font-bold text-rose-300 mt-1">AI：${storyAiName(o.intelligence)}</div><div class="text-[10px] text-slate-500 mt-1">第${idx+1}戦</div></div></div>`;
       const units=(Array.isArray(o.unitIds)?o.unitIds:[]).map(storyCardById).filter(c=>c?.cardType==='unit');
       const magics=(Array.isArray(o.magicIds)?o.magicIds:[]).map(storyCardById).filter(c=>c?.cardType==='magic');
       if(ub){ub.innerHTML='';if(!units.length)ub.innerHTML='<div class="col-span-full text-xs text-amber-300">相手キャラ情報を修復中です。再表示してください。</div>';units.forEach(c=>{const d=document.createElement('div');d.className='story-opponent-card-preview min-w-0';d.innerHTML=storyRenderFullCard(c,true);d.title='タップしてカード詳細を表示';d.onclick=()=>openCardDetail(c.id,{readOnly:true});ub.appendChild(d);});}
@@ -3329,9 +3634,9 @@
     }
     function storyRenderConfirmedDeck(){storyRenderConfirmed();}
     function storyRenderOpponent(){storyRenderOpponentDetail();}
-    function showStoryMatchIntro(){const modal=document.getElementById('story-match-intro-modal');if(!modal||!storyPendingBattle)return;const o=storyPendingBattle.opponent;document.getElementById('story-intro-round').innerText=`第${(storyModeState.currentMatchIndex||0)+1}戦 / 全5戦`;document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${storyAiName(o.intelligence)}`;const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph');if(playerIcon){pi.src=playerIcon;pi.classList.remove('hidden');pp.classList.add('hidden');}else{pi.classList.add('hidden');pp.classList.remove('hidden');}const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');if(o.iconImage){oi.src=o.iconImage;oi.classList.remove('hidden');op.classList.add('hidden');}else{oi.classList.add('hidden');op.classList.remove('hidden');}modal.classList.remove('hidden');}
+    function showStoryMatchIntro(){const modal=document.getElementById('story-match-intro-modal');if(!modal||!storyPendingBattle)return;const o=storyPendingBattle.opponent;document.getElementById('story-intro-round').innerText=`第${(storyModeState.currentMatchIndex||0)+1}戦 / 全5戦`;document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${storyAiName(o.intelligence)}`;const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph');if(playerIcon){pi.src=playerIcon;pi.classList.remove('hidden');pp.classList.add('hidden');}else{pi.classList.add('hidden');pp.classList.remove('hidden');}const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');const opponentIcon=storyResolveParticipantIcon(o);if(opponentIcon){oi.src=opponentIcon;oi.classList.remove('hidden');op.classList.add('hidden');}else{oi.classList.add('hidden');op.classList.remove('hidden');}modal.classList.remove('hidden');}
     function closeStoryMatchIntro(){document.getElementById('story-match-intro-modal')?.classList.add('hidden');storyPendingBattle=null;}
-    async function confirmStoryBattleStart(){if(!storyPendingBattle)return;const o=storyPendingBattle.opponent;storyPendingBattle=null;document.getElementById('story-match-intro-modal')?.classList.add('hidden');const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();storyBattleOverride={playerDeck:{id:`story_p_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]},enemyDeck:{id:`story_e_${Date.now()}`,name:`${o.name}のデッキ`,unitIds:[...o.unitIds],magicIds:[...o.magicIds]},enemyIntelligence:o.intelligence||'normal',enemyName:o.name,enemyIconUrl:o.iconImage||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};switchView('battle');startBattle();}
+    async function confirmStoryBattleStart(){if(!storyPendingBattle)return;const o=storyPendingBattle.opponent;storyPendingBattle=null;document.getElementById('story-match-intro-modal')?.classList.add('hidden');const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();storyBattleOverride={playerDeck:{id:`story_p_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]},enemyDeck:{id:`story_e_${Date.now()}`,name:`${o.name}のデッキ`,unitIds:[...o.unitIds],magicIds:[...o.magicIds]},enemyIntelligence:o.intelligence||'normal',enemyName:o.name,enemyIconUrl:storyResolveParticipantIcon(o)||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};switchView('battle');startBattle();}
     async function startStoryBattle(){
       if(!storyModeState||storyModeState.completed||storyModeState.defeated)return;
       if(storyRepairLoadedState())await saveStoryModeState();
