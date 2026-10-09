@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.0 - オンラインカード画像同期修正</title>
+  <title>カードAI対戦ゲーム v3.28.1 - オンライン戦闘ターン同期修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.0</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.1</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -1079,7 +1079,7 @@
       if (res.length > 0 && !res.endsWith("。")) res += "。";
 
       if (skill.hasSubEffect && skill.subEffect && skill.subEffect.type !== "none") {
-        let subTargetText = getTargetText(skill.subEffect.targetType || skill.targetType, skill.subEffect.targetCond || skill.targetCond);
+        let subTargetText = getTargetText(skill.subEffect.targetType || skill.targetType, skill.subEffect.targetCond || {type:'none'});
         let subEffText = getEffectText(skill.subEffect);
         if (subEffText) res += `さらに${subTargetText}に${subEffText}。`;
       }
@@ -3714,7 +3714,8 @@
       if (targetType === 'select_enemy_1' || targetType === 'random_enemy_1' || targetType === 'all_enemy') return enemies;
       if (targetType === 'select_ally_1' || targetType === 'random_ally_1' || targetType === 'all_ally') return allies;
       if (targetType === 'all_field' || targetType === 'random_all_1') {
-        return [...battleState.playerUnits, ...battleState.enemyUnits].filter(u => u.currentHp > 0);
+        // Online targetPool() is field-only too; living reserve units are never eligible until deployed.
+        return [...getActiveUnits('player'), ...getActiveUnits('enemy')].filter(u => u.currentHp > 0);
       }
       return [];
     }
@@ -4119,7 +4120,7 @@
       const beforeHp = target.currentHp;
       if (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce' || effect.type === 'dmg_atk_ratio') {
         if (isMagic && effect.type === 'dmg_atk_ratio') return fail({ value: -50, kills: 0, damage: 0, healing: 0 });
-        const raw = effect.type === 'dmg_fixed' ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
+        const raw = (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce') ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
         const actual = effect.type === 'dmg_fixed_pierce' ? Math.max(0, Math.round(raw)) : aiPlannerDamageAfterCut(target, raw);
         target.currentHp = Math.max(0, target.currentHp - actual);
         return ok({
@@ -4211,7 +4212,7 @@
         if ((sub.targetType || 'same_main_target') === 'same_main_target') {
           subTargets = mainTargets;
         } else {
-          const subEff={...sub,targetType:sub.targetType||skill.targetType,targetCond:sub.targetCond||skill.targetCond};
+          const subEff={...sub,targetType:sub.targetType||skill.targetType,targetCond:sub.targetCond||{type:'none'}};
           subTargets=aiPlannerResolveTargets(state,actor,subEff,explicitSubTargetId);
         }
         if (!subTargets.length) return { value: total.value - 650, kills: total.kills, damage: total.damage, healing: total.healing };
@@ -4475,7 +4476,7 @@
       const effect = skill.mainEffect || {};
       let score = Math.random() * 2;
       if (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce' || effect.type === 'dmg_atk_ratio') {
-        const raw = effect.type === 'dmg_fixed' ? Number(effect.val || 0) : Math.round(aiPlannerEffectiveAtk(unit) * Number(effect.val || 0) / 100);
+        const raw = (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce') ? Number(effect.val || 0) : Math.round(aiPlannerEffectiveAtk(unit) * Number(effect.val || 0) / 100);
         const actual = effect.type === 'dmg_fixed_pierce' ? Math.max(0, Math.round(raw)) : aiPlannerDamageAfterCut(target, raw);
         score += actual * 0.8;
         if (actual >= target.currentHp) score += 260;
@@ -4539,9 +4540,9 @@
             u.reservedAction = {type:'attack',targetInstanceId:fallback?.instanceId||null};
           } else {
             u.reservedAction = {type:'skill',skillIndex:pick.sIdx,targetInstanceId:target?.instanceId||null,subTargetInstanceId:subTarget?.instanceId||null};
-            remainingAp -= Number(pick.sk.cost||0);
           }
-          remainingAp -= Number(pick.sk.cost||0);
+          // AP is a shared budget; subtract the picked skill exactly once.
+          if (u.reservedAction.type === 'skill') remainingAp -= Number(pick.sk.cost||0);
         } else {
           const target = aliveEnemies.slice().sort((a,b)=>((a.currentHp/a.maxHp)-(b.currentHp/b.maxHp)) || (a.currentHp-b.currentHp))[0] || aliveEnemies[Math.floor(Math.random()*aliveEnemies.length)];
           u.reservedAction = {type:'attack',targetInstanceId:target?.instanceId||null};
@@ -5191,7 +5192,7 @@
               mainTargets.forEach(t=>{ if(!firstTarget&&!t.__playerTarget)firstTarget=t; const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(effectResultSucceeded(r)){mainEffectSucceeded=true;} if(r){effectLines.push(r.result||r.effect||r);} });
               if(mainEffectSucceeded&&sk.hasSubEffect&&sk.subEffect){
                 const subType=sk.subEffect.targetType||sk.targetType;
-                const subTargets=subType==='same_main_target'?mainTargets:resolveTargets(subType,sk.subEffect.targetCond||sk.targetCond,u,isPlayer);
+                const subTargets=subType==='same_main_target'?mainTargets:resolveTargets(subType,sk.subEffect.targetCond||{type:'none'},u,isPlayer);
                 subTargets.forEach(t=>{ const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
               }
             } finally { battleState._statusApplicationTiming = previousTiming; }
@@ -5489,8 +5490,12 @@
   let onlineUiToken = 0;
   let onlineTimerHandle = null;
   let onlineDeadline = 0;
+  let onlineTimerEndMonotonic = 0;
   let onlineSubmitted = false;
   let onlineLastTurn = 0;
+  let onlineLastDecisionToken = null;
+  let onlinePrepareMarker = null;
+  let onlinePrepareAckToken = null;
   let onlineLastState = null;
   let onlineEventQueue = [];
   let onlineEventProcessing = false;
@@ -5790,8 +5795,8 @@
   function resetOnlineRoomLocal(){
     onlineUiToken++;
     clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
-    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastState=null;onlineEventQueue=[];onlineDeferredState=null;onlineDeferredEnd=null;
-    clearInterval(onlineTimerHandle);onlineDeadline=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;
+    clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
     onlineMode=false;$('online-controls')?.classList.add('hidden');
   }
@@ -6010,22 +6015,23 @@
     };
     switchView('battle');initBattleUI();renderBattleState();renderOnlineBattleLog(st.events||[]);
     const decision=st.phase==='decision'&&!isSpectator;
+    const paused=st.phase==='paused'&&!isSpectator;
+    const timerVisible=!!(onlineMode&&!isSpectator&&(decision||paused));
     const panel=$('decision-command-panel');if(panel)panel.classList.toggle('hidden',!decision);
-    $('online-controls')?.classList.toggle('hidden',!onlineMode||isSpectator);
-    $('online-battle-timer')?.classList.toggle('hidden',!onlineMode||isSpectator);
+    $('online-controls')?.classList.toggle('hidden',!decision);
+    $('online-battle-timer')?.classList.toggle('hidden',!timerVisible);
     if(decision){
       renderCommandPanel();renderMagicHand();renderEnemyMagicHand();updateReservationSummary();renderOnlineControls();
-      if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();
+      if(st.deadline)startOnlineTimer(st.deadline,st.remainingMs);else showOnlinePausedTimer();
     }else if(st.phase==='execution'){
       showOnlineExecutionTimer();
-      $('online-battle-timer')?.classList.remove('hidden');
-    }else if(st.phase==='paused'){
+    }else if(st.phase==='preparing'){
+      showOnlinePreparingTimer();
+    }else if(paused){
       showOnlinePausedTimer();
-      $('online-battle-timer')?.classList.remove('hidden');
     }else{
-      clearInterval(onlineTimerHandle);
+      clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;
       if($('online-confirmed-status'))$('online-confirmed-status').innerText='対戦状態を同期しています。';
-      $('online-battle-timer')?.classList.remove('hidden');
       if($('online-timer'))$('online-timer').innerText='—';
       if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='—';
     }
@@ -6060,7 +6066,7 @@
   }
   function renderOnlineControls(){
     if(onlineSpectating||!onlineMode)return;
-    const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;
+    const left=onlineTimerEndMonotonic?Math.max(0,Math.ceil((onlineTimerEndMonotonic-onlineMonotonicNow())/1000)):0;
     $('online-timer').innerText=String(left);
     $('online-confirmed-status').innerText=onlineSubmitted?'行動送信済み。相手の入力を待っています。':'行動を選択して「行動決定」を押してください。';
     const btn=$('btn-confirm-actions');if(btn){btn.innerText=onlineSubmitted?'送信済み':'🌐 行動決定（送信）';btn.disabled=onlineSubmitted||battleState?.phase!=='decision';btn.classList.toggle('opacity-50',btn.disabled);btn.classList.toggle('cursor-not-allowed',btn.disabled);}
@@ -6100,12 +6106,18 @@
 
   function renderOnlineTargets(u,act){
     const targetBox=$('online-target-buttons');if(!targetBox)return;
-    const sk=act.type==='skill'?u.skills?.[act.skillIndex]:null;let targets=[];
-    if(sk&&['select_enemy_1','select_ally_1'].includes(sk.targetType)) targets=(sk.targetType==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0&&!(x.side!==u.side&&unitHasStatus(x,'stealth')));
     targetBox.innerHTML='';
     if(act.type==='attack'){targetBox.innerHTML='<span class="text-[10px] text-slate-500">通常攻撃の対象は実行時に現在フィールドからランダム決定</span>';return;}
-    if(!targets.length)return;
-    for(const t of targets){const b=document.createElement('button');b.className='px-2 py-1 rounded border '+(act.targetInstanceId===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-900')+' text-[10px]';b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{const u2=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u2)return;u2.reservedAction=u2.reservedAction||{type:'attack',targetInstanceId:null};u2.reservedAction.targetInstanceId=t.instanceId;renderCommandPanel();updateReservationSummary();};targetBox.appendChild(b);}
+    const sk=act.type==='skill'?u.skills?.[act.skillIndex]:null;if(!sk)return;
+    const renderPicker=(label,type,cond,field)=>{
+      if(!isManualTargetType(type))return;
+      const pool=(type==='select_enemy_1'?battleState.enemyUnits:battleState.playerUnits).filter(x=>x.isActive&&x.currentHp>0&&matchesTargetCondition(x,cond)&&!(x.side!==u.side&&unitHasStatus(x,'stealth')));
+      const wrap=document.createElement('div');wrap.className='mb-2';const title=document.createElement('div');title.className='text-[10px] font-bold text-cyan-300';title.innerText=label;wrap.appendChild(title);
+      for(const t of pool){const b=document.createElement('button');b.className='px-2 py-1 rounded border mr-1 mt-1 '+(act[field]===t.instanceId?'border-emerald-400 bg-emerald-900/30':'border-slate-700 bg-slate-900')+' text-[10px]';b.innerText=`${t.name} HP:${t.currentHp}`;b.onclick=()=>{const u2=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u2)return;u2.reservedAction=u2.reservedAction||{type:'attack',targetInstanceId:null};u2.reservedAction[field]=t.instanceId;renderCommandPanel();updateReservationSummary();};wrap.appendChild(b);}
+      if(!pool.length){const empty=document.createElement('div');empty.className='text-[10px] text-rose-300';empty.innerText='有効な対象がいません';wrap.appendChild(empty);}targetBox.appendChild(wrap);
+    };
+    renderPicker('メイン効果の対象',sk.targetType,sk.targetCond,'targetInstanceId');
+    if(sk.hasSubEffect&&sk.subEffect){if(sk.subEffect.targetType==='same_main_target'){const e=document.createElement('div');e.className='text-[10px] text-emerald-300';e.innerText='追加効果：メイン効果と同じ対象';targetBox.appendChild(e);}else renderPicker('追加効果の対象',sk.subEffect.targetType,sk.subEffect.targetCond,'subTargetInstanceId');}
   }
 
   window.setOnlineTarget=id=>{const u=battleState.playerUnits.find(x=>x.instanceId===onlineSelectedUnitId);if(!u)return;const t=(battleState.enemyUnits||[]).concat(battleState.playerUnits||[]).find(x=>x.instanceId===id);if(!t||(t.side!==u.side&&unitHasStatus(t,'stealth'))){showOnlineError('隠密中の敵は指定できません。');return;}u.reservedAction=u.reservedAction||{type:'attack',targetInstanceId:null};u.reservedAction.targetInstanceId=id;renderCommandPanel();updateReservationSummary();};
@@ -6131,21 +6143,34 @@
     sendOnline('submit_actions',{actionId,battleId:battleState.battleId,turn:battleState.turn,actions:{actionId,units,magicId:battleState.reservedMagic?.id||null,magicTargetInstanceId:battleState.reservedMagicTargetInstanceId||null,magicSubTargetInstanceId:battleState.reservedMagicSubTargetInstanceId||null}});
   }
   window.submitOnlineActions=submitOnlineActions;
-  function startOnlineTimer(deadline){
+  function onlineMonotonicNow(){return (typeof performance!=='undefined'&&typeof performance.now==='function')?performance.now():Date.now();}
+  function onlineTimerSecondsLeft(){return onlineTimerEndMonotonic?Math.max(0,Math.ceil((onlineTimerEndMonotonic-onlineMonotonicNow())/1000)):0;}
+  function startOnlineTimer(deadline,remainingMs=null){
     clearInterval(onlineTimerHandle);
     onlineDeadline=Number(deadline)||0;
-    const tick=()=>{const left=onlineDeadline?Math.max(0,Math.ceil((onlineDeadline-Date.now())/1000)):0;if($('online-timer'))$('online-timer').innerText=String(left);if($('online-battle-timer-value'))$('online-battle-timer-value').innerText=String(left);if($('online-timer'))$('online-timer').classList.toggle('text-rose-400',left<=10);if($('online-battle-timer'))$('online-battle-timer').classList.toggle('text-rose-300',left<=10);if(left<=0)clearInterval(onlineTimerHandle);};
+    const hasRemaining=remainingMs!==null&&remainingMs!==undefined&&Number.isFinite(Number(remainingMs));
+    const duration=hasRemaining?Math.max(0,Number(remainingMs)):(onlineDeadline?Math.max(0,onlineDeadline-Date.now()):0);
+    onlineTimerEndMonotonic=onlineMonotonicNow()+duration;
+    const tick=()=>{const left=onlineTimerSecondsLeft();if($('online-timer'))$('online-timer').innerText=String(left);if($('online-battle-timer-value'))$('online-battle-timer-value').innerText=String(left);if($('online-timer'))$('online-timer').classList.toggle('text-rose-400',left<=10);if($('online-battle-timer'))$('online-battle-timer').classList.toggle('text-rose-300',left<=10);if(left<=0){clearInterval(onlineTimerHandle);onlineTimerHandle=null;}};
     tick();onlineTimerHandle=setInterval(tick,250);
   }
+  function showOnlinePreparingTimer(){
+    clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;
+    $('online-controls')?.classList.add('hidden');$('online-battle-timer')?.classList.add('hidden');$('decision-command-panel')?.classList.add('hidden');
+    if($('online-timer'))$('online-timer').innerText='—';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='—';
+    if($('online-confirmed-status'))$('online-confirmed-status').innerText='開始時・ターン開始パッシブを処理しています…';
+  }
   function showOnlineExecutionTimer(){
-    clearInterval(onlineTimerHandle);onlineDeadline=0;
-    if($('online-timer'))$('online-timer').innerText='処理中';
-    if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='処理中';
+    clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;
+    // The 90-second timer exists only during an actionable decision phase.
+    $('online-controls')?.classList.add('hidden');$('online-battle-timer')?.classList.add('hidden');$('decision-command-panel')?.classList.add('hidden');
+    if($('online-timer'))$('online-timer').innerText='—';
+    if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='—';
     if($('online-timer'))$('online-timer').classList.remove('text-rose-400');
     if($('online-battle-timer'))$('online-battle-timer').classList.remove('text-rose-300');
     if($('online-confirmed-status'))$('online-confirmed-status').innerText='行動を実行中です。';
   }
-  function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineDeadline=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
+  function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
   function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;battleState.reservedMagicSubTargetInstanceId=null;} }
 
   async function playOnlineEvent(ev){
@@ -6185,6 +6210,19 @@
         safeApplyOnlineState(st);
       }
     }finally{onlineEventProcessing=false;}
+    completeOnlinePreparationIfReady();
+  }
+
+  function completeOnlinePreparationIfReady(){
+    const marker=onlinePrepareMarker;
+    if(!marker||onlineSpectating||!onlineMode||onlineEventProcessing||onlineEventQueue.length)return;
+    if(onlinePrepareAckToken===marker.decisionToken)return;
+    // Apply the last preparing state only after all passive popups have completed.
+    if(onlineDeferredState){const st=onlineDeferredState;onlineDeferredState=null;safeApplyOnlineState(st);}
+    if(battleState?.phase!=='preparing'||String(battleState?.battleId||'')!==String(marker.battleId||''))return;
+    onlinePrepareAckToken=marker.decisionToken;onlinePrepareMarker=null;
+    if($('online-confirmed-status'))$('online-confirmed-status').innerText='開始時効果の表示完了。相手側の準備完了を待っています…';
+    sendOnline('decision_ready',{battleId:marker.battleId,turn:marker.turn,decisionToken:marker.decisionToken});
   }
 
   function handleOnlineMessage(m){
@@ -6278,8 +6316,22 @@
       return;
     }
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
-    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);if(m.state?.phase==='decision'&&m.state?.deadline)startOnlineTimer(m.state.deadline);else if(m.state?.phase==='execution')showOnlineExecutionTimer();safeApplyOnlineState(m.state);return;}
+    if(m.type==='battle_start'){resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineLastDecisionToken=null;onlinePrepareAckToken=null;safeApplyOnlineState(m.state);return;}
+    if(m.type==='turn_preparing'){
+      if(m.state){if(onlineEventQueue.length||onlineEventProcessing)onlineDeferredState=m.state;else safeApplyOnlineState(m.state);}
+      return;
+    }
+    if(m.type==='decision_prepare_end'){
+      if(m.state){if(onlineEventQueue.length||onlineEventProcessing)onlineDeferredState=m.state;else safeApplyOnlineState(m.state);}
+      if(!onlineSpectating&&m.state?.yourSide!=='spectator'){
+        onlinePrepareMarker={battleId:m.battleId||m.state?.battleId,turn:Number(m.turn||m.state?.turn||0),decisionToken:String(m.decisionToken||m.state?.decisionToken||'')};
+        completeOnlinePreparationIfReady();
+      }
+      return;
+    }
     if(m.type==='battle_event'){
+      if(m.state?.phase==='execution')showOnlineExecutionTimer();
+      else if(m.state?.phase==='preparing')showOnlinePreparingTimer();
       // イベント演出中は最新stateをUIへ即反映せず保留する。
       // イベントごとにdecision UIを書き換えると、ポップアップ表示中に
       // コマンド選択が消えたり次ターンへ進めなくなるため、最後に一度だけ描画する。
@@ -6287,12 +6339,15 @@
       if(m.state) onlineDeferredState=m.state;
       processOnlineEventQueue();return;
     }
-    if(m.type==='turn_start'||m.type==='battle_state'){
+    if(m.type==='turn_start'||m.type==='battle_state'||m.type==='turn_execution_start'){
       const st=m.state;if(!st)return;
-      const nextTurn=Number(st.turn||0);if(m.type==='turn_start'&&nextTurn>Number(onlineLastTurn||0))resetOnlineTurn();onlineLastTurn=nextTurn||onlineLastTurn;
-      if(st.phase==='decision'){if(st.deadline)startOnlineTimer(st.deadline);else showOnlinePausedTimer();}
-      else if(st.phase==='execution')showOnlineExecutionTimer();
-      else if(st.phase==='paused')showOnlinePausedTimer();
+      if(m.type==='turn_start'){
+        const nextTurn=Number(st.turn||0),token=String(st.decisionToken||'');
+        if(nextTurn>Number(onlineLastTurn||0)||(token&&token!==onlineLastDecisionToken))resetOnlineTurn();
+        onlineLastTurn=nextTurn||onlineLastTurn;
+        if(token)onlineLastDecisionToken=token;
+      }
+      // Do not start/stop timers ahead of queued passive/action animations. State application owns the phase UI.
       if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredState=st;return;}
       safeApplyOnlineState(st);return;
     }
@@ -6310,7 +6365,13 @@
     if(m.type==='error'){
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
 
-      if(m.code==='INVALID_ACTION')onlineSubmitted=false;
+      if(['INVALID_ACTION','NOT_DECISION','STALE_BATTLE','STALE_TURN','OFFLINE_PLAYER'].includes(m.code)){
+        onlineSubmitted=false;
+        if(battleState?.phase==='decision')renderOnlineControls();
+        // The rejection can mean our phase snapshot became stale. Ask the server for its current phase,
+        // rather than leaving the client stuck in the submitted/disabled state.
+        if(onlineRoom)sendOnline('battle_state');
+      }
       if(['INVALID_DECK','NO_DECK','NO_SOURCE','PROFILE_NOT_READY','OUTSIDE_DECK','NOT_IN_ROOM'].includes(m.code)){
         clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;onlineDeckRequestId=null;
       }
@@ -6320,6 +6381,21 @@
   }
 
   function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+
+  // The offline reservation renderer may enable the confirm button. Reapply authoritative online phase/submission locks after it runs.
+  const originalRenderBattleState=window.renderBattleState;
+  if(typeof originalRenderBattleState==='function'){
+    window.renderBattleState=function(){const result=originalRenderBattleState.apply(this,arguments);if(onlineMode)renderOnlineControls();return result;};
+  }
+  const originalTriggerOmakase=window.triggerOmakase;
+  if(typeof originalTriggerOmakase==='function'){
+    window.triggerOmakase=function(){
+      if(onlineMode&&(onlineSpectating||onlineSubmitted||battleState?.phase!=='decision')){renderOnlineControls();return;}
+      const result=originalTriggerOmakase.apply(this,arguments);
+      if(onlineMode){$('decision-command-panel')?.classList.remove('hidden');renderCommandPanel();renderMagicHand();renderOnlineMagicTargets();renderOnlineControls();}
+      return result;
+    };
+  }
 
   // オンライン版では既存のオフライン確定処理を使わない。
   const originalConfirmPlayerActions=window.confirmPlayerActions;
