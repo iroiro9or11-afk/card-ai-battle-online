@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.27.5 - ストーリー表示修正</title>
+  <title>カードAI対戦ゲーム v3.27.6 - ストーリー表示修正</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -165,7 +165,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.5</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.27.6</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -492,6 +492,11 @@
             <div id="story-initial-magic-reward" class="grid grid-cols-2 sm:grid-cols-3 gap-2"></div>
           </div>
         </div>
+        <div class="bg-slate-900 border border-rose-700/50 rounded-xl p-3 mt-5">
+          <div class="text-sm font-black text-rose-300 mb-2">📅 今回の5戦予定相手</div>
+          <p class="text-[10px] text-slate-400 mb-3">抽選後もこの5人との対戦順は固定です。編成画面では第1戦の相手デッキと5戦の順番を確認できます。</p>
+          <div id="story-initial-opponents-preview" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2"></div>
+        </div>
         <div class="flex justify-center mt-5">
           <button type="button" onclick="closeStoryInitialReward()" class="w-full sm:w-auto px-8 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg">📝 ストーリー編成へ進む</button>
         </div>
@@ -518,7 +523,7 @@
         <div class="text-center">
           <div class="text-5xl mb-3">🏆</div>
           <h3 class="text-xl font-black text-amber-300">5戦ストーリーを開始</h3>
-          <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">ここでは先に対戦予定の5人を確認・変更できます。カードはまだ配布しません。「5戦ストーリーを開始」を押した瞬間に、キャラ5枚＋マジック10枚を新しく抽選してから編成画面へ進みます。</p>
+          <p class="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed">ここでは先に対戦予定の5人と各相手の使用キャラクターを確認・変更できます。プレイヤー用カードはまだ配布しません。「5戦ストーリーを開始」を押した瞬間に、キャラ5枚＋マジック10枚を新しく抽選してから編成画面へ進みます。</p>
         </div>
         <div class="flex flex-wrap justify-center gap-2">
           <button type="button" onclick="storyRandomizeDraftOpponents()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl text-xs">🎲 ライバルを再抽選</button>
@@ -528,7 +533,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div>
               <div class="text-xs font-black text-amber-300 border-l-2 border-amber-400 pl-2">5戦の対戦予定</div>
-              <div class="text-[10px] text-slate-500 mt-1">各戦の相手とAI難易度を開始前に確認・変更できます。</div>
+              <div class="text-[10px] text-slate-500 mt-1">各戦の相手・AI難易度・使用キャラクターを開始前に確認・変更できます。</div>
             </div>
             <div class="text-[10px] text-slate-500">第1戦 → 第5戦</div>
           </div>
@@ -798,6 +803,13 @@
     let storyModeDraft = null;
     let storyBattleOverride = null;
     let storyPendingBattle = null;
+
+    // 初期化中にストーリー画面を開くと、空のallCards/allRivalsで一度描画され、
+    // IndexedDBの読み込み完了後に再描画されない競合があった。全画面操作から共有する準備完了Promise。
+    window.__cardBattleAppReady = false;
+    window.__cardBattleAppInitError = null;
+    let resolveCardBattleAppReady;
+    const cardBattleAppReadyPromise = new Promise(resolve => { resolveCardBattleAppReady = resolve; });
 
 
     // 戦闘状態管理
@@ -1337,13 +1349,28 @@
     }
 
     window.addEventListener("DOMContentLoaded", async () => {
-      await initDB();
-      await loadAllData();
-      window.__cardBattleAppReady = true;
-      setupCropInteractions();
-      initEditorSkillUI();
-      initLongPressGlobalListener();
-      updatePreview();
+      try {
+        await initDB();
+        await loadAllData();
+        // カード・デッキ・ライバルの読み込みとID移行が完了してから、ストーリー保存値を検査する。
+        storyEnsureDraft();
+        await saveStoryModeDraft();
+        if (storyModeState && storyRepairLoadedState()) await saveStoryModeState();
+        setupCropInteractions();
+        initEditorSkillUI();
+        initLongPressGlobalListener();
+        updatePreview();
+        window.__cardBattleAppInitError = null;
+        window.__cardBattleAppReady = true;
+      } catch (error) {
+        window.__cardBattleAppInitError = String(error?.stack || error);
+        console.error('[CardAI] アプリ初期化に失敗しました', error);
+      } finally {
+        if (typeof resolveCardBattleAppReady === 'function') resolveCardBattleAppReady();
+        // 起動中にストーリー画面を選んだ場合も、初期化完了後に必ず描画し直す。
+        const storyView = document.getElementById('view-story');
+        if (window.__cardBattleAppReady && storyView && !storyView.classList.contains('hidden')) renderStoryMode();
+      }
     });
 
     // カード画像の互換取得
@@ -1591,7 +1618,10 @@
       if (viewId === "deck") renderDeckList();
       if (viewId === "deck-manager") renderDeckManager();
       if (viewId === "battle-setup") renderBattleSetup();
-      if (viewId === "story") renderStoryMode();
+      if (viewId === "story") {
+        if (window.__cardBattleAppReady) renderStoryMode();
+        else storyRenderLoadingState();
+      }
       if (viewId === "editor") updatePreview();
     }
 
@@ -2599,26 +2629,155 @@
     function storyCloneParticipant(p){return p?JSON.parse(JSON.stringify(p)):null;}
 
     function storyMakeInstantRival(serial,intelligence='normal'){
-      const unitPool=allCards.filter(c=>c.cardType==='unit'),magicPool=allCards.filter(c=>c.cardType==='magic');
+      const cards=Array.isArray(allCards)?allCards.filter(c=>c&&c.id):[];
+      const unitPool=cards.filter(c=>c.cardType==='unit'),magicPool=cards.filter(c=>c.cardType==='magic');
       const units=storyShuffle(unitPool).slice(0,Math.min(5,unitPool.length));const magics=storyShuffle(magicPool).slice(0,Math.min(10,magicPool.length));
-      return {id:`story_instant_${Date.now()}_${serial}_${Math.random().toString(36).slice(2,7)}`,type:'instant',name:`即席ライバル ${String(serial).padStart(2,'0')}`,iconImage:null,intelligence,unitIds:units.map(c=>c.id),magicIds:magics.map(c=>c.id)};
+      return {id:`story_instant_${Date.now()}_${serial}_${Math.random().toString(36).slice(2,7)}`,type:'instant',name:`即席ライバル ${String(serial).padStart(2,'0')}`,iconImage:null,intelligence:storyValidAiLevel(intelligence)?intelligence:'normal',unitIds:units.map(c=>c.id),magicIds:magics.map(c=>c.id)};
     }
     function storyBuildFixedParticipant(rival,serial){
-      const deck=allDecks.find(d=>d.id===rival.deckId);if(!deck||(deck.unitIds||[]).length<3)return storyMakeInstantRival(serial,'normal');
-      return {id:`story_rival_${rival.id}`,type:'rival',rivalId:rival.id,name:rival.name||`ライバル${serial}`,iconImage:rival.iconImage||null,intelligence:rival.intelligence||'normal',deckId:deck.id,unitIds:[...(deck.unitIds||[])].slice(0,5),magicIds:[...(deck.magicIds||[])].slice(0,10)};
+      if(!rival||!rival.id)return storyMakeInstantRival(serial,storyGeneratedAi(serial-1));
+      const fallback=()=>{
+        const p=storyMakeInstantRival(serial,rival.intelligence||'normal');
+        return {...p,id:`story_rival_${rival.id}`,type:'rival',rivalId:rival.id,name:rival.name||`ライバル${serial}`,iconImage:rival.iconImage||null,intelligence:rival.intelligence||'normal'};
+      };
+      const deck=(Array.isArray(allDecks)?allDecks:[]).find(d=>d&&String(d.id)===String(rival.deckId));
+      if(!deck)return fallback();
+      const unitIds=[...new Set((Array.isArray(deck.unitIds)?deck.unitIds:[]).map(id=>storyResolveCardId(id,'unit')).filter(Boolean))].slice(0,5);
+      const magicIds=[...new Set((Array.isArray(deck.magicIds)?deck.magicIds:[]).map(id=>storyResolveCardId(id,'magic')).filter(Boolean))].slice(0,10);
+      if(unitIds.length<3)return fallback();
+      return {id:`story_rival_${rival.id}`,type:'rival',rivalId:rival.id,name:rival.name||`ライバル${serial}`,iconImage:rival.iconImage||null,intelligence:storyValidAiLevel(rival.intelligence)?rival.intelligence:'normal',deckId:deck.id,unitIds,magicIds};
     }
 
-    function storyCreateOpponentDraft(){
-      const fixed=storyShuffle(allRivals||[]).slice(0,Math.min(5,(allRivals||[]).length));const entries=fixed.map(r=>({type:'rival',rivalId:r.id}));
-      while(entries.length<5)entries.push({type:'instant',intelligence:storyGeneratedAi(entries.length)});
-      const byRank=new Map();entries.forEach((e,i)=>{let rank=e.type==='rival'?(storyAiRank(allRivals.find(r=>r.id===e.rivalId)?.intelligence||'normal')):storyAiRank(e.intelligence||storyGeneratedAi(i));if(!byRank.has(rank))byRank.set(rank,[]);byRank.get(rank).push(e);});
-      return [...byRank.keys()].sort((a,b)=>a-b).flatMap(k=>storyShuffle(byRank.get(k))).slice(0,5);
+    function storyValidAiLevel(level) {
+      return ['novice','normal','expert','master'].includes(String(level||''));
     }
-    function storyCreateEmptyDraft(){return {version:6,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};}
-    function storyEnsureDraft(){
-      const valid=storyModeDraft && Number(storyModeDraft.version)>=6 && Array.isArray(storyModeDraft.opponents) && storyModeDraft.opponents.length===5;
-      if(!valid){storyModeDraft=storyCreateEmptyDraft();saveStoryModeDraft();}
-      // 「準備」段階ではカードをまだ抽選しない。抽選は「5戦ストーリーを開始」でのみ行う。
+    function storyDraftEntryRank(entry, index) {
+      if (entry?.type === 'rival') {
+        const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(entry.rivalId));
+        return storyAiRank(rival?.intelligence || entry.intelligence || 'normal');
+      }
+      return storyAiRank(entry?.intelligence || storyGeneratedAi(index));
+    }
+    function storyPreviewHasValidCards(p) {
+      return !!p && Array.isArray(p.unitIds) && p.unitIds.length >= 3 &&
+        p.unitIds.every(id => storyCardById(id)?.cardType === 'unit') &&
+        Array.isArray(p.magicIds) && p.magicIds.every(id => storyCardById(id)?.cardType === 'magic');
+    }
+    function storyMaterializeDraftOpponent(entry, index, forceNew = false) {
+      const e = entry && typeof entry === 'object' ? entry : {type:'instant'};
+      if (!forceNew && storyPreviewHasValidCards(e.preview)) {
+        const p = storyCloneParticipant(e.preview);
+        // 表示名・アイコン・難易度はライバル管理側の最新値に合わせる。
+        if (e.type === 'rival') {
+          const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(e.rivalId));
+          if (rival) {
+            p.name = rival.name || p.name || `ライバル${index+1}`;
+            p.iconImage = rival.iconImage || null;
+            p.intelligence = rival.intelligence || p.intelligence || 'normal';
+            p.rivalId = rival.id;
+            p.type = 'rival';
+          }
+        } else {
+          p.name = `即席ライバル ${String(index+1).padStart(2,'0')}`;
+          p.intelligence = storyValidAiLevel(e.intelligence) ? e.intelligence : storyGeneratedAi(index);
+        }
+        return p;
+      }
+      if (e.type === 'rival') {
+        const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(e.rivalId));
+        if (rival) {
+          const fixed = storyBuildFixedParticipant(rival, index+1);
+          if (storyPreviewHasValidCards(fixed)) return fixed;
+          // ライバルのデッキ参照が壊れていても、予定相手表示を止めず使用可能な即席デッキに退避。
+          const fallback = storyMakeInstantRival(index+1, rival.intelligence || e.intelligence || 'normal');
+          fallback.name = rival.name || fallback.name;
+          fallback.iconImage = rival.iconImage || null;
+          fallback.intelligence = rival.intelligence || e.intelligence || 'normal';
+          fallback.type = 'rival';
+          fallback.rivalId = rival.id;
+          return fallback;
+        }
+      }
+      const intelligence = storyValidAiLevel(e.intelligence) ? e.intelligence : storyGeneratedAi(index);
+      const instant = storyMakeInstantRival(index+1, intelligence);
+      instant.name = `即席ライバル ${String(index+1).padStart(2,'0')}`;
+      instant.intelligence = intelligence;
+      instant.type = 'instant';
+      return instant;
+    }
+    function storyCreateOpponentDraft() {
+      const rivals = storyShuffle((Array.isArray(allRivals) ? allRivals : []).filter(r => r && r.id)).slice(0,5);
+      const entries = rivals.map(r => ({type:'rival', rivalId:r.id, intelligence:r.intelligence || 'normal'}));
+      while (entries.length < 5) entries.push({type:'instant', intelligence:storyGeneratedAi(entries.length)});
+      const ranked = entries.map((e,i) => ({e,i,rank:storyDraftEntryRank(e,i)}))
+        .sort((a,b) => a.rank-b.rank || a.i-b.i).map(x => x.e);
+      return ranked.map((entry,index) => ({
+        ...entry,
+        intelligence: entry.type === 'instant' ? (storyValidAiLevel(entry.intelligence) ? entry.intelligence : storyGeneratedAi(index)) : entry.intelligence,
+        preview: storyMaterializeDraftOpponent(entry,index,true)
+      }));
+    }
+    function storyCreateEmptyDraft() {
+      return {version:7,opponents:storyCreateOpponentDraft(),initialUnitIds:[],initialMagicIds:[],playerDeck:{unitIds:[],magicIds:[]},playerDeployment:{active:[],reserve:[]}};
+    }
+    function storyEnsureDraft() {
+      const raw = storyModeDraft && typeof storyModeDraft === 'object' ? storyModeDraft : {};
+      const source = Array.isArray(raw.opponents) ? raw.opponents.slice(0,5) : [];
+      let changed = Number(raw.version) !== 7 || source.length !== 5;
+      // 旧ドラフトは配列の長さだけ正常でも、null／消えたライバルID／カード参照切れを含むことがあった。
+      // 5件それぞれを検査して補修し、1件の不正値で一覧全体の描画が停止しないようにする。
+      let regenerated = null;
+      const regeneratedAt = index => { if(!regenerated) regenerated=storyCreateOpponentDraft(); return regenerated[index]; };
+      const usedRivalIds = new Set();
+      const opponents = [];
+      for (let i=0; i<5; i++) {
+        let entry = source[i] && typeof source[i] === 'object' ? source[i] : null;
+        let normalized = null;
+        if (entry?.type === 'rival') {
+          const rival = (Array.isArray(allRivals) ? allRivals : []).find(r => r && String(r.id) === String(entry.rivalId));
+          const rivalKey = rival ? String(rival.id) : '';
+          if (rival && !usedRivalIds.has(rivalKey)) {
+            usedRivalIds.add(rivalKey);
+            const samePreview = storyPreviewHasValidCards(entry.preview);
+            normalized = {
+              type:'rival', rivalId:rival.id, intelligence:rival.intelligence || entry.intelligence || 'normal',
+              preview: storyMaterializeDraftOpponent({...entry, type:'rival', rivalId:rival.id}, i, !samePreview)
+            };
+          }
+        } else if (entry?.type === 'instant') {
+          const intelligence = storyValidAiLevel(entry.intelligence) ? entry.intelligence : storyGeneratedAi(i);
+          normalized = {type:'instant', intelligence,
+            preview: storyMaterializeDraftOpponent({...entry, type:'instant', intelligence}, i, !storyPreviewHasValidCards(entry.preview))};
+        }
+        if (!normalized) {
+          const fallback = regeneratedAt(i) || {type:'instant',intelligence:storyGeneratedAi(i)};
+          normalized = {...fallback};
+          if (normalized.type === 'rival' && usedRivalIds.has(String(normalized.rivalId))) {
+            normalized = {type:'instant',intelligence:storyGeneratedAi(i),preview:storyMaterializeDraftOpponent({type:'instant',intelligence:storyGeneratedAi(i)},i,true)};
+          }
+          if (normalized.type === 'rival') usedRivalIds.add(String(normalized.rivalId));
+          changed = true;
+        }
+        if (!storyPreviewHasValidCards(normalized.preview)) {
+          normalized.preview = storyMaterializeDraftOpponent(normalized,i,true);
+          changed = true;
+        }
+        if (!entry || entry.type !== normalized.type || String(entry.rivalId||'') !== String(normalized.rivalId||'') ||
+            entry.intelligence !== normalized.intelligence || JSON.stringify(entry.preview||null) !== JSON.stringify(normalized.preview||null)) changed = true;
+        opponents.push(normalized);
+      }
+      const playerDeck = raw.playerDeck && typeof raw.playerDeck === 'object' ? raw.playerDeck : {unitIds:[],magicIds:[]};
+      const deployment = raw.playerDeployment && typeof raw.playerDeployment === 'object' ? raw.playerDeployment : {active:[],reserve:[]};
+      const next = {
+        ...raw, version:7, opponents,
+        initialUnitIds:Array.isArray(raw.initialUnitIds)?raw.initialUnitIds:[],
+        initialMagicIds:Array.isArray(raw.initialMagicIds)?raw.initialMagicIds:[],
+        playerDeck:{unitIds:Array.isArray(playerDeck.unitIds)?playerDeck.unitIds:[],magicIds:Array.isArray(playerDeck.magicIds)?playerDeck.magicIds:[]},
+        playerDeployment:{active:Array.isArray(deployment.active)?deployment.active:[],reserve:Array.isArray(deployment.reserve)?deployment.reserve:[]}
+      };
+      if (JSON.stringify(raw.playerDeck||{}) !== JSON.stringify(next.playerDeck) || JSON.stringify(raw.playerDeployment||{}) !== JSON.stringify(next.playerDeployment)) changed = true;
+      storyModeDraft = next;
+      if (changed) saveStoryModeDraft().catch(err => console.error('[CardAI] story draft save failed',err));
       return storyModeDraft;
     }
     function storyPrepareDraftCards(){
@@ -2637,8 +2796,87 @@
     function storyResetDraftDeck(){storyEnsureDraft();storyModeDraft.playerDeck={unitIds:[...storyModeDraft.initialUnitIds],magicIds:[...storyModeDraft.initialMagicIds]};storyModeDraft.playerDeployment={active:storyModeDraft.initialUnitIds.slice(0,3),reserve:storyModeDraft.initialUnitIds.slice(3,5)};saveStoryModeDraft();renderStoryMode();}
 
     function storyRenderCompactCard(c,type='unit'){const img=getCardImage(c);const label=type==='unit'?'キャラ':'マジック';return `<div class="rounded-lg border border-slate-700 bg-slate-900 p-1 text-center"><div class="h-14 sm:h-16 overflow-hidden rounded-md bg-slate-950">${img?`<img src="${img}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:''}</div><div class="text-[8px] sm:text-[9px] font-black text-slate-200 mt-1 truncate">${esc(c.name||label)}</div></div>`;}
-    function storyRenderStartOpponents(){const box=document.getElementById('story-start-opponents');if(!box)return;box.innerHTML='';const d=storyEnsureDraft();d.opponents.forEach((e,i)=>{const r=e.type==='rival'?allRivals.find(x=>x.id===e.rivalId):null;const p=r?storyBuildFixedParticipant(r,i+1):storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));const opts=allRivals.map(x=>`<option value="rival:${x.id}" ${e.type==='rival'&&e.rivalId===x.id?'selected':''}>${esc(x.name)}</option>`).join('')+`<option value="instant" ${e.type==='instant'?'selected':''}>🎲 即席ライバル</option>`;const card=document.createElement('div');card.className='rounded-xl border border-slate-800 bg-slate-950 p-3';card.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center mb-2">第${i+1}戦</div><div class="w-12 h-12 mx-auto rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${p.iconImage?`<img src="${p.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center">🤖</div>'}</div><div class="text-sm font-black text-white text-center mt-2">${esc(p.name)}</div><div class="text-[10px] font-bold text-rose-300 text-center">AI：${storyAiName(p.intelligence)}</div><select class="w-full mt-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[9px] font-bold" onchange="storySetDraftOpponent(${i},this.value)">${opts}</select>`;box.appendChild(card);});}
-    function storySetDraftOpponent(index,value){storyEnsureDraft();const next=value==='instant'?{type:'instant',intelligence:storyGeneratedAi(index)}:{type:'rival',rivalId:value.replace(/^rival:/,'')};if(next.type==='rival'){const dup=storyModeDraft.opponents.findIndex((e,i)=>i!==index&&e.type==='rival'&&e.rivalId===next.rivalId);if(dup>=0){const old=storyModeDraft.opponents[index];storyModeDraft.opponents[index]=storyModeDraft.opponents[dup];storyModeDraft.opponents[dup]=old;}else storyModeDraft.opponents[index]=next;}else storyModeDraft.opponents[index]=next;storyModeDraft.opponents=storyModeDraft.opponents.map((e,i)=>e.type==='instant'?{...e,intelligence:storyGeneratedAi(i)}:e);const ranked=storyModeDraft.opponents.map((e,i)=>({e,i,rank:e.type==='rival'?storyAiRank(allRivals.find(r=>r.id===e.rivalId)?.intelligence||'normal'):storyAiRank(e.intelligence||storyGeneratedAi(i))}));storyModeDraft.opponents=ranked.sort((a,b)=>a.rank-b.rank||a.i-b.i).map(x=>x.e);saveStoryModeDraft();renderStoryMode();}
+    function storyRenderStartOpponents() {
+      const box = document.getElementById('story-start-opponents');
+      if (!box) return;
+      box.innerHTML = '';
+      const draft = storyEnsureDraft();
+      for (let i=0; i<5; i++) {
+        try {
+          const entry = draft.opponents[i] || {type:'instant',intelligence:storyGeneratedAi(i)};
+          const preview = storyMaterializeDraftOpponent(entry,i,false);
+          entry.preview = preview;
+          const selectedRival = entry.type === 'rival'
+            ? (Array.isArray(allRivals) ? allRivals.find(r => r && String(r.id) === String(entry.rivalId)) : null)
+            : null;
+          const name = selectedRival?.name || preview.name || `即席ライバル ${String(i+1).padStart(2,'0')}`;
+          const ai = selectedRival?.intelligence || preview.intelligence || entry.intelligence || storyGeneratedAi(i);
+          const opts = (Array.isArray(allRivals) ? allRivals : []).filter(r => r && r.id).map(r =>
+            `<option value="rival:${esc(r.id)}" ${entry.type==='rival'&&String(entry.rivalId)===String(r.id)?'selected':''}>${esc(r.name||'ライバル')}</option>`
+          ).join('') + `<option value="instant" ${entry.type==='instant'?'selected':''}>🎲 即席ライバル</option>`;
+          const units = (Array.isArray(preview.unitIds)?preview.unitIds:[]).map(storyCardById).filter(c=>c?.cardType==='unit');
+          const card = document.createElement('div');
+          card.className = 'rounded-xl border border-slate-800 bg-slate-950 p-3 min-w-0';
+          card.innerHTML = `<div class="text-[10px] font-black text-amber-300 text-center mb-2">第${i+1}戦</div>
+            <div class="w-12 h-12 mx-auto rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${(selectedRival?.iconImage||preview.iconImage)?`<img src="${esc(selectedRival?.iconImage||preview.iconImage)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'<div class="w-full h-full flex items-center justify-center">🤖</div>'}</div>
+            <div class="text-sm font-black text-white text-center mt-2 break-words">${esc(name)}</div>
+            <div class="text-[10px] font-bold text-rose-300 text-center">AI：${storyAiName(ai)}</div>
+            <div class="text-[9px] text-slate-500 text-center mt-1">キャラ ${units.length}枚 / マジック ${(preview.magicIds||[]).length}枚</div>
+            <div class="grid grid-cols-2 gap-1 mt-2">${units.slice(0,4).map(c=>`<div class="truncate rounded bg-slate-900 border border-slate-800 px-1.5 py-1 text-[9px] text-slate-300" title="${esc(c.name)}">${esc(c.name)}</div>`).join('')}${units.length>4?`<div class="col-span-2 text-[8px] text-slate-500 text-center">ほか${units.length-4}枚</div>`:''}</div>
+            <select aria-label="第${i+1}戦の相手" class="w-full mt-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[9px] font-bold" onchange="storySetDraftOpponent(${i},this.value)">${opts}</select>`;
+          box.appendChild(card);
+        } catch (error) {
+          // 1戦分の旧データが壊れていても、残り4戦を巻き添えにしない。
+          console.error(`[CardAI] 第${i+1}戦の予定表示を復旧します`, error);
+          const fallback = document.createElement('div');
+          fallback.className = 'rounded-xl border border-amber-800 bg-slate-950 p-3';
+          fallback.innerHTML = `<div class="text-[10px] font-black text-amber-300">第${i+1}戦</div><div class="text-sm font-bold text-white mt-2">即席ライバル ${String(i+1).padStart(2,'0')}</div><div class="text-[10px] text-amber-200 mt-1">対戦予定データを自動修復しました</div>`;
+          box.appendChild(fallback);
+        }
+      }
+      if (box.children.length !== 5) console.error('[CardAI] 5戦予定の描画件数が一致しません',box.children.length);
+    }
+    function storySetDraftOpponent(index,value) {
+      const draft = storyEnsureDraft();
+      const idx = Math.max(0,Math.min(4,Number(index)||0));
+      let next;
+      if (value === 'instant') {
+        next = {type:'instant', intelligence:storyGeneratedAi(idx)};
+      } else {
+        const rivalId = String(value||'').replace(/^rival:/,'');
+        const rival = (Array.isArray(allRivals)?allRivals:[]).find(r=>r && String(r.id)===rivalId);
+        if (!rival) { storyEnsureDraft(); storyRenderStartOpponents(); return; }
+        next = {type:'rival',rivalId:rival.id,intelligence:rival.intelligence||'normal'};
+      }
+      if (next.type === 'rival') {
+        const duplicate = draft.opponents.findIndex((e,i)=>i!==idx&&e?.type==='rival'&&String(e.rivalId)===String(next.rivalId));
+        if (duplicate >= 0) {
+          const old = draft.opponents[idx];
+          draft.opponents[idx] = draft.opponents[duplicate];
+          draft.opponents[duplicate] = old;
+        } else {
+          draft.opponents[idx] = {...next,preview:storyMaterializeDraftOpponent(next,idx,true)};
+        }
+      } else {
+        draft.opponents[idx] = {...next,preview:storyMaterializeDraftOpponent(next,idx,true)};
+      }
+      // 既存仕様どおりAI難易度の低い順に整列する。プレビューもエントリと一緒に移動する。
+      draft.opponents = draft.opponents.map((entry,i)=>({entry,i,rank:storyDraftEntryRank(entry,i)}))
+        .sort((a,b)=>a.rank-b.rank||a.i-b.i).map(x=>x.entry);
+      // 即席ライバルの難易度は並び順に合わせる。変更があった相手だけデッキを再抽選する。
+      draft.opponents = draft.opponents.map((entry,i)=>{
+        if (entry.type !== 'instant') return entry;
+        const intelligence = storyGeneratedAi(i);
+        if (entry.intelligence !== intelligence || !storyPreviewHasValidCards(entry.preview)) {
+          const value = {type:'instant',intelligence};
+          return {...value,preview:storyMaterializeDraftOpponent(value,i,true)};
+        }
+        return entry;
+      });
+      draft.opponents = draft.opponents.map((entry,i)=>({...entry, preview:storyMaterializeDraftOpponent(entry,i,false)}));
+      saveStoryModeDraft().catch(err=>console.error('[CardAI] story draft save failed',err));
+      renderStoryMode();
+    }
     function storyRenderStartConfirmed(){const a=document.getElementById('story-start-confirmed-active'),r=document.getElementById('story-start-confirmed-reserve');if(!a||!r)return;storyEnsureDraft();storyDraftNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDraftDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeDraft.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeDraft.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
     function storyRenderStartDeckEditor(){storyEnsureDraft();const ul=document.getElementById('story-start-unit-pool'),ml=document.getElementById('story-start-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storyModeDraft.playerDeck.unitIds.map(String)),sm=new Set(storyModeDraft.playerDeck.magicIds.map(String));storyModeDraft.initialUnitIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftUnit(id);ul.appendChild(d);});storyModeDraft.initialMagicIds.forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryDraftMagic(id);ml.appendChild(d);});document.getElementById('story-start-unit-selection-label').innerText=`${su.size} / 5`;document.getElementById('story-start-magic-selection-label').innerText=`${sm.size} / 10`;const v=storyDraftValidate();const vb=document.getElementById('story-start-deck-validation');vb.innerText=v.ok?'設定OK':v.message;vb.className=`text-[10px] font-black ${v.ok?'text-emerald-300':'text-amber-300'}`;storyRenderStartConfirmed();}
 
@@ -2649,9 +2887,41 @@
     function storyResetDeckToSafeDefault(){if(!storyModeState)return;const units=storyUnitIds().slice(0,5),magics=storyMagicIds().slice(0,10);storyModeState.playerDeck={unitIds:[...units],magicIds:[...magics]};storyModeState.playerDeployment={active:units.slice(0,3),reserve:units.slice(3,5)};storyModeState.participants[0].unitIds=[...units];storyModeState.participants[0].magicIds=[...magics];saveStoryModeState();renderStoryMode();}
     function storyValidateDeck(){if(!storyModeState)return {ok:false,message:'ストーリーモードを開始してください。'};storyNormalizeDeployment();const u=storySelectedUnits(),m=storySelectedMagics(),d=storyModeState.playerDeployment;if(u.length<3||u.length>5)return {ok:false,message:'キャラクターを3～5枚選択してください。'};if(d.active.length!==3)return {ok:false,message:'初期出撃3体を設定してください。'};if(d.active.length+d.reserve.length!==u.length)return {ok:false,message:'選択した全キャラを出撃3体＋控えに設定してください。'};return {ok:true,message:`出撃3体 / 控え${d.reserve.length}体 / マジック${m.length}枚`};}
 
-    function storyBuildFiveOpponents(){return storyEnsureDraft().opponents.map((e,i)=>{if(e.type==='rival'){const r=allRivals.find(x=>x.id===e.rivalId);if(r)return storyBuildFixedParticipant(r,i+1);}return storyMakeInstantRival(i+1,e.intelligence||storyGeneratedAi(i));});}
-    function storyRenderOpponentSequence(){const box=document.getElementById('story-opponent-sequence');if(!box)return;box.innerHTML='';(storyModeState?.opponents||[]).forEach((o,i)=>{const active=i===storyModeState.currentMatchIndex&&!storyModeState.completed&&!storyModeState.defeated;const done=i<(storyModeState.currentMatchIndex||0);const d=document.createElement('div');d.className=`rounded-xl border p-3 ${active?'border-amber-500 bg-amber-950/30':'border-slate-800 bg-slate-950'} ${done?'opacity-65':''}`;d.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center">第${i+1}戦 ${done?'✓':''} ${active?'◀ 次':''}</div><div class="w-10 h-10 mx-auto mt-2 rounded-full bg-slate-900 border border-rose-500 flex items-center justify-center overflow-hidden">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'🤖'}</div><div class="text-xs font-black text-white text-center mt-2 truncate">${esc(o.name)}</div><div class="text-[9px] text-rose-300 font-bold text-center">AI：${storyAiName(o.intelligence)}</div>`;box.appendChild(d);});}
-    function storyRenderOpponentDetail(){const o=storyModeState?.currentOpponent,box=document.getElementById('story-opponent-card'),ub=document.getElementById('story-opponent-unit-deck'),mb=document.getElementById('story-opponent-magic-deck');if(!box)return;if(!o){box.innerHTML='<div class="text-sm text-slate-500">次の対戦相手はありません。</div>';if(ub)ub.innerHTML='';if(mb)mb.innerHTML='';return;}box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${o.iconImage?`<img src="${o.iconImage}" class="w-full h-full object-cover">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${esc(o.name)}</div><div class="text-xs font-bold text-rose-300 mt-1">AI：${storyAiName(o.intelligence)}</div><div class="text-[10px] text-slate-500 mt-1">第${(storyModeState.currentMatchIndex||0)+1}戦</div></div></div>`;const units=(o.unitIds||[]).map(storyCardById).filter(Boolean),magics=(o.magicIds||[]).map(storyCardById).filter(Boolean);if(ub){ub.innerHTML='';units.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'unit');ub.appendChild(d);});}if(mb){mb.innerHTML='';magics.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'magic');mb.appendChild(d);});}}
+    function storyBuildFiveOpponents(){
+      const draft=storyEnsureDraft();
+      return draft.opponents.slice(0,5).map((entry,i)=>{
+        const p=storyMaterializeDraftOpponent(entry,i,false);
+        // 事前プレビューと開始後の対戦相手が別抽選にならないよう、同じ相手データを使う。
+        entry.preview=storyCloneParticipant(p);
+        return storyCloneParticipant(p);
+      });
+    }
+    function storyRenderOpponentSequence(){
+      const box=document.getElementById('story-opponent-sequence');if(!box)return;
+      box.innerHTML='';
+      const list=Array.isArray(storyModeState?.opponents)?storyModeState.opponents:[];
+      for(let i=0;i<5;i++){
+        const o=list[i]||{name:`対戦相手 ${i+1}`,intelligence:'normal'};
+        const active=i===Number(storyModeState.currentMatchIndex||0)&&!storyModeState.completed&&!storyModeState.defeated;
+        const done=i<Number(storyModeState.currentMatchIndex||0);
+        const d=document.createElement('div');
+        d.className=`rounded-xl border p-3 min-w-0 ${active?'border-amber-500 bg-amber-950/30':'border-slate-800 bg-slate-950'} ${done?'opacity-65':''}`;
+        d.innerHTML=`<div class="text-[10px] font-black text-amber-300 text-center">第${i+1}戦 ${done?'✓':''} ${active?'◀ 次':''}</div><div class="w-10 h-10 mx-auto mt-2 rounded-full bg-slate-900 border border-rose-500 flex items-center justify-center overflow-hidden">${o.iconImage?`<img src="${esc(o.iconImage)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'🤖'}</div><div class="text-xs font-black text-white text-center mt-2 truncate" title="${esc(o.name||'対戦相手データを修復中')}">${esc(o.name||'対戦相手データを修復中')}</div><div class="text-[9px] text-rose-300 font-bold text-center">AI：${storyAiName(o.intelligence)}</div>`;
+        box.appendChild(d);
+      }
+    }
+    function storyRenderOpponentDetail(){
+      const idx=Math.max(0,Math.min(4,Number(storyModeState?.currentMatchIndex)||0));
+      const o=storyModeState?.currentOpponent || (storyModeState?.completed||storyModeState?.defeated?null:storyModeState?.opponents?.[idx]);
+      const box=document.getElementById('story-opponent-card'),ub=document.getElementById('story-opponent-unit-deck'),mb=document.getElementById('story-opponent-magic-deck');
+      if(!box)return;
+      if(!o){box.innerHTML='<div class="text-sm text-slate-500">次の対戦相手はありません。新しい5戦を準備すると対戦予定が表示されます。</div>';if(ub)ub.innerHTML='';if(mb)mb.innerHTML='';return;}
+      box.innerHTML=`<div class="flex items-center gap-3"><div class="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 bg-slate-900">${o.iconImage?`<img src="${esc(o.iconImage)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`:'<div class="w-full h-full flex items-center justify-center text-2xl">🤖</div>'}</div><div><div class="text-lg font-black text-white">${esc(o.name||'対戦相手')}</div><div class="text-xs font-bold text-rose-300 mt-1">AI：${storyAiName(o.intelligence)}</div><div class="text-[10px] text-slate-500 mt-1">第${idx+1}戦</div></div></div>`;
+      const units=(Array.isArray(o.unitIds)?o.unitIds:[]).map(storyCardById).filter(c=>c?.cardType==='unit');
+      const magics=(Array.isArray(o.magicIds)?o.magicIds:[]).map(storyCardById).filter(c=>c?.cardType==='magic');
+      if(ub){ub.innerHTML='';if(!units.length)ub.innerHTML='<div class="col-span-full text-xs text-amber-300">相手キャラ情報を修復中です。再表示してください。</div>';units.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'unit');ub.appendChild(d);});}
+      if(mb){mb.innerHTML='';if(!magics.length)mb.innerHTML='<div class="col-span-full text-[9px] text-slate-500">マジックなし</div>';magics.forEach(c=>{const d=document.createElement('div');d.innerHTML=storyRenderCompactCard(c,'magic');mb.appendChild(d);});}
+    }
     function storyRenderConfirmed(){const a=document.getElementById('story-confirmed-active'),r=document.getElementById('story-confirmed-reserve');if(!a||!r)return;storyNormalizeDeployment();a.innerHTML='';r.innerHTML='';const render=(id,type,idx)=>{const c=storyCardById(id);if(!c)return null;const w=document.createElement('div');w.className='bg-slate-900 rounded-lg border border-slate-700 p-1';w.innerHTML=storyRenderCompactCard(c,'unit');const s=document.createElement('select');s.className='w-full mt-1 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[8px] font-bold';s.innerHTML='<option value="active1">出撃1</option><option value="active2">出撃2</option><option value="active3">出撃3</option><option value="reserve1">控え1</option><option value="reserve2">控え2</option>';s.value=`${type}${idx+1}`;s.onchange=()=>storySetDeploymentSlot(id,s.value);w.appendChild(s);return w;};storyModeState.playerDeployment.active.forEach((id,i)=>{const el=render(id,'active',i);if(el)a.appendChild(el);});while(a.children.length<3){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-cyan-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`出撃${a.children.length+1}`;a.appendChild(d);}storyModeState.playerDeployment.reserve.forEach((id,i)=>{const el=render(id,'reserve',i);if(el)r.appendChild(el);});while(r.children.length<2){const d=document.createElement('div');d.className='min-h-[120px] border border-dashed border-amber-900 rounded-lg flex items-center justify-center text-[9px] text-slate-600';d.textContent=`控え${r.children.length+1}`;r.appendChild(d);}}
 
     function storyRenderCurrentDeck(){const ul=document.getElementById('story-unit-pool'),ml=document.getElementById('story-magic-pool');if(!ul||!ml)return;ul.innerHTML='';ml.innerHTML='';const su=new Set(storySelectedUnits().map(String)),sm=new Set(storySelectedMagics().map(String));storyUnitIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${su.has(String(id))?'border-amber-400 bg-amber-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});d.onclick=()=>toggleStoryUnit(id);ul.appendChild(d);});storyMagicIds().forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.className=`p-1 rounded-xl border cursor-pointer ${sm.has(String(id))?'border-purple-400 bg-purple-500/20':'border-slate-800 bg-slate-950 opacity-60'}`;d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});d.onclick=()=>toggleStoryMagic(id);ml.appendChild(d);});document.getElementById('story-unit-selection-label').innerText=`${su.size} / ${storyUnitIds().length}`;document.getElementById('story-magic-selection-label').innerText=`${sm.size} / ${storyMagicIds().length}`;}
@@ -2782,6 +3052,8 @@
 
     async function openStoryMode(){
       switchView('story');
+      const ready=await storyWaitForAppReady();
+      if(!ready){storyRenderLoadingState('ゲームデータを読み込めませんでした。ページを再読み込みしてから再度お試しください。');return;}
       if(storyModeState){
         if(storyRepairLoadedState())await saveStoryModeState();
       }else{
@@ -2791,16 +3063,24 @@
       renderStoryMode();
     }
     async function prepareNewStoryMode(){
-      storyModeState=null;storyPendingBattle=null;storyBattleOverride=null;closeStoryInitialReward();closeStoryMatchIntro();hideBattleResultModal();
+      const ready=await storyWaitForAppReady();
+      if(!ready){storyRenderLoadingState('ゲームデータを読み込めませんでした。ページを再読み込みしてください。');return;}
+      storyModeState=null;storyPendingBattle=null;storyBattleOverride=null;
+      document.getElementById('story-initial-reward-modal')?.classList.add('hidden');
+      closeStoryMatchIntro();hideBattleResultModal();
       storyModeDraft=storyCreateEmptyDraft();
       await saveStoryModeDraft();await saveStoryModeState();
       switchView('story');renderStoryMode();
     }
     function storyRandomizeDraftOpponents(){
-      storyModeDraft=storyModeDraft&&Number(storyModeDraft.version)>=6?storyModeDraft:storyCreateEmptyDraft();
-      storyModeDraft.opponents=storyCreateOpponentDraft();saveStoryModeDraft();renderStoryMode();
+      if(typeof window!=='undefined' && window.__cardBattleAppReady===false){storyRenderLoadingState();return;}
+      storyModeDraft=storyCreateEmptyDraft();
+      saveStoryModeDraft().catch(err=>console.error('[CardAI] story draft save failed',err));
+      renderStoryMode();
     }
     async function startNewStoryMode(){
+      const ready=await storyWaitForAppReady();
+      if(!ready){storyRenderLoadingState('ゲームデータを読み込めませんでした。ページを再読み込みしてください。');return;}
       if(!Array.isArray(allCards)||allCards.length===0){alert('カード一覧を読み込み中です。少し待ってからもう一度開始してください。');return;}
       const unitCount=allCards.filter(c=>c.cardType==='unit').length,magicCount=allCards.filter(c=>c.cardType==='magic').length;
       if(unitCount<5||magicCount<10){alert(`ストーリーモード開始にはキャラ5枚以上・マジック10枚以上が必要です。現在：キャラ${unitCount}枚 / マジック${magicCount}枚`);return;}
@@ -2813,14 +3093,59 @@
       storyModeState={version:6,mode:'five_match',active:true,completed:false,defeated:false,currentMatchIndex:0,wins:0,availableUnitIds:[...units],availableMagicIds:[...magics],initialUnitIds:[...units],initialMagicIds:[...magics],playerDeck:{unitIds:[...units],magicIds:[...magics]},playerDeployment:{active:units.slice(0,3),reserve:units.slice(3,5)},participants:[participant],opponents,currentOpponent:opponents[0]||null,rewardHistory:[]};
       await saveStoryModeState();await saveStoryModeDraft();hideBattleResultModal();closeStoryMatchIntro();storyBattleOverride=null;switchView('story');renderStoryMode();storyRenderInitialRewardModal();
     }
-    function storyRenderInitialRewardModal(){const modal=document.getElementById('story-initial-reward-modal'),ub=document.getElementById('story-initial-unit-reward'),mb=document.getElementById('story-initial-magic-reward');if(!modal||!ub||!mb||!storyModeState)return;ub.innerHTML='';mb.innerHTML='';(storyModeState.initialUnitIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});ub.appendChild(d);});(storyModeState.initialMagicIds||[]).forEach(id=>{const c=storyCardById(id);if(!c)return;const d=document.createElement('div');d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});mb.appendChild(d);});modal.classList.remove('hidden');}
-    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');switchView('story');renderStoryMode();}
+    function storyRenderInitialRewardModal() {
+      const modal=document.getElementById('story-initial-reward-modal');
+      const ub=document.getElementById('story-initial-unit-reward');
+      const mb=document.getElementById('story-initial-magic-reward');
+      if(!modal||!ub||!mb||!storyModeState)return;
+      ub.innerHTML=''; mb.innerHTML='';
+      (storyModeState.initialUnitIds||[]).forEach(id=>{
+        const c=storyCardById(id); if(!c)return;
+        const d=document.createElement('div');
+        d.innerHTML=getCardHTML({id:c.id,cardType:'unit',name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs,hp:c.stats?.hp||0,atk:c.stats?.atk||0,prio:c.stats?.priority??0,rank:c.rank,img:getCardImage(c)});
+        ub.appendChild(d);
+      });
+      (storyModeState.initialMagicIds||[]).forEach(id=>{
+        const c=storyCardById(id); if(!c)return;
+        const d=document.createElement('div');
+        d.innerHTML=getCardHTML({id:c.id,cardType:'magic',name:c.name,desc:c.desc,prio:c.stats?.priority??999,img:getCardImage(c)});
+        mb.appendChild(d);
+      });
+      const ob=document.getElementById('story-initial-opponents-preview');
+      if(ob){
+        ob.innerHTML='';
+        const list=Array.isArray(storyModeState.opponents)?storyModeState.opponents:[];
+        for(let i=0;i<5;i++){
+          const o=list[i] || {name:`対戦相手 ${i+1}`,intelligence:'normal',unitIds:[],magicIds:[]};
+          const units=(Array.isArray(o.unitIds)?o.unitIds:[]).map(storyCardById).filter(c=>c?.cardType==='unit');
+          const item=document.createElement('div');
+          item.className='rounded-lg border border-slate-800 bg-slate-950 p-2 min-w-0';
+          item.innerHTML=`<div class="text-[9px] font-black text-amber-300">第${i+1}戦</div><div class="text-xs font-black text-white mt-1 truncate" title="${esc(o.name||'即席ライバル')}">${esc(o.name||`即席ライバル ${i+1}`)}</div><div class="text-[9px] text-rose-300">AI：${storyAiName(o.intelligence)}</div><div class="text-[9px] text-slate-400 mt-1">キャラ ${units.length}枚 / マジック ${(o.magicIds||[]).length}枚</div><div class="mt-1 space-y-0.5">${units.slice(0,3).map(c=>`<div class="text-[8px] text-slate-300 truncate" title="${esc(c.name)}">・${esc(c.name)}</div>`).join('')}${units.length>3?`<div class="text-[8px] text-slate-500">ほか${units.length-3}枚</div>`:''}</div>`;
+          ob.appendChild(item);
+        }
+      }
+      modal.classList.remove('hidden');
+    }
+    function closeStoryInitialReward(){document.getElementById('story-initial-reward-modal')?.classList.add('hidden');switchView('story');if(window.__cardBattleAppReady)renderStoryMode();}
 
     function storyGrantVictoryReward(){const remU=allCards.filter(c=>c.cardType==='unit'&&!storyUnitIds().some(id=>String(id)===String(c.id)));const remM=allCards.filter(c=>c.cardType==='magic'&&!storyMagicIds().some(id=>String(id)===String(c.id)));const us=storyShuffle(remU).slice(0,3),ms=storyShuffle(remM).slice(0,5);storyModeState.availableUnitIds.push(...us.map(c=>c.id));storyModeState.availableMagicIds.push(...ms.map(c=>c.id));return {units:us,magics:ms};}
     function storyRecordReward(reward){storyModeState.rewardHistory=storyModeState.rewardHistory||[];storyModeState.rewardHistory.unshift({win:storyModeState.wins,names:[...(reward.units||[]),...(reward.magics||[])].map(c=>c?.name).filter(Boolean),at:Date.now()});storyModeState.rewardHistory=storyModeState.rewardHistory.slice(0,10);}
 
+    function storyRenderLoadingState(message='カード・データを読み込んでいます。読み込みが終わると5戦の予定相手が表示されます。') {
+      const start=document.getElementById('story-start-panel'),main=document.getElementById('story-main-panel'),box=document.getElementById('story-start-opponents');
+      if(start)start.classList.remove('hidden'); if(main)main.classList.add('hidden');
+      if(box)box.innerHTML=`<div class="col-span-full rounded-xl border border-cyan-800 bg-slate-950 p-4 text-sm text-cyan-200" role="status">${esc(message)}</div>`;
+    }
+    async function storyWaitForAppReady() {
+      if (typeof window === 'undefined') return true;
+      if (window.__cardBattleAppReady === true) return true;
+      if (typeof cardBattleAppReadyPromise !== 'undefined') await cardBattleAppReadyPromise;
+      return window.__cardBattleAppReady === true;
+    }
     function renderStoryMode(){
       const start=document.getElementById('story-start-panel'),main=document.getElementById('story-main-panel');if(!start||!main)return;
+      if(typeof window!=='undefined' && window.__cardBattleAppReady===false){storyRenderLoadingState();return;}
+      if(typeof window!=='undefined' && window.__cardBattleAppInitError){storyRenderLoadingState('ゲームデータの読み込みに失敗しました。ページを更新してください。詳細は開発者コンソールに記録されています。');return;}
       if(storyModeState&&storyRepairLoadedState()){saveStoryModeState();}
       if(!storyModeState||(!storyModeState.active&&!storyModeState.completed&&!storyModeState.defeated)){
         start.classList.remove('hidden');main.classList.add('hidden');
@@ -2831,6 +3156,7 @@
       if(!storyModeState.playerDeployment)storyModeState.playerDeployment={active:(storyModeState.playerDeck?.unitIds||[]).slice(0,3),reserve:(storyModeState.playerDeck?.unitIds||[]).slice(3,5)};
       storyNormalizeDeployment();
       const idx=Math.min(4,Math.max(0,Number(storyModeState.currentMatchIndex)||0));storyModeState.currentMatchIndex=idx;
+      if(!storyModeState.completed && !storyModeState.defeated && !storyModeState.currentOpponent) storyModeState.currentOpponent=storyModeState.opponents?.[idx]||null;
       const round=document.getElementById('story-round-label'),wins=document.getElementById('story-win-label'),uc=document.getElementById('story-unit-count'),mc=document.getElementById('story-magic-count');
       if(round)round.innerText=storyModeState.completed?'🏆 5戦クリア':`第${idx+1}戦 / 全5戦`;
       if(wins)wins.innerText=`${storyModeState.wins||0} / 5`;
@@ -2849,7 +3175,14 @@
     function showStoryMatchIntro(){const modal=document.getElementById('story-match-intro-modal');if(!modal||!storyPendingBattle)return;const o=storyPendingBattle.opponent;document.getElementById('story-intro-round').innerText=`第${(storyModeState.currentMatchIndex||0)+1}戦 / 全5戦`;document.getElementById('story-intro-player-name').innerText=playerName;document.getElementById('story-intro-opponent-name').innerText=o.name;document.getElementById('story-intro-opponent-ai').innerText=`AI：${storyAiName(o.intelligence)}`;const pi=document.getElementById('story-intro-player-icon'),pp=document.getElementById('story-intro-player-icon-ph');if(playerIcon){pi.src=playerIcon;pi.classList.remove('hidden');pp.classList.add('hidden');}else{pi.classList.add('hidden');pp.classList.remove('hidden');}const oi=document.getElementById('story-intro-opponent-icon'),op=document.getElementById('story-intro-opponent-icon-ph');if(o.iconImage){oi.src=o.iconImage;oi.classList.remove('hidden');op.classList.add('hidden');}else{oi.classList.add('hidden');op.classList.remove('hidden');}modal.classList.remove('hidden');}
     function closeStoryMatchIntro(){document.getElementById('story-match-intro-modal')?.classList.add('hidden');storyPendingBattle=null;}
     async function confirmStoryBattleStart(){if(!storyPendingBattle)return;const o=storyPendingBattle.opponent;storyPendingBattle=null;document.getElementById('story-match-intro-modal')?.classList.add('hidden');const pUnits=storySelectedUnits(),pMagics=storySelectedMagics();storyModeState.participants[0].unitIds=[...pUnits];storyModeState.participants[0].magicIds=[...pMagics];await saveStoryModeState();storyBattleOverride={playerDeck:{id:`story_p_${Date.now()}`,name:'ストーリーデッキ',unitIds:[...pUnits],magicIds:[...pMagics]},enemyDeck:{id:`story_e_${Date.now()}`,name:`${o.name}のデッキ`,unitIds:[...o.unitIds],magicIds:[...o.magicIds]},enemyIntelligence:o.intelligence||'normal',enemyName:o.name,enemyIconUrl:o.iconImage||null,playerActive:[...storyModeState.playerDeployment.active],playerReserve:[...storyModeState.playerDeployment.reserve]};switchView('battle');startBattle();}
-    async function startStoryBattle(){if(!storyModeState||storyModeState.completed||storyModeState.defeated)return;const valid=storyValidateDeck();if(!valid.ok){alert(valid.message);return;}if(!storyModeState.currentOpponent){alert('次の対戦相手がいません。');return;}storyPendingBattle={opponent:storyCloneParticipant(storyModeState.currentOpponent)};showStoryMatchIntro();}
+    async function startStoryBattle(){
+      if(!storyModeState||storyModeState.completed||storyModeState.defeated)return;
+      if(storyRepairLoadedState())await saveStoryModeState();
+      if(!storyModeState.currentOpponent)storyModeState.currentOpponent=storyModeState.opponents?.[storyModeState.currentMatchIndex||0]||null;
+      const valid=storyValidateDeck();if(!valid.ok){alert(valid.message);return;}
+      if(!storyModeState.currentOpponent){alert('次の対戦相手データを修復できませんでした。ストーリーモードを開き直すか、新しい5戦を準備してください。');renderStoryMode();return;}
+      storyPendingBattle={opponent:storyCloneParticipant(storyModeState.currentOpponent)};showStoryMatchIntro();
+    }
     async function handleStoryBattleEnd(winner){if(!storyModeState||!battleState.storyMode)return null;const idx=storyModeState.currentMatchIndex||0;if(winner!=='player'){storyModeState.active=false;storyModeState.defeated=true;await saveStoryModeState();return {defeat:true,champion:false,reward:null,matchIndex:idx};}storyModeState.wins=Math.min(5,(storyModeState.wins||0)+1);const reward=storyGrantVictoryReward();storyRecordReward(reward);if(storyModeState.wins>=5){storyModeState.active=false;storyModeState.completed=true;storyModeState.currentOpponent=null;await saveStoryModeState();return {defeat:false,champion:true,reward,matchIndex:idx};}storyModeState.currentMatchIndex=idx+1;storyModeState.currentOpponent=storyModeState.opponents[storyModeState.currentMatchIndex]||null;await saveStoryModeState();return {defeat:false,champion:false,reward,matchIndex:idx};}
     async function storyRestartFromScratch(){hideBattleResultModal();battleExecutionRunning=false;storyBattleOverride=null;storyPendingBattle=null;await prepareNewStoryMode();}
 
