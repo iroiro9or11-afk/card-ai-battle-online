@@ -4,12 +4,12 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.28.7';
+const SERVER_VERSION = '3.28.8';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
 
-const RULES = new Set(['unlimited', 'rental', 'super_rental', 'random_pot']);
+const RULES = new Set(['unlimited', 'rental', 'super_rental', 'random_pot', 'card_exchange']);
 const MAX_ROOM_NAME = 40;
 const MAX_PLAYER_NAME = 40;
 const MAX_SPECTATORS = 50;
@@ -417,6 +417,81 @@ function copySessionProfileToRoom(r, s) {
   if (!s?.profile) return;
   r.profiles[s.sessionId] = clone(s.profile);
 }
+function cardExchangeStateFor(r, sid) {
+  const slot = playerSlot(r, sid);
+  const opponent = r.players[slot === 0 ? 1 : 0];
+  return {
+    roomId: r.roomId,
+    phase: r.exchangePhase || 'selecting',
+    roundId: r.exchangeRoundId || null,
+    submitted: !!r.exchangeSelections?.[sid],
+    opponentSubmitted: !!(opponent && r.exchangeSelections?.[opponent.sessionId]),
+    submittedCount: Object.values(r.exchangeSelections || {}).filter(Boolean).length,
+    receivedCount: opponent ? (r.exchangeSelections?.[opponent.sessionId] || []).length : 0,
+    players: r.players.map(p => p ? {name:p.name, online:!!p.online} : null)
+  };
+}
+function sendCardExchangeState(r) {
+  if (!r || r.rule !== 'card_exchange') return;
+  for (const p of r.players.filter(Boolean)) send(p.ws, 'card_exchange_state', cardExchangeStateFor(r, p.sessionId));
+}
+function closeCardExchangeRoom(r, reason, leavingSid=null) {
+  if (!r || r.rule !== 'card_exchange') return;
+  r.status = 'closed'; r.updatedAt = Date.now();
+  broadcastRoom(r, 'room_closed', {reason: reason || 'カード交換を終了しました。'});
+  for (const p of r.players.filter(Boolean)) setSessionRoom(p.sessionId, null);
+  for (const sid of r.spectators) setSessionRoom(sid, null);
+  rooms.delete(r.roomId);
+  if (leavingSid) {
+    setSessionRoom(leavingSid, null);
+    const sess = sessions.get(leavingSid);
+    if (sess?.ws) send(sess.ws, 'left_room');
+  }
+}
+function splitCardExchangeAssets(items) {
+  const batches=[]; let batch=[]; let size=2; const limit=256*1024;
+  for (const item of items) {
+    const n=Buffer.byteLength(JSON.stringify(item));
+    if (batch.length && size+n+2>limit) { batches.push(batch); batch=[]; size=2; }
+    batch.push(item); size+=n+1;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+function sendCardExchangeDeliveryTo(r, recipientSid) {
+  if (!r || r.rule !== 'card_exchange' || r.exchangePhase !== 'delivering' || !r.players.every(Boolean)) return false;
+  if (r.exchangeDeliveryAcks?.has(recipientSid) || r.exchangeDeliverySent?.has(recipientSid)) return false;
+  if (!r.players.every(p => profileAssetsReady(sessions.get(p.sessionId)))) return false;
+  const recipient=r.players.find(p=>p.sessionId===recipientSid);
+  const sender=r.players.find(p=>p.sessionId!==recipientSid);
+  if (!recipient || !sender) return false;
+  const ids=r.exchangeSelections?.[sender.sessionId];
+  if (!Array.isArray(ids)) return false;
+  const senderProfile=r.profiles[sender.sessionId];
+  const sourceCards=ids.map(id=>(senderProfile?.cards||[]).find(c=>String(c.id)===String(id))).filter(Boolean);
+  const cards=sourceCards.map(c=>({...cardWithoutImage(c),sourceCardId:String(c.id)}));
+  const assets=sourceCards.map(c=>({sourceId:String(c.id),image:cardImageValue(c)})).filter(a=>a.image);
+  const batches=splitCardExchangeAssets(assets);
+  r.exchangeDeliverySent=r.exchangeDeliverySent instanceof Set?r.exchangeDeliverySent:new Set();
+  r.exchangeDeliverySent.add(recipientSid);
+  send(recipient.ws,'card_exchange_result',{exchangeId:r.exchangeId,fromName:sender.name,cards,assetTotal:batches.length});
+  batches.forEach((items,batch)=>send(recipient.ws,'card_exchange_assets',{exchangeId:r.exchangeId,batch,total:batches.length,items}));
+  return true;
+}
+function resendPendingCardExchangeDeliveries(r) {
+  if (!r || r.rule!=='card_exchange' || r.exchangePhase!=='delivering') return;
+  for (const p of r.players.filter(Boolean)) sendCardExchangeDeliveryTo(r,p.sessionId);
+}
+function beginCardExchangeDelivery(r) {
+  if (!r || r.rule !== 'card_exchange' || !r.players.every(Boolean)) return false;
+  const [p1,p2]=r.players;
+  const ids1=r.exchangeSelections?.[p1.sessionId], ids2=r.exchangeSelections?.[p2.sessionId];
+  if (!Array.isArray(ids1) || !Array.isArray(ids2)) return false;
+  r.exchangePhase='delivering'; r.exchangeId=uid('exchange'); r.exchangeDeliveryAcks=new Set(); r.exchangeDeliverySent=new Set(); r.updatedAt=Date.now();
+  resendPendingCardExchangeDeliveries(r);
+  sendCardExchangeState(r);
+  return true;
+}
 function createRoom(owner, cfg) {
   const rule = RULES.has(cfg.rule) ? cfg.rule : 'unlimited';
   const maxSpectators = Math.max(0, Math.min(MAX_SPECTATORS, Number(cfg.maxSpectators) || 10));
@@ -440,7 +515,14 @@ function createRoom(owner, cfg) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     timer: null,
-    rematchVotes: new Set()
+    rematchVotes: new Set(),
+    exchangePhase: 'selecting',
+    exchangeRoundId: uid('exchange_round'),
+    exchangeSelections: {},
+    exchangeDeliveryAcks: new Set(),
+    exchangeDeliverySent: new Set(),
+    exchangeContinueVotes: new Map(),
+    exchangeId: null
   };
   room.players[0] = { sessionId: owner.sessionId, name: owner.name, ws: owner.ws, ready: false, online: true, lastSeen: Date.now(), assetsReady: profileAssetsReady(owner) };
   copySessionProfileToRoom(room, owner);
@@ -1587,6 +1669,12 @@ server.on('upgrade',(req,socket) => {
       } else if (rr) {
         s.roomId = null;
       }
+      if (rr?.rule === 'card_exchange') {
+        rr.exchangeDeliverySent=rr.exchangeDeliverySent instanceof Set?rr.exchangeDeliverySent:new Set();
+        rr.exchangeDeliverySent.delete(sid);
+        sendCardExchangeState(rr);
+        resendPendingCardExchangeDeliveries(rr);
+      }
       return;
     }
     if (!sid) return send(ws,'error',{code:'NO_SESSION',message:'オンラインセッションを初期化できません。ページを再読み込みしてください。'});
@@ -1622,7 +1710,8 @@ server.on('upgrade',(req,socket) => {
       if (r) r.profiles[sid] = clone(s.profile);
       if (r?.rule === 'rental' && r.ownerId === sid) broadcastRoom(r,'rental_decks',{decks:r.profiles[sid]?.decks||[]});
       if (r) { for (const p of r.players.filter(Boolean)) if (r.deckSelections[p.sessionId]) sendDeploymentOptions(r,p.sessionId); }
-      if (r) { if (r.rule === 'super_rental' || r.rule === 'random_pot') maybePrepareCandidatePools(r); else maybeStartBattle(r); }
+      if (r && r.rule === 'card_exchange') { sendCardExchangeState(r); resendPendingCardExchangeDeliveries(r); }
+      else if (r) { if (r.rule === 'super_rental' || r.rule === 'random_pot') maybePrepareCandidatePools(r); else maybeStartBattle(r); }
       return;
     }
 
@@ -1642,7 +1731,8 @@ server.on('upgrade',(req,socket) => {
           if (r.deckSelections[p.sessionId]) sendDeploymentOptions(r,p.sessionId);
         }
       }
-      if (r && ready) { if (r.rule === 'super_rental' || r.rule === 'random_pot') maybePrepareCandidatePools(r); else maybeStartBattle(r); }
+      if (r && ready && r.rule === 'card_exchange') { sendCardExchangeState(r); resendPendingCardExchangeDeliveries(r); }
+      else if (r && ready) { if (r.rule === 'super_rental' || r.rule === 'random_pot') maybePrepareCandidatePools(r); else maybeStartBattle(r); }
       return;
     }
 
@@ -1654,6 +1744,7 @@ server.on('upgrade',(req,socket) => {
       copySessionProfileToRoom(r,s);
       send(ws,'room_joined',{room:publicRoom(r),slot:0,myDecks:s.profile.decks||[],rentalDecks:r.rule==='rental' ? (r.profiles[r.ownerId]?.decks||[]) : []});
       broadcastPlayers(r);
+      if (r.rule === 'card_exchange') sendCardExchangeState(r);
       return;
     }
 
@@ -1680,6 +1771,7 @@ server.on('upgrade',(req,socket) => {
       send(ws,'room_joined',{room:publicRoom(r),slot:idx,myDecks:s.profile.decks||[],rentalDecks:r.rule==='rental' ? (r.profiles[r.ownerId]?.decks||[]) : []});
       if (r.rule==='rental' && r.ownerId===r.players[0]?.sessionId) broadcastRoom(r,'rental_decks',{decks:r.profiles[r.ownerId]?.decks||[]});
       broadcastPlayers(r);
+      if (r.rule === 'card_exchange') sendCardExchangeState(r);
       return;
     }
 
@@ -1701,6 +1793,63 @@ server.on('upgrade',(req,socket) => {
 
     const r = roomBySession(sid);
     if (!r && type !== 'room_leave') return send(ws,'error',{code:'NOT_IN_ROOM',message:'部屋に参加していません。'});
+
+    if (type === 'card_exchange_submit') {
+      if (!r || r.rule !== 'card_exchange') return send(ws,'error',{code:'NOT_CARD_EXCHANGE',message:'この部屋はカード交換モードではありません。'});
+      if (playerSlot(r,sid) < 0) return send(ws,'error',{code:'NOT_PLAYER',message:'カード交換はプレイヤーのみ利用できます。'});
+      if (!r.players.every(Boolean)) return send(ws,'error',{code:'EXCHANGE_WAITING_PLAYER',message:'相手が入室するまでお待ちください。'});
+      if (r.exchangePhase !== 'selecting') return send(ws,'error',{code:'EXCHANGE_PHASE',message:'現在はカードを選択できません。'});
+      if (!profileAssetsReady(sessions.get(r.players[0].sessionId)) || !profileAssetsReady(sessions.get(r.players[1].sessionId))) return send(ws,'error',{code:'EXCHANGE_ASSETS_PENDING',message:'両者のカード画像同期が完了するまでお待ちください。'});
+      if (r.exchangeSelections?.[sid]) return send(ws,'error',{code:'EXCHANGE_ALREADY_SUBMITTED',message:'今回の交換内容はすでに確定しています。'});
+      const cardIds=Array.isArray(m.cardIds)?m.cardIds.map(String):[];
+      if (cardIds.length>5 || new Set(cardIds).size!==cardIds.length) return send(ws,'error',{code:'EXCHANGE_LIMIT',message:'交換に出せるカードは重複なしで最大5枚です。'});
+      const profile=r.profiles[sid];
+      const available=new Set((profile?.cards||[]).map(c=>String(c.id)));
+      if (cardIds.some(id=>!available.has(id))) return send(ws,'error',{code:'EXCHANGE_INVALID_CARD',message:'所持カードに存在しないカードが含まれています。カード情報を同期し直してください。'});
+      r.exchangeSelections=r.exchangeSelections||{}; r.exchangeSelections[sid]=cardIds; r.updatedAt=Date.now();
+      sendCardExchangeState(r);
+      const a=r.players[0].sessionId,b=r.players[1].sessionId;
+      if (Array.isArray(r.exchangeSelections[a]) && Array.isArray(r.exchangeSelections[b])) beginCardExchangeDelivery(r);
+      return;
+    }
+
+    if (type === 'card_exchange_saved') {
+      if (!r || r.rule!=='card_exchange' || r.exchangePhase!=='delivering' || String(m.exchangeId||'')!==String(r.exchangeId||'')) return send(ws,'error',{code:'EXCHANGE_STALE',message:'交換データが古いか、現在は保存待ちではありません。'});
+      if (playerSlot(r,sid)<0) return send(ws,'error',{code:'NOT_PLAYER',message:'プレイヤーではありません。'});
+      r.exchangeDeliveryAcks=r.exchangeDeliveryAcks instanceof Set?r.exchangeDeliveryAcks:new Set();
+      r.exchangeDeliveryAcks.add(sid);
+      if (r.players.filter(Boolean).every(p=>r.exchangeDeliveryAcks.has(p.sessionId))) {
+        r.exchangePhase='decision'; r.exchangeContinueVotes=new Map(); r.updatedAt=Date.now();
+        for (const p of r.players.filter(Boolean)) {
+          const opponent=r.players.find(q=>q&&q.sessionId!==p.sessionId);
+          const receivedCount=(r.exchangeSelections?.[opponent?.sessionId]||[]).length;
+          send(p.ws,'card_exchange_complete',{exchangeId:r.exchangeId,receivedCount,roundId:r.exchangeRoundId});
+        }
+        sendCardExchangeState(r);
+      }
+      return;
+    }
+
+    if (type === 'card_exchange_continue') {
+      if (!r || r.rule!=='card_exchange' || r.exchangePhase!=='decision') return send(ws,'error',{code:'EXCHANGE_DECISION_UNAVAILABLE',message:'交換完了後の選択画面ではありません。'});
+      if (playerSlot(r,sid)<0) return send(ws,'error',{code:'NOT_PLAYER',message:'プレイヤーではありません。'});
+      if (m.continue !== true) {
+        closeCardExchangeRoom(r, 'プレイヤーがカード交換を終了しました。', sid);
+        return;
+      }
+      r.exchangeContinueVotes=r.exchangeContinueVotes instanceof Map?r.exchangeContinueVotes:new Map();
+      r.exchangeContinueVotes.set(sid,true);
+      const bothContinue=r.players.filter(Boolean).length===2 && r.players.filter(Boolean).every(p=>r.exchangeContinueVotes.get(p.sessionId)===true);
+      if (!bothContinue) {
+        for (const p of r.players.filter(Boolean)) send(p.ws,'card_exchange_continue_waiting',{votes:r.exchangeContinueVotes.size,total:2,myVote:r.exchangeContinueVotes.has(p.sessionId)});
+        return;
+      }
+      r.exchangePhase='selecting'; r.exchangeRoundId=uid('exchange_round'); r.exchangeSelections={}; r.exchangeDeliveryAcks=new Set(); r.exchangeDeliverySent=new Set(); r.exchangeContinueVotes=new Map(); r.exchangeId=null; r.status='waiting'; r.updatedAt=Date.now();
+      broadcastRoom(r,'card_exchange_next_round',{roundId:r.exchangeRoundId});
+      sendCardExchangeState(r);
+      broadcastPlayers(r);
+      return;
+    }
 
     if (type === 'rematch_request') {
       if (!r?.battle || r.battle.phase !== 'finished' || r.status !== 'finished') {
@@ -1738,6 +1887,10 @@ server.on('upgrade',(req,socket) => {
       if (isSpectator(r,sid)) {
         r.spectators.delete(sid); setSessionRoom(sid,null); send(ws,'left_room'); broadcastPlayers(r); return;
       }
+      if (r.rule === 'card_exchange') {
+        closeCardExchangeRoom(r, 'プレイヤーがカード交換の部屋を退出しました。', sid);
+        return;
+      }
       const leavingSlot = playerSlot(r,sid);
       if (r.battle && r.battle.phase !== 'finished' && leavingSlot >= 0) {
         if (r.players[leavingSlot]) r.players[leavingSlot].online = false;
@@ -1767,6 +1920,7 @@ server.on('upgrade',(req,socket) => {
     }
 
     if (type === 'deck_select') {
+      if (r.rule === 'card_exchange') return send(ws,'error',{code:'NO_DECK_SELECT',message:'カード交換モードではデッキ選択は不要です。'});
       if (r.battle) return send(ws,'error',{code:'BATTLE_STARTED',message:'対戦開始後はデッキを変更できません。'});
       if (r.rule === 'super_rental' || r.rule === 'random_pot') return send(ws,'error',{code:'NO_DECK_SELECT',message:'このルールではデッキ選択は不要です。サーバーが候補カードを抽選します。'});
       const p = r.players.find(x=>x?.sessionId===sid); if (!p) return send(ws,'error',{code:'NOT_PLAYER',message:'プレイヤー枠がありません。'});
@@ -1788,6 +1942,7 @@ server.on('upgrade',(req,socket) => {
     }
 
     if (type === 'battle_select') {
+      if (r.rule === 'card_exchange') return send(ws,'error',{code:'NO_BATTLE_SELECT',message:'カード交換モードでは対戦用のカード選択はできません。'});
       if (!r.players.some(p=>p?.sessionId===sid)) return send(ws,'error',{code:'NOT_PLAYER',message:'プレイヤーではありません。'});
       if (r.battle) return send(ws,'error',{code:'BATTLE_STARTED',message:'すでに対戦が始まっています。'});
       const source = roomSourceForPlayer(r,sid);
@@ -1814,6 +1969,7 @@ server.on('upgrade',(req,socket) => {
     }
 
     if (type === 'room_ready') {
+      if (r.rule === 'card_exchange') return send(ws,'error',{code:'NO_ROOM_READY',message:'カード交換モードでは交換内容を確定してください。'});
       const p = r.players.find(x=>x?.sessionId===sid); if (!p) return send(ws,'error',{code:'NOT_PLAYER',message:'プレイヤーではありません。'});
       if (r.battle) return send(ws,'error',{code:'BATTLE_STARTED',message:'すでに対戦中です。'});
       if (m.ready) {
