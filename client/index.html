@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.5 - AIマジック対象・発動条件・ストーリー報酬修正</title>
+  <title>カードAI対戦ゲーム v3.28.6 - オンライン時間切れ後の行動入力復旧</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.5</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.6</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -6040,6 +6040,7 @@
   let onlineLastDecisionToken = null;
   let onlinePrepareMarker = null;
   let onlinePrepareAckToken = null;
+  let onlinePrepareWatchdog = null;
   let onlineLastState = null;
   let onlineEventQueue = [];
   let onlineEventProcessing = false;
@@ -6339,6 +6340,7 @@
 
   function resetOnlineRoomLocal(){
     onlineUiToken++;
+    clearOnlinePreparationWatchdog();
     clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
     onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
@@ -6592,12 +6594,23 @@
       if(allowRetry){
         setOnlineStatus('オンライン戦闘画面を再同期しています…');
         setTimeout(()=>safeApplyOnlineState(st,false),100);
-      }else if(st.phase==='decision'&&!onlineSpectating){
-        // 描画例外で決定画面が閉じたままになるのを防ぐ。次の受信状態で正規描画へ戻す。
-        $('decision-command-panel')?.classList.remove('hidden');
-        $('online-controls')?.classList.remove('hidden');
-        renderOnlineControls();
-        setOnlineStatus('戦闘画面の再描画に失敗しました。現在の状態を再同期しています。');
+      }else if((st.phase==='decision'||st.phase==='preparing')&&!onlineSpectating){
+        // UI描画が一部失敗しても、サーバーのフェーズをローカル状態へ反映して永久ロックを避ける。
+        if(window.battleState){
+          battleState.battleId=st.battleId||battleState.battleId;
+          battleState.turn=Number(st.turn||battleState.turn||1);
+          battleState.phase=st.phase;
+          battleState.decisionToken=st.decisionToken||battleState.decisionToken||null;
+        }
+        const preparing=st.phase==='preparing';
+        $('decision-command-panel')?.classList.toggle('hidden',preparing);
+        $('online-controls')?.classList.toggle('hidden',preparing);
+        $('online-battle-timer')?.classList.add('hidden');
+        if(preparing) showOnlinePreparingTimer(); else renderOnlineControls();
+        setOnlineStatus(preparing
+          ? 'ターン準備の描画に失敗しました。同期処理を復旧しています。'
+          : '戦闘画面の再描画に失敗しました。入力状態を復旧し、最新状態を再同期しています。');
+        if(onlinePrepareMarker && st.phase==='preparing') scheduleOnlinePreparationRecovery(onlinePrepareMarker, 1500);
       }
       return false;
     }
@@ -6716,7 +6729,8 @@
     if($('online-confirmed-status'))$('online-confirmed-status').innerText='行動を実行中です。';
   }
   function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
-  function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;battleState.reservedMagicSubTargetInstanceId=null;battleState.reservedEnemyMagicTargetInstanceId=null;battleState.reservedEnemyMagicSubTargetInstanceId=null;} }
+  function clearOnlinePreparationWatchdog(){if(onlinePrepareWatchdog!==null){clearTimeout(onlinePrepareWatchdog);onlinePrepareWatchdog=null;}}
+  function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;battleState.reservedMagicSubTargetInstanceId=null;battleState.reservedEnemyMagicTargetInstanceId=null;battleState.reservedEnemyMagicSubTargetInstanceId=null;}renderOnlineControls();}
 
   async function playOnlineEvent(ev){
     if(!ev)return;
@@ -6836,14 +6850,50 @@ ${reason}`:''}`;
     completeOnlinePreparationIfReady();
   }
 
+  function scheduleOnlinePreparationRecovery(marker, delay=12000){
+    clearOnlinePreparationWatchdog();
+    if(!marker?.decisionToken)return;
+    onlinePrepareWatchdog=setTimeout(()=>{
+      onlinePrepareWatchdog=null;
+      const current=onlinePrepareMarker;
+      if(!current||current.decisionToken!==marker.decisionToken||onlinePrepareAckToken===current.decisionToken)return;
+      // Never skip queued action/passive popups. Recovery only runs once all queued presentation work is drained.
+      if(onlineEventProcessing||onlineEventQueue.length){scheduleOnlinePreparationRecovery(current,5000);return;}
+      const state=current.state||onlineLastState;
+      if(state?.battleId===current.battleId && state.phase==='preparing' &&
+         (battleState?.phase!=='preparing'||String(battleState?.battleId||'')!==String(current.battleId||''))){
+        safeApplyOnlineState(state,false);
+      }
+      if(!battleState || String(battleState.battleId||'')!==String(current.battleId||'')){
+        // Request the server's authoritative state and retry rather than waiting forever on a stale local battle.
+        sendOnline('battle_state');
+        scheduleOnlinePreparationRecovery(current,5000);
+        return;
+      }
+      if(battleState.phase!=='preparing'){
+        // If a render error prevented phase application, the received preparing snapshot is authoritative.
+        if(state?.phase==='preparing'&&String(state.battleId||'')===String(current.battleId||'')){
+          battleState.phase='preparing';battleState.turn=Number(current.turn||state.turn||battleState.turn||1);
+          battleState.decisionToken=current.decisionToken;
+        }else{
+          sendOnline('battle_state');scheduleOnlinePreparationRecovery(current,5000);return;
+        }
+      }
+      if(onlineEventProcessing||onlineEventQueue.length){scheduleOnlinePreparationRecovery(current,5000);return;}
+      onlinePrepareAckToken=current.decisionToken;onlinePrepareMarker=null;clearOnlinePreparationWatchdog();
+      if($('online-confirmed-status'))$('online-confirmed-status').innerText='ターン準備の同期を復旧しました。入力フェーズを開始します…';
+      sendOnline('decision_ready',{battleId:current.battleId,turn:current.turn,decisionToken:current.decisionToken});
+    },Math.max(1000,delay));
+  }
+
   function completeOnlinePreparationIfReady(){
     const marker=onlinePrepareMarker;
     if(!marker||onlineSpectating||!onlineMode||onlineEventProcessing||onlineEventQueue.length)return;
-    if(onlinePrepareAckToken===marker.decisionToken)return;
+    if(onlinePrepareAckToken===marker.decisionToken){onlinePrepareMarker=null;clearOnlinePreparationWatchdog();return;}
     // Apply the last preparing state only after all passive popups have completed.
     if(onlineDeferredState){const st=onlineDeferredState;onlineDeferredState=null;safeApplyOnlineState(st);}
     if(battleState?.phase!=='preparing'||String(battleState?.battleId||'')!==String(marker.battleId||''))return;
-    onlinePrepareAckToken=marker.decisionToken;onlinePrepareMarker=null;
+    onlinePrepareAckToken=marker.decisionToken;onlinePrepareMarker=null;clearOnlinePreparationWatchdog();
     if($('online-confirmed-status'))$('online-confirmed-status').innerText='開始時効果の表示完了。相手側の準備完了を待っています…';
     sendOnline('decision_ready',{battleId:marker.battleId,turn:marker.turn,decisionToken:marker.decisionToken});
   }
@@ -6939,7 +6989,7 @@ ${reason}`:''}`;
       return;
     }
     if(m.type==='battle_preparing'){setOnlineStatus(m.message||'カード画像の同期完了を待っています…');return;}
-    if(m.type==='battle_start'){onlineRematchRequested=false;hideBattleResultModal();resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineLastDecisionToken=null;onlinePrepareAckToken=null;safeApplyOnlineState(m.state);return;}
+    if(m.type==='battle_start'){clearOnlinePreparationWatchdog();onlinePrepareMarker=null;onlineRematchRequested=false;hideBattleResultModal();resetOnlineTurn();onlineLastTurn=Number(m.state?.turn||1);onlineLastDecisionToken=null;onlinePrepareAckToken=null;safeApplyOnlineState(m.state);return;}
     if(m.type==='turn_preparing'){
       if(m.state){if(onlineEventQueue.length||onlineEventProcessing)onlineDeferredState=m.state;else safeApplyOnlineState(m.state);}
       return;
@@ -6947,7 +6997,8 @@ ${reason}`:''}`;
     if(m.type==='decision_prepare_end'){
       if(m.state){if(onlineEventQueue.length||onlineEventProcessing)onlineDeferredState=m.state;else safeApplyOnlineState(m.state);}
       if(!onlineSpectating&&m.state?.yourSide!=='spectator'){
-        onlinePrepareMarker={battleId:m.battleId||m.state?.battleId,turn:Number(m.turn||m.state?.turn||0),decisionToken:String(m.decisionToken||m.state?.decisionToken||'')};
+        onlinePrepareMarker={battleId:m.battleId||m.state?.battleId,turn:Number(m.turn||m.state?.turn||0),decisionToken:String(m.decisionToken||m.state?.decisionToken||''),state:m.state||onlineLastState};
+        scheduleOnlinePreparationRecovery(onlinePrepareMarker,12000);
         completeOnlinePreparationIfReady();
       }
       return;
@@ -6969,9 +7020,15 @@ ${reason}`:''}`;
       const st=m.state;if(!st)return;
       if(m.type==='turn_start'){
         const nextTurn=Number(st.turn||0),token=String(st.decisionToken||'');
-        if(nextTurn>Number(onlineLastTurn||0)||(token&&token!==onlineLastDecisionToken))resetOnlineTurn();
+        // turn_start is the authoritative signal that a fresh input phase is open. Do not rely on local
+        // turn/token comparisons: a timeout or resync race can leave those values stale and keep the button locked.
+        clearOnlinePreparationWatchdog();onlinePrepareMarker=null;resetOnlineTurn();
         onlineLastTurn=nextTurn||onlineLastTurn;
         if(token)onlineLastDecisionToken=token;
+      }else if(m.type==='turn_execution_start'){
+        // The submitted lock belongs to the phase that just ended. Clear it while execution UI is hidden,
+        // so a timeout-driven transition cannot carry the old lock into the next turn.
+        onlineSubmitted=false;
       }
       // Do not start/stop timers ahead of queued passive/action animations. State application owns the phase UI.
       if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredState=st;return;}
