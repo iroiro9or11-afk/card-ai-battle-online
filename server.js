@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.28.8';
+const SERVER_VERSION = '3.28.9';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -762,7 +762,7 @@ function triggerPassiveTiming(b, timing, subject=null) {
   try {
     const candidates = [];
     for (const u of allUnits(b)) {
-      if (u.currentHp <= 0 && timing !== 'death') continue;
+      if (u.currentHp <= 0 && timing !== 'death' && !(timing === 'hp_decrease' && u === subject)) continue;
       if (!u.isActive && timing !== 'death') continue;
       if (timing === 'death') { if (u !== subject) continue; }
       else if (timing === 'ally_death') { if (!subject || u.side !== subject.side || u === subject) continue; }
@@ -784,7 +784,7 @@ function triggerPassiveTiming(b, timing, subject=null) {
         if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
           const subType = sk.subEffect.targetType || sk.targetType;
           const subTargets = subType === 'same_main_target'
-            ? ts
+            ? ts.filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}))
             : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
           for (const t of subTargets) { trackTarget(t); const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
         }
@@ -813,7 +813,7 @@ function matchesTarget(t, c) {
   if (c.type === 'hp_ratio_lte') return t.maxHp > 0 && t.currentHp / t.maxHp * 100 <= Number(c.val);
   if (c.type === 'attr_is') return t.mainAttr === c.attr || (t.subAttrs || []).includes(c.attr);
   if (c.type === 'attr_not') return !(t.mainAttr === c.attr || (t.subAttrs || []).includes(c.attr));
-  return true;
+  return false;
 }
 function evalCond(b, cond, actor) {
   if (!cond || cond.type === 'none') return true;
@@ -836,7 +836,7 @@ function evalCond(b, cond, actor) {
   if (cond.type === 'ally_has_any_status') return allies.some(u => u !== actor && hasAnyStatus(u));
   if (cond.type === 'enemy_has_status') return enemies.some(u => hasStatus(u, cond.status));
   if (cond.type === 'enemy_has_any_status') return enemies.some(u => hasAnyStatus(u));
-  return true;
+  return false;
 }
 function resolveSingleTarget(b, actor, type, pool, selectedTarget=null) {
   if (!pool.length) return [];
@@ -953,7 +953,14 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
     if (target.currentHp <= 0 && before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
     return 'バフ全解除';
   }
-  if (eff.type === 'clear_debuffs') { target.debuffs = []; refreshEffectiveMaxHp(target, false); return 'デバフ全解除'; }
+  if (eff.type === 'clear_debuffs') {
+    const before = target.currentHp;
+    target.debuffs = [];
+    refreshEffectiveMaxHp(target, false);
+    if (target.currentHp < before) triggerPassiveTiming(b,'hp_decrease',target);
+    if (target.currentHp <= 0 && before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
+    return 'デバフ全解除';
+  }
   if (eff.type === 'status_apply') {
     const ok = addAbnormality(target, eff.status || 'poison', duration, appliedTurn);
     const name = abnormalityName(eff.status || 'poison');
@@ -971,7 +978,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   return null;
 }
 function passiveOne(b, timing, u) {
-  if (!u || u.currentHp <= 0 || !u.isActive) return;
+  if (!u || (u.currentHp <= 0 && timing !== 'hp_decrease') || !u.isActive) return;
   for (const sk of u.skills || []) {
     if (sk.type !== 'passive' || sk.timing !== timing || !evalCond(b, sk.selfCond, u)) continue;
     b._statusApplicationTiming = timing;
@@ -988,7 +995,7 @@ function passiveOne(b, timing, u) {
     if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
       const subType=sk.subEffect.targetType||sk.targetType;
       const subTargets=subType==='same_main_target'
-        ? mainTargets
+        ? mainTargets.filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}))
         : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
       for (const t of subTargets) {
         trackTarget(t);
@@ -1010,6 +1017,10 @@ function tickStatuses(b) {
     const before = u.currentHp;
     refreshEffectiveMaxHp(u, false);
     if (u.currentHp < before) triggerPassiveTiming(b,'hp_decrease',u);
+    if (before > 0 && u.currentHp <= 0) {
+      triggerPassiveTiming(b,'death',u);
+      triggerPassiveTiming(b,'ally_death',u);
+    }
   }
 }
 function processEndTurnAbnormalities(r) {
@@ -1412,23 +1423,23 @@ function validateActionSet(b, side, actions) {
     if (a.type !== 'skill') throw new Error('不正な行動タイプです。');
     const sk = u.skills?.[Number(a.skillIndex)];
     if (!sk || sk.type !== 'active') throw new Error('存在しないスキルが指定されています。');
-    if ((u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration))) throw new Error(`「${u.name}」はスキル使用禁止中です。`);
-    if (!evalCond(b, sk.selfCond, u)) throw new Error(`「${sk.name}」の発動条件を満たしていません。`);
-    const cost = Number(sk.cost || 0);
-    totalCost += cost;
+    const skillBlockedNow = (u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration));
+    const cost = Math.max(0, Number(sk.cost || 0));
     const pool = targetPool(b, u, sk.targetType).filter(t => matchesTarget(t, sk.targetCond));
+    const skillConditionMetNow = evalCond(b, sk.selfCond, u);
+    const canExecuteSkillNow = skillConditionMetNow && !skillBlockedNow;
+    const targetlessSkill = ['self','player_self','player_opp'].includes(sk.targetType);
+    if (canExecuteSkillNow && (pool.length || targetlessSkill)) totalCost += cost;
     if (sk.targetType === 'select_enemy_1' || sk.targetType === 'select_ally_1') {
       const chosen = pool.find(t => t.instanceId === a.targetInstanceId);
-      if (!chosen || isForbiddenStealthSelection(u, chosen)) throw new Error(`「${sk.name}」のメイン効果対象が不正です。隠密中の敵は指定できません。`);
+      if (pool.length && canExecuteSkillNow && (!chosen || isForbiddenStealthSelection(u, chosen))) throw new Error(`「${sk.name}」のメイン効果対象が不正です。隠密中の敵は指定できません。対象を選び直してください。`);
     }
-    if (!pool.length && !['self','player_self','player_opp'].includes(sk.targetType)) throw new Error(`「${sk.name}」の対象が存在しません。`);
     if (sk.hasSubEffect && sk.subEffect && sk.subEffect.targetType !== 'same_main_target') {
       const sp = targetPool(b,u,sk.subEffect.targetType).filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}));
       if (sk.subEffect.targetType === 'select_enemy_1' || sk.subEffect.targetType === 'select_ally_1') {
         const chosenSub = sp.find(t => t.instanceId === a.subTargetInstanceId);
-        if (!chosenSub || isForbiddenStealthSelection(u, chosenSub)) throw new Error(`「${sk.name}」の追加効果対象が不正です。隠密中の敵は指定できません。`);
+        if (sp.length && canExecuteSkillNow && (!chosenSub || isForbiddenStealthSelection(u, chosenSub))) throw new Error(`「${sk.name}」の追加効果対象が不正です。隠密中の敵は指定できません。対象を選び直してください。`);
       }
-      if (!sp.length && !['self','player_self','player_opp'].includes(sk.subEffect.targetType)) throw new Error(`「${sk.name}」の追加効果対象が存在しません。`);
     }
     out.units.push({unitInstanceId:u.instanceId,type:'skill',skillIndex:Number(a.skillIndex),targetInstanceId:a.targetInstanceId || null,subTargetInstanceId:a.subTargetInstanceId || null});
   }
@@ -1438,17 +1449,23 @@ function validateActionSet(b, side, actions) {
     if (pl.usedMagic.includes(magicId)) throw new Error('そのマジックカードはこの対戦ですでに使用済みです。');
     const card = pl.magicCards[magicId];
     if (!card) throw new Error('マジックカード情報がありません。');
-    totalCost += Number(card.effect?.cost || 0);
     const eff = card.effect || {};
-    const actor = {side, name:pl.name, currentHp:1, maxHp:1};
+    const actor = {side, name:pl.name, currentHp:1, maxHp:1, buffs:[], debuffs:[], statuses:[]};
+    const magicConditionMetNow = evalCond(b, eff.selfCond, actor);
     const pool = targetPool(b, actor, eff.targetType).filter(t => matchesTarget(t, eff.targetCond));
-    if ((eff.targetType === 'select_enemy_1' || eff.targetType === 'select_ally_1') && !out.magicTargetInstanceId) throw new Error(`「${card.name}」の対象を選択してください。`);
-    if (out.magicTargetInstanceId) { const chosen = pool.find(t => t.instanceId === out.magicTargetInstanceId); if (!chosen || isForbiddenStealthSelection(actor, chosen)) throw new Error(`「${card.name}」の対象が不正です。隠密中の敵は指定できません。`); }
-    if (!pool.length && !['player_self','player_opp','self'].includes(eff.targetType)) throw new Error(`「${card.name}」の対象が存在しません。`);
+    const targetlessMagic = ['player_self','player_opp','self'].includes(eff.targetType);
+    if (magicConditionMetNow && (pool.length || targetlessMagic)) totalCost += Math.max(0, Number(eff.cost || 0));
+    if (eff.targetType === 'select_enemy_1' || eff.targetType === 'select_ally_1') {
+      const chosen = pool.find(t => t.instanceId === out.magicTargetInstanceId);
+      if (pool.length && magicConditionMetNow && (!chosen || isForbiddenStealthSelection(actor, chosen))) throw new Error(`「${card.name}」の対象を選び直してください。`);
+    }
     if (eff.hasSubEffect && eff.subEffect && eff.subEffect.targetType !== 'same_main_target') {
       const sp=targetPool(b,actor,eff.subEffect.targetType).filter(t=>matchesTarget(t,eff.subEffect.targetCond||{type:'none'}));
-      if (eff.subEffect.targetType==='select_enemy_1'||eff.subEffect.targetType==='select_ally_1') { const chosenSub=sp.find(t=>t.instanceId===out.magicSubTargetInstanceId); if(!chosenSub||isForbiddenStealthSelection(actor,chosenSub)) throw new Error(`「${card.name}」の追加効果対象が不正です。隠密中の敵は指定できません。`); }
-      if (!sp.length && !['player_self','player_opp','self'].includes(eff.subEffect.targetType)) throw new Error(`「${card.name}」の追加効果対象が存在しません。`);
+      // 追加効果の対象がいない、またはマジックの発動条件が未達の場合は、ターン全体を拒否せず追加効果だけ不発にする。
+      if (magicConditionMetNow && sp.length && (eff.subEffect.targetType==='select_enemy_1'||eff.subEffect.targetType==='select_ally_1')) {
+        const chosenSub=sp.find(t=>t.instanceId===out.magicSubTargetInstanceId);
+        if(!chosenSub||isForbiddenStealthSelection(actor,chosenSub)) throw new Error(`「${card.name}」の追加効果対象が不正です。対象を選び直してください。`);
+      }
     }
     out.magicId = magicId;
   } else if (out.magicTargetInstanceId) {
@@ -1460,11 +1477,12 @@ function validateActionSet(b, side, actions) {
 function executeMagic(b, side, card, selectedTargetId=null, selectedSubTargetId=null) {
   const resource = side === 'player1' ? b.p1 : b.p2;
   const cost = Number(card.effect?.cost || 0);
-  if (resource.ap < cost) return {type:'MAGIC_USE',actor:{side,name:resource.name},actionName:card.name,effect:'AP不足',result:'不発',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
-  const actor = {side,name:resource.name,currentHp:1,maxHp:1};
+  const actor = {side,name:resource.name,currentHp:1,maxHp:1,buffs:[],debuffs:[],statuses:[]};
   const eff = card.effect || {};
+  if (!evalCond(b, eff.selfCond, actor)) return {type:'MAGIC_USE',activated:false,actor:{side,name:resource.name},actionName:card.name,effect:'発動条件未達',result:'不発（AP消費なし）',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
+  if (resource.ap < cost) return {type:'MAGIC_USE',activated:false,actor:{side,name:resource.name},actionName:card.name,effect:'AP不足',result:'不発（AP消費なし）',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
   const main = targets(b, actor, eff.targetType, eff.targetCond, selectedTargetId, true);
-  if (['select_enemy_1','select_ally_1'].includes(eff.targetType) && !main.length) return {type:'MAGIC_USE',actor:{side,name:resource.name},actionName:card.name,effect:'指定対象なし',result:'不発',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
+  if (!main.length && !['player_self','player_opp','self'].includes(eff.targetType)) return {type:'MAGIC_USE',activated:false,actor:{side,name:resource.name},actionName:card.name,effect:'有効な対象なし',result:'不発（AP消費なし）',description:card.desc || '',card:sanitizeCardNoImage(card,true),cardId:card.id};
   resource.ap -= cost;
   const before = new Map(); const touched=[];
   const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!before.has(t.instanceId))before.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
@@ -1473,12 +1491,12 @@ function executeMagic(b, side, card, selectedTargetId=null, selectedSubTargetId=
   for (const t of main) { trackTarget(t); const r = applyEffect(b, eff.mainEffect, t, actor, true); if (effectResultSucceeded(r)) mainEffectSucceeded=true; if(r) lines.push(r); }
   if (mainEffectSucceeded && eff.hasSubEffect && eff.subEffect) {
     const subType=eff.subEffect.targetType||'same_main_target';
-    const sub = subType==='same_main_target' ? main : targets(b, actor, subType, eff.subEffect.targetCond || {type:'none'}, selectedSubTargetId, true);
+    const sub = subType==='same_main_target' ? main.filter(t => matchesTarget(t, eff.subEffect.targetCond || {type:'none'})) : targets(b, actor, subType, eff.subEffect.targetCond || {type:'none'}, selectedSubTargetId, true);
     for (const t of sub) { trackTarget(t); const r = applyEffect(b, eff.subEffect, t, actor, true); if (r) lines.push(r); }
   }
   const tar = main[0];
   return {
-    type:'MAGIC_USE', actor:{side,name:resource.name},
+    type:'MAGIC_USE', activated:true, actor:{side,name:resource.name},
     target:tar?pubUnit(tar,false):null, actionName:card.name,
     effect:lines.join('\n') || '効果なし', result:lines.join('\n') || '変化なし', description:card.desc || '',
     card:sanitizeCardNoImage(card,true), targetHpBefore:tar?before.get(tar.instanceId):null,
@@ -1520,11 +1538,12 @@ function executeAction(b, side, u, action) {
   if (action.type !== 'skill') return null;
   const sk = u.skills?.[action.skillIndex];
   if (!sk) return null;
+  if (!evalCond(b, sk.selfCond, u)) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'発動条件未達',result:'不発（AP消費なし）',description:sk.desc || sk.description || ''};
   if ((u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration))) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'スキル使用禁止',result:'不発',description:sk.desc || ''};
   const cost = Number(sk.cost || 0);
   if (resource.ap < cost) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'AP不足',result:'不発',description:sk.desc || ''};
   const main = targets(b,u,sk.targetType,sk.targetCond,action.targetInstanceId,false);
-  if (['select_enemy_1','select_ally_1'].includes(sk.targetType) && !main.length) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'指定対象なし',result:'不発',description:sk.desc || ''};
+  if (!main.length && !['self','player_self','player_opp'].includes(sk.targetType)) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'有効な対象なし',result:'不発（AP消費なし）',description:sk.desc || sk.description || ''};
   resource.ap -= cost;
   const before = new Map(); const touched=[];
   const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!before.has(t.instanceId))before.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
@@ -1534,7 +1553,7 @@ function executeAction(b, side, u, action) {
   if (mainEffectSucceeded && sk.hasSubEffect && sk.subEffect) {
     const subType=sk.subEffect.targetType||'same_main_target';
     const sub=subType==='same_main_target'
-      ? main
+      ? main.filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}))
       : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},action.subTargetInstanceId || null,false);
     for (const t of sub) { trackTarget(t); const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
   }
@@ -1579,7 +1598,7 @@ function executeTurn(r) {
     const x = arr[0];
     pending.delete(x.u ? x.u.instanceId : 'magic_'+x.side);
     const ev = x.magic ? executeMagic(b,x.side,x.magic,x.magicTargetInstanceId,x.magicSubTargetInstanceId) : executeAction(b,x.side,x.u,x.a);
-    if (x.magic) battlePlayer(b,x.side).usedMagic.push(x.magic.id);
+    if (x.magic && ev?.activated !== false) battlePlayer(b,x.side).usedMagic.push(x.magic.id);
     if (ev) { b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev}); }
     flushPendingEvents(r);
     checkWin(r);
