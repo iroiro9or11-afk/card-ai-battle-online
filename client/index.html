@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.7 - 戦闘ポップアップ表示時間・オフライン早送り対応</title>
+  <title>カードAI対戦ゲーム v3.28.8 - オンラインカード交換対応</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.7</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.8</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -430,7 +430,7 @@
           <input id="online-room-name" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs" placeholder="部屋名" value="カード勝負">
           <input id="online-room-password" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs" placeholder="パスワード（任意）" type="password">
           <select id="online-room-rule" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs">
-            <option value="unlimited">無制限</option><option value="rental">レンタル</option><option value="super_rental">超レンタル</option><option value="random_pot">闇鍋</option>
+            <option value="unlimited">無制限</option><option value="rental">レンタル</option><option value="super_rental">超レンタル</option><option value="random_pot">闇鍋</option><option value="card_exchange">カード交換</option>
           </select>
           <label class="flex items-center gap-2 text-xs"><input id="online-allow-spectators" type="checkbox" checked> 観戦を許可</label>
           <input id="online-max-spectators" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs" type="number" min="0" max="50" value="10" placeholder="最大観戦人数">
@@ -6036,7 +6036,7 @@
 <script>
 (function(){
   const $ = id => document.getElementById(id);
-  const ruleName = {unlimited:'無制限',rental:'レンタル',super_rental:'超レンタル',random_pot:'闇鍋'};
+  const ruleName = {unlimited:'無制限',rental:'レンタル',super_rental:'超レンタル',random_pot:'闇鍋',card_exchange:'カード交換'};
   const waitForAppReady = async (timeoutMs=10000) => {
     const until = Date.now() + timeoutMs;
     while (!window.__cardBattleAppReady && Date.now() < until) await new Promise(r=>setTimeout(r,50));
@@ -6059,6 +6059,14 @@
   let onlineSpectating = false;
   let onlinePool = null;
   let onlineRentalDecks = [];
+  let onlineExchangeSelected = [];
+  let onlineExchangeFilter = 'all';
+  let onlineExchangeSearch = '';
+  let onlineExchangeSubmitted = false;
+  let onlineExchangePending = null;
+  let onlineExchangeDecisionLocked = false;
+  let onlineExchangeReceivedCount = 0;
+  let onlineExchangeOpponentSubmitted = false;
   let onlineDeckList = [];
   let onlineDeckOptions = null;
   let onlineSelection = null;
@@ -6208,7 +6216,7 @@
     if(batches.length===0){
       const imageExpected=(allCards||[]).some(hasTransportableImage);
       onlineAssetsSyncing=false;onlineAssetsReady=!imageExpected;
-      if(onlineAssetsReady)setOnlineStatus(onlineRoom?'画像同期対象のカードはありません。':'オンライン接続済み。');
+      if(onlineAssetsReady){setOnlineStatus(onlineRoom?'画像同期対象のカードはありません。':'オンライン接続済み。');if(onlineRoom?.rule==='card_exchange')renderCardExchangeSelection();}
       else showOnlineError('カード画像を送信用データに変換できませんでした。画像形式を確認して再接続してください。');
       return;
     }
@@ -6376,7 +6384,7 @@
     onlineUiToken++;
     clearOnlinePreparationWatchdog();
     clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
-    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineExchangeSelected=[];onlineExchangeFilter='all';onlineExchangeSearch='';onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
     onlineMode=false;$('online-controls')?.classList.add('hidden');
@@ -6393,7 +6401,11 @@
     $('online-lobby')?.classList.add('hidden');$('online-room-panel')?.classList.remove('hidden');
     $('online-current-room').innerText='部屋：'+onlineRoom.roomName;
     $('online-current-rule').innerText='ルール：'+(ruleName[onlineRoom.rule]||onlineRoom.rule);
-    $('online-ready-btn').innerText=onlineReady?'準備を解除':'準備完了';
+    const readyBtn=$('online-ready-btn');
+    if(readyBtn){
+      if(onlineRoom.rule==='card_exchange') readyBtn.classList.add('hidden');
+      else {readyBtn.classList.remove('hidden');readyBtn.innerText=onlineReady?'準備を解除':'準備完了';}
+    }
   }
 
   function scheduleOnlineRoomRender(roomId){
@@ -6551,8 +6563,103 @@
   }
   window.confirmOnlinePoolSelection=confirmOnlinePoolSelection;
 
+  function renderCardExchangeSelection(){
+    const area=$('online-selection-area');if(!area)return;
+    const cards=Array.isArray(allCards)?allCards:[];
+    if(onlineExchangeSubmitted){
+      area.innerHTML=`<div class="rounded-lg border border-amber-500/40 bg-amber-950/20 p-4 space-y-2"><div class="font-black text-amber-300">交換内容を確定しました（${onlineExchangeSelected.length}枚）</div><div class="text-xs text-slate-300">相手が交換内容を確定するまでお待ちください。確定したカードは送信側の所持カードから削除されません。</div></div>`;
+      return;
+    }
+    const filtered=cards.filter(c=>{
+      if(onlineExchangeFilter==='unit'&&c.cardType!=='unit')return false;
+      if(onlineExchangeFilter==='magic'&&c.cardType!=='magic')return false;
+      return !onlineExchangeSearch || String(c.name||'').toLowerCase().includes(onlineExchangeSearch.toLowerCase());
+    });
+    const cardButton=c=>{
+      const id=String(c.id),selected=onlineExchangeSelected.includes(id);
+      const img=getCardImage(c);
+      const body=getCardHTML({id:c.id,cardType:c.cardType,name:c.name,mainAttr:c.mainAttr,subAttrs:c.subAttrs||[],hp:c.stats?.hp,atk:c.stats?.atk,prio:c.stats?.priority,rank:c.rank,desc:c.desc||c.description||'',img});
+      return `<button type="button" onclick='toggleCardExchangeCard(${JSON.stringify(id)})' class="relative text-left p-1 rounded-lg border ${selected?'border-emerald-400 bg-emerald-900/30 ring-2 ring-emerald-500/50':'border-slate-700 bg-slate-950'}"><div class="aspect-[3/4] rounded overflow-hidden bg-slate-900 mb-1">${body}</div><div class="text-[10px] font-bold truncate">${esc(c.name||'名称未設定')}</div><div class="text-[9px] ${c.cardType==='unit'?'text-cyan-300':'text-purple-300'}">${c.cardType==='unit'?'キャラクター':'マジック'}${selected?'・選択中':''}</div>${selected?'<span class="absolute top-1 right-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5">✓</span>':''}</button>`;
+    };
+    const disabled=onlineRoom.players<2||!onlineAssetsReady||cards.length===0;
+    area.innerHTML=`<div class="space-y-3">
+      <div><div class="font-black text-amber-300">🤝 カード交換</div><div class="text-xs text-slate-300 mt-1">所持カードから最大5枚を選んで相手に共有します。0枚でも確定できます。交換に出したカードは自分の所持カードから消えず、受け取ったカードはこのブラウザに保存されます。</div></div>
+      <div class="flex flex-wrap items-center gap-2"><span class="text-xs font-black ${onlineExchangeSelected.length===5?'text-amber-300':'text-emerald-300'}">選択中：${onlineExchangeSelected.length}/5枚</span><button type="button" onclick="setCardExchangeFilter('all')" class="px-3 py-1.5 rounded text-xs ${onlineExchangeFilter==='all'?'bg-cyan-700':'bg-slate-800'}">すべて</button><button type="button" onclick="setCardExchangeFilter('unit')" class="px-3 py-1.5 rounded text-xs ${onlineExchangeFilter==='unit'?'bg-cyan-700':'bg-slate-800'}">キャラクター</button><button type="button" onclick="setCardExchangeFilter('magic')" class="px-3 py-1.5 rounded text-xs ${onlineExchangeFilter==='magic'?'bg-cyan-700':'bg-slate-800'}">マジック</button><input value="${esc(onlineExchangeSearch)}" oninput="setCardExchangeSearch(this.value)" placeholder="カード名で検索" class="flex-1 min-w-[130px] bg-slate-950 border border-slate-700 rounded p-2 text-xs"></div>
+      ${onlineExchangeOpponentSubmitted?'<div class="text-xs text-cyan-300">相手は交換内容を確定しました。あなたの確定を待っています。</div>':''}${!onlineAssetsReady?'<div class="text-xs text-amber-300">カード画像を同期中です。完了までお待ちください。</div>':''}
+      ${onlineRoom.players<2?'<div class="text-xs text-amber-300">相手が入室すると交換を確定できます。</div>':''}
+      ${cards.length?`<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">${filtered.map(cardButton).join('')}</div>`:'<div class="text-xs text-amber-300">所持カードがありません。</div>'}
+      <div class="flex flex-wrap gap-2"><button type="button" onclick="clearCardExchangeSelection()" class="px-3 py-2 bg-slate-700 rounded text-xs" ${onlineExchangeSelected.length?'':'disabled'}>選択解除</button><button type="button" onclick="submitCardExchangeSelection()" class="flex-1 min-w-[200px] py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg font-black text-xs" ${disabled?'disabled':''}>${onlineExchangeSelected.length?`選択した${onlineExchangeSelected.length}枚で交換を確定`:'0枚で交換を確定'}</button></div>
+    </div>`;
+  }
+  window.toggleCardExchangeCard=function(id){
+    if(!onlineRoom||onlineRoom.rule!=='card_exchange'||onlineExchangeSubmitted)return;
+    const key=String(id),i=onlineExchangeSelected.indexOf(key);
+    if(i>=0)onlineExchangeSelected.splice(i,1);
+    else {if(onlineExchangeSelected.length>=5){showOnlineError('交換に出せるカードは最大5枚です。');return;}if(!(allCards||[]).some(c=>String(c.id)===key)){showOnlineError('所持カードが見つかりません。カード一覧を更新してください。');return;}onlineExchangeSelected.push(key);}
+    renderCardExchangeSelection();
+  };
+  window.setCardExchangeFilter=function(filter){onlineExchangeFilter=['all','unit','magic'].includes(filter)?filter:'all';renderCardExchangeSelection();};
+  window.setCardExchangeSearch=function(value){onlineExchangeSearch=String(value||'').slice(0,80);const input=$('online-selection-area')?.querySelector('input[placeholder="カード名で検索"]');const pos=input?.selectionStart;renderCardExchangeSelection();const next=$('online-selection-area')?.querySelector('input[placeholder="カード名で検索"]');if(next){next.focus();try{next.setSelectionRange(pos,pos);}catch{}}};
+  window.clearCardExchangeSelection=function(){if(onlineExchangeSubmitted)return;onlineExchangeSelected=[];renderCardExchangeSelection();};
+  window.submitCardExchangeSelection=function(){
+    if(!onlineRoom||onlineRoom.rule!=='card_exchange'||onlineExchangeSubmitted)return;
+    if(onlineRoom.players<2){showOnlineError('相手が入室するまで確定できません。');return;}
+    if(!onlineAssetsReady){showOnlineError('カード画像の同期が完了するまでお待ちください。');return;}
+    if(onlineExchangeSelected.length>5){showOnlineError('カードは最大5枚までです。');return;}
+    onlineExchangeSubmitted=true;renderCardExchangeSelection();
+    sendOnline('card_exchange_submit',{cardIds:[...onlineExchangeSelected]});
+  };
+
+  function removeCardExchangeDecisionModal(){document.getElementById('card-exchange-decision-modal')?.remove();onlineExchangeDecisionLocked=false;}
+  function showCardExchangeDecision(receivedCount=onlineExchangeReceivedCount, opponentVoted=false){
+    if(Number.isFinite(Number(receivedCount)))onlineExchangeReceivedCount=Number(receivedCount);
+    let modal=document.getElementById('card-exchange-decision-modal');
+    if(!modal){modal=document.createElement('div');modal.id='card-exchange-decision-modal';modal.className='fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4';document.body.appendChild(modal);}
+    const locked=onlineExchangeDecisionLocked;
+    const message=locked?'あなたは「続ける」を選びました。相手の選択を待っています。':(opponentVoted?'相手は「続ける」を選びました。続けるか、ここで終了するか選んでください。':'続けて交換する場合は、相手も「続ける」を選ぶ必要があります。どちらかが「やめる」を選ぶと部屋を終了します。');
+    modal.innerHTML=`<div class="w-full max-w-md rounded-2xl border border-emerald-500/60 bg-slate-950 p-5 shadow-2xl space-y-4"><div class="text-center text-2xl font-black text-emerald-300">交換完了！</div><div class="text-center text-sm text-slate-200">相手から${onlineExchangeReceivedCount}枚のカードを受け取り、所持カードに保存しました。</div><div class="text-center text-xs text-slate-400">${message}</div><div class="grid grid-cols-2 gap-3"><button type="button" onclick="chooseCardExchangeContinue(true)" class="py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black" ${locked?'disabled':''}>続ける</button><button type="button" onclick="chooseCardExchangeContinue(false)" class="py-3 rounded-lg bg-rose-700 hover:bg-rose-600 font-black" ${locked?'disabled':''}>やめる</button></div></div>`;
+  }
+  window.chooseCardExchangeContinue=function(keepGoing){
+    if(onlineExchangeDecisionLocked)return;
+    if(keepGoing===true){onlineExchangeDecisionLocked=true;showCardExchangeDecision(onlineExchangeReceivedCount,false);}
+    else {onlineExchangeDecisionLocked=true;const modal=document.getElementById('card-exchange-decision-modal');if(modal)modal.querySelectorAll('button').forEach(b=>b.disabled=true);}
+    sendOnline('card_exchange_continue',{continue:keepGoing===true});
+  };
+
+  async function finalizeCardExchangeReceive(){
+    const pending=onlineExchangePending;
+    if(!pending||pending.saving||pending.receivedBatches.size<pending.assetTotal)return;
+    pending.saving=true;
+    try{
+      allCards=await getAllFromStore('cards');
+      for(const source of pending.cards){
+        const sourceId=String(source.sourceCardId||source.id||'');
+        if(allCards.some(c=>String(c.exchangeBatchId||'')===pending.exchangeId&&String(c.exchangeSourceCardId||'')===sourceId))continue;
+        const card={...source};delete card.sourceCardId;
+        card.id=generateCardId();
+        if(pending.images.has(sourceId))card.image=pending.images.get(sourceId);
+        else {delete card.image; if(card.imageUrl==null)delete card.imageUrl;}
+        card.exchangeSourceCardId=sourceId;
+        card.exchangeBatchId=pending.exchangeId;
+        card.exchangeSourceName=String(pending.fromName||'相手');
+        card.exchangeReceivedAt=Date.now();
+        await saveToStore('cards',card);
+        allCards.push(card);
+      }
+      allCards=await getAllFromStore('cards');
+      try{refreshAttributeDatalist();renderDeckList();}catch(_){/* current view may be the online lobby */}
+      const exchangeId=pending.exchangeId;
+      onlineExchangePending=null;
+      sendOnline('card_exchange_saved',{exchangeId});
+    }catch(err){
+      console.error('card exchange local save failed',err);
+      showOnlineError('受け取ったカードをローカル保存できませんでした。ブラウザの保存容量を確認して再試行してください。');
+    }
+  }
+
   function renderOnlineSelection(){
     if(!onlineRoom||onlineSpectating)return;
+    if(onlineRoom.rule==='card_exchange'){renderCardExchangeSelection();return;}
     const area=$('online-selection-area');if(!area)return;
     $('online-pool-area').classList.add('hidden');
     if(onlineRoom.rule==='super_rental'||onlineRoom.rule==='random_pot'){
@@ -6940,7 +7047,7 @@ ${reason}`:''}`;
       if(m.done){
         onlineAssetsSyncing=false;
         onlineAssetsReady=!!m.ready;
-        if(onlineAssetsReady)setOnlineStatus(onlineRoom?'カード画像の同期が完了しました。':'オンライン接続済み。');
+        if(onlineAssetsReady){setOnlineStatus(onlineRoom?'カード画像の同期が完了しました。':'オンライン接続済み。');if(onlineRoom?.rule==='card_exchange')renderCardExchangeSelection();}
         else showOnlineError('一部カード画像をサーバーへ同期できませんでした。通信状態と画像形式を確認して再接続してください。');
       }else if(window.__cardBattleAssetNext) window.__cardBattleAssetNext();
       return;
@@ -6950,11 +7057,43 @@ ${reason}`:''}`;
     if(m.type==='battle_cards'){ (m.cards||[]).forEach(registerOnlinePublicCard); return; }
     if(m.type==='battle_assets'){ mergeOnlinePublicAssets(m.items||[]); return; }
     if(m.type==='battle_assets_end'){ mergeOnlinePublicAssets([]); return; }
+    if(m.type==='card_exchange_state'){
+      if(onlineRoom?.rule!=='card_exchange')return;
+      onlineExchangeSubmitted=!!m.submitted;onlineExchangeOpponentSubmitted=!!m.opponentSubmitted;
+      if(m.phase==='selecting'){
+        if(!onlineExchangeSubmitted)renderCardExchangeSelection();
+        else $('online-selection-area').innerHTML=`<div class="rounded-lg border border-amber-500/40 bg-amber-950/20 p-4 text-xs text-amber-200">交換内容を確定しました。相手の確定を待っています…</div>`;
+      }else if(m.phase==='delivering'){
+        $('online-selection-area').innerHTML='<div class="rounded-lg border border-cyan-500/40 bg-cyan-950/20 p-4 text-xs text-cyan-200">交換カードの情報と画像を保存しています。画面を閉じずにお待ちください…</div>';
+      }else if(m.phase==='decision'&&!document.getElementById('card-exchange-decision-modal')){
+        showCardExchangeDecision(Number(m.receivedCount||0),false);
+      }
+      return;
+    }
+    if(m.type==='card_exchange_result'){
+      onlineExchangePending={exchangeId:String(m.exchangeId||''),fromName:m.fromName||'相手',cards:Array.isArray(m.cards)?m.cards:[],assetTotal:Math.max(0,Number(m.assetTotal)||0),receivedBatches:new Set(),images:new Map(),saving:false};
+      if(onlineExchangePending.assetTotal===0)finalizeCardExchangeReceive();
+      return;
+    }
+    if(m.type==='card_exchange_assets'){
+      const pending=onlineExchangePending;if(!pending||String(m.exchangeId||'')!==pending.exchangeId)return;
+      for(const item of (m.items||[]))if(item?.sourceId&&typeof item.image==='string'&&item.image)pending.images.set(String(item.sourceId),item.image);
+      pending.receivedBatches.add(Number(m.batch));finalizeCardExchangeReceive();return;
+    }
+    if(m.type==='card_exchange_complete'){
+      onlineExchangeSubmitted=true;onlineExchangeReceivedCount=Number(m.receivedCount||0);showCardExchangeDecision(onlineExchangeReceivedCount,false);return;
+    }
+    if(m.type==='card_exchange_continue_waiting'){
+      onlineExchangeDecisionLocked=!!m.myVote;showCardExchangeDecision(onlineExchangeReceivedCount,!m.myVote);return;
+    }
+    if(m.type==='card_exchange_next_round'){
+      removeCardExchangeDecisionModal();onlineExchangeSelected=[];onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeOpponentSubmitted=false;onlineExchangeFilter='all';onlineExchangeSearch='';setOnlineStatus('次のカード交換を開始できます。');renderOnlineSelection();return;
+    }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
       clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineDeckOptions=null;onlineDeckRequestId=null;onlineDeckList=Array.isArray(m.myDecks)?m.myDecks:[];onlineRentalDecks=Array.isArray(m.rentalDecks)?m.rentalDecks:[];
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineExchangeSelected=[];onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckOptions=null;onlineDeckRequestId=null;onlineDeckList=Array.isArray(m.myDecks)?m.myDecks:[];onlineRentalDecks=Array.isArray(m.rentalDecks)?m.rentalDecks:[];
       // 部屋参加時は必ずオンライン画面へ移動し、アプリ本体のIndexedDB読込完了後にデッキUIを描画する。
       switchView('online');renderRoomPanel();renderPlayerList([]);
       $('online-selection-area').innerHTML='<div class="text-xs text-slate-400">オンライン用カード・デッキ情報を読み込んでいます…</div>';
@@ -7006,7 +7145,7 @@ ${reason}`:''}`;
       onlineSelection={...(onlineSelection||{}),...(m.selection||{}),deployConfirmed:true};setOnlineStatus('出撃設定をサーバーに確定しました。準備完了できます。');renderOnlineSelection();return;
     }
     if(m.type==='room_update'){
-      if(m.room){onlineRoom=m.room;renderRoomPanel();}const ps=m.players||[];onlineReady=!!ps[onlineSlot||0]?.ready;renderPlayerList(ps);return;
+      if(m.room){onlineRoom=m.room;renderRoomPanel();}const ps=m.players||[];onlineReady=!!ps[onlineSlot||0]?.ready;renderPlayerList(ps);if(onlineRoom?.rule==='card_exchange'&&!onlineExchangeSubmitted)renderCardExchangeSelection();return;
     }
     if(m.type==='pool_ready'){
       onlinePool={units:m.units||[],magics:m.magics||[]};
@@ -7082,6 +7221,9 @@ ${reason}`:''}`;
     if(m.type==='room_closed'){hideBattleResultModal();showOnlineError(m.reason||'部屋が終了しました。');resetOnlineRoomLocal();switchView('online');sendOnline('room_list');return;}
     if(m.type==='left_room'){resetOnlineRoomLocal();setOnlineStatus('部屋から退出しました。');return;}
     if(m.type==='error'){
+      if(String(m.code||'').startsWith('EXCHANGE_')||m.code==='NOT_CARD_EXCHANGE'||m.code==='EXCHANGE_WAITING_PLAYER'){
+        if(onlineRoom?.rule==='card_exchange'&&onlineExchangeSubmitted&&onlineExchangePending===null){onlineExchangeSubmitted=false;renderCardExchangeSelection();}
+      }
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
 
       if(['INVALID_ACTION','NOT_DECISION','STALE_BATTLE','STALE_TURN','OFFLINE_PLAYER'].includes(m.code)){
