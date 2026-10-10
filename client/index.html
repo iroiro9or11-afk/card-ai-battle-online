@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>カードAI対戦ゲーム v3.28.6 - オンライン時間切れ後の行動入力復旧</title>
+  <title>カードAI対戦ゲーム v3.28.7 - 戦闘ポップアップ表示時間・オフライン早送り対応</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .card-aspect { aspect-ratio: 3 / 4; }
@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.6</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.7</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -828,6 +828,8 @@
     let editingCardId = null;
     let currentDetailCardId = null;
     window.__onlineBattleCards = window.__onlineBattleCards || {};
+    // Shared by the offline popup layer so backdrop-tap skipping is disabled during online matches.
+    window.__onlineBattleMode = false;
     let deploymentSelection = { player: { active: [], reserve: [] }, enemy: { active: [], reserve: [] } };
     let storyModeState = null;
     let storyModeDraft = null;
@@ -5853,7 +5855,7 @@
 
       // ポップアップはオンライン戦闘のイベント処理をブロックする重要な演出。
       // 詳細UIの一部で例外が起きても「演出なし→即次ターン」にならないよう、
-      // 最低3秒は必ず表示する。
+      // 最低5秒は必ず表示する。
       modal.classList.remove("hidden");
       const popupKind = document.getElementById("popup-title");
       if (popupKind) popupKind.innerText = cardData?.cardType === 'magic' ? 'MAGIC CARD' : 'ACTION';
@@ -5972,10 +5974,41 @@
         if(resultEl)resultEl.innerText=info.result||'変化なし';
       }
 
-      // 詳細処理が失敗しても、イベント1件につき最低3秒は画面を保持する。
-      const remaining=Math.max(0,3000-(Date.now()-startedAt));
-      if(remaining)await sleep(remaining);
+      // 詳細処理が失敗しても、イベント1件につき最低5秒は画面を保持する。
+      // オフラインでは背景（ポップアップ本体の外側）をタップすると、この待機だけを早送りして次のキューへ進む。
+      // オンラインではサーバーイベント順序を守るため、タップによる早送りは許可しない。
+      const remaining=Math.max(0,5000-(Date.now()-startedAt));
+      if(remaining) await waitForActionPopupDisplay(remaining, window.__onlineBattleMode !== true);
       modal.classList.add("hidden");
+    }
+
+    let actionPopupDismissResolver = null;
+    function waitForActionPopupDisplay(ms, allowBackdropTap) {
+      return new Promise(resolve => {
+        let settled = false;
+        let timerId = null;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (timerId !== null) clearTimeout(timerId);
+          if (actionPopupDismissResolver === finish) actionPopupDismissResolver = null;
+          resolve();
+        };
+        if (allowBackdropTap) actionPopupDismissResolver = finish;
+        timerId = setTimeout(finish, Math.max(0, Number(ms) || 0));
+      });
+    }
+
+    // Overlayそのものがクリックされた場合だけ早送りする。ポップアップ内容やカードの操作は妨げない。
+    // オンラインはイベント順序と両クライアントの同期を優先するため、背景タップでは閉じない。
+    const actionPopupModalForAdvance = document.getElementById('action-popup-modal');
+    if (actionPopupModalForAdvance && !actionPopupModalForAdvance.dataset.offlineAdvanceBound) {
+      actionPopupModalForAdvance.dataset.offlineAdvanceBound = 'true';
+      actionPopupModalForAdvance.addEventListener('click', event => {
+        if (event.target !== actionPopupModalForAdvance) return;
+        if (window.__onlineBattleMode === true) return;
+        if (typeof actionPopupDismissResolver === 'function') actionPopupDismissResolver();
+      });
     }
 
     let actionPopupQueue = Promise.resolve();
@@ -6339,6 +6372,7 @@
   }
 
   function resetOnlineRoomLocal(){
+    window.__onlineBattleMode = false;
     onlineUiToken++;
     clearOnlinePreparationWatchdog();
     clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
@@ -6532,7 +6566,7 @@
 
   function applyOnlineState(st){
     if(!st)return;
-    onlineMode=true;onlineLastState=st;
+    onlineMode=true;window.__onlineBattleMode=true;onlineLastState=st;
     const isSpectator=st.yourSide==='spectator'||onlineSpectating;
     const mySide=st.yourSide==='player2'?'player2':'player1';
     const me=isSpectator?st.p1:(mySide==='player1'?st.p1:st.p2);
