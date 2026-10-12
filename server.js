@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.28.9';
+const SERVER_VERSION = '3.29.0';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -47,6 +47,16 @@ function uniqueById(arr) {
   for (const x of Array.isArray(arr) ? arr : []) if (x?.id && !m.has(String(x.id))) m.set(String(x.id), x);
   return [...m.values()];
 }
+function uniqueByCanonicalCard(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const card of Array.isArray(arr) ? arr : []) {
+    const key = String(card?.exchangeOriginCardId || card?.exchangeSourceCardId || card?.id || '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key); out.push(card);
+  }
+  return out;
+}
 function sample(arr, n) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -81,7 +91,8 @@ function sanitizeCard(c, includePrivate=false) {
     stats: clone(c.stats || {}),
     rank: isUnitCard(c) ? (c.rank != null && Number.isFinite(Number(c.rank)) && Number(c.rank) > 0 ? Number(c.rank) : estimateUnitRank(c.stats || {})) : null,
     image: typeof c.image === 'string' ? c.image : null,
-    imageUrl: typeof c.imageUrl === 'string' ? c.imageUrl : null
+    imageUrl: typeof c.imageUrl === 'string' ? c.imageUrl : null,
+    exchangeOriginCardId: String(c.exchangeOriginCardId || c.exchangeSourceCardId || c.id)
   };
   if (includePrivate) {
     const normalizeEffect = effect => {
@@ -469,7 +480,7 @@ function sendCardExchangeDeliveryTo(r, recipientSid) {
   if (!Array.isArray(ids)) return false;
   const senderProfile=r.profiles[sender.sessionId];
   const sourceCards=ids.map(id=>(senderProfile?.cards||[]).find(c=>String(c.id)===String(id))).filter(Boolean);
-  const cards=sourceCards.map(c=>({...cardWithoutImage(c),sourceCardId:String(c.id)}));
+  const cards=sourceCards.map(c=>({...cardWithoutImage(c),sourceCardId:String(c.id),originCardId:String(c.exchangeOriginCardId||c.exchangeSourceCardId||c.id)}));
   const assets=sourceCards.map(c=>({sourceId:String(c.id),image:cardImageValue(c)})).filter(a=>a.image);
   const batches=splitCardExchangeAssets(assets);
   r.exchangeDeliverySent=r.exchangeDeliverySent instanceof Set?r.exchangeDeliverySent:new Set();
@@ -592,7 +603,7 @@ function prepareCandidatePools(r) {
   const ownerProfile = r.profiles[r.ownerId];
   let source;
   if (r.rule === 'super_rental') source = ownerProfile?.cards || [];
-  else source = uniqueById([...(r.profiles[p1.sessionId]?.cards || []), ...(r.profiles[p2.sessionId]?.cards || [])]);
+  else source = uniqueByCanonicalCard([...(r.profiles[p1.sessionId]?.cards || []), ...(r.profiles[p2.sessionId]?.cards || [])]);
   const chars = source.filter(isUnitCard);
   const mags = source.filter(isMagicCard);
   if (chars.length < 10) throw new Error('候補抽選に必要なキャラクターカードが10枚未満です。');
@@ -762,7 +773,7 @@ function triggerPassiveTiming(b, timing, subject=null) {
   try {
     const candidates = [];
     for (const u of allUnits(b)) {
-      if (u.currentHp <= 0 && timing !== 'death' && !(timing === 'hp_decrease' && u === subject)) continue;
+      if (u.currentHp <= 0 && timing !== 'death') continue;
       if (!u.isActive && timing !== 'death') continue;
       if (timing === 'death') { if (u !== subject) continue; }
       else if (timing === 'ally_death') { if (!subject || u.side !== subject.side || u === subject) continue; }
@@ -895,6 +906,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
     return `AP ${eff.val >= 0 ? '+' : ''}${eff.val}`;
   }
   if (target.__playerTarget) return null;
+  if (Number(target.currentHp) <= 0 && ['heal_fixed','heal_max_hp_ratio','mod_max_hp_val'].includes(eff.type)) return `${target.name || '対象'}は戦闘不能のため効果を受けない`;
   const duration = normalizeDuration(eff.duration);
   const appliedTurn = b._statusApplicationTiming === 'battle_start' ? b.turn - 1 : b.turn;
   if (eff.type === 'dmg_atk_ratio') {
