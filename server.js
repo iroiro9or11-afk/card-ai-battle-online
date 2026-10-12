@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.29.2';
+const SERVER_VERSION = '3.29.3';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -762,9 +762,15 @@ function passiveTargetDetails(units, beforeMap) {
   }));
 }
 function pushPassiveEvent(b, u, sk, result, target=null, targetDetails=[]) {
-  b.pendingEvents = b.pendingEvents || [];
   const ev={ type:'PASSIVE_USE', actor:pubUnit(u,false), target:target && !target.__playerTarget ? pubUnit(target,false) : null, actionName:sk.name, effect:result || 'パッシブ効果', result:result || '発動', description:sk.desc || sk.description || '', cardId:u.cardId };
   if (Array.isArray(targetDetails) && targetDetails.length) ev.targetDetails=targetDetails;
+  // 行動解決中に発生した反応パッシブは、原因となった行動イベントの後に配信する。
+  if (Number(b._deferPassiveEvents||0) > 0) {
+    b._deferredPassiveEvents = b._deferredPassiveEvents || [];
+    b._deferredPassiveEvents.push(ev);
+    return;
+  }
+  b.pendingEvents = b.pendingEvents || [];
   b.pendingEvents.push(ev);
 }
 function triggerPassiveTiming(b, timing, subject=null) {
@@ -809,6 +815,13 @@ function flushPendingEvents(r) {
   const b=r?.battle; if(!b?.pendingEvents?.length) return;
   const events=b.pendingEvents.splice(0);
   for (const ev of events) { b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev}); }
+}
+function flushDeferredPassiveEvents(r) {
+  const b=r?.battle; if(!b?._deferredPassiveEvents?.length) return;
+  const events=b._deferredPassiveEvents.splice(0);
+  b.pendingEvents = b.pendingEvents || [];
+  b.pendingEvents.push(...events);
+  flushPendingEvents(r);
 }
 function targetPool(b, actor, targetType) {
   const own = activeUnits(b, actor.side === 'player1' ? 'player1' : 'player2');
@@ -1609,10 +1622,18 @@ function executeTurn(r) {
     });
     const x = arr[0];
     pending.delete(x.u ? x.u.instanceId : 'magic_'+x.side);
-    const ev = x.magic ? executeMagic(b,x.side,x.magic,x.magicTargetInstanceId,x.magicSubTargetInstanceId) : executeAction(b,x.side,x.u,x.a);
+    b._deferPassiveEvents = Number(b._deferPassiveEvents||0) + 1;
+    let ev;
+    try {
+      ev = x.magic ? executeMagic(b,x.side,x.magic,x.magicTargetInstanceId,x.magicSubTargetInstanceId) : executeAction(b,x.side,x.u,x.a);
+    } finally {
+      b._deferPassiveEvents = Math.max(0, Number(b._deferPassiveEvents||1) - 1);
+    }
     if (x.magic && ev?.activated !== false) battlePlayer(b,x.side).usedMagic.push(x.magic.id);
+    // まず原因となった行動（スキル/攻撃/マジック）を表示し、その後にHP変動・死亡などの反応パッシブを表示。
     if (ev) { b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev}); }
     flushPendingEvents(r);
+    flushDeferredPassiveEvents(r);
     checkWin(r);
   }
   // マジックカード（最遅）の全処理が終わった後に毒、その後にターン終了パッシブ。

@@ -1,8 +1,8 @@
 {
   "name": "card-ai-online",
-  "version": "3.29.2",
+  "version": "3.29.3",
   "private": true,
-  "description": "カードAIバトル オンライン対戦 v3.29.2（致死HP減少パッシブ・大タイマー移動）",
+  "description": "カードAIバトル オンライン対戦 v3.29.3（表示グループ移動・パッシブ演出順）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
