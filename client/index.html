@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.28.9</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.29.0</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -616,7 +616,6 @@
         <div class="text-center">
           <div class="text-xs font-black text-amber-400 tracking-wider">TURN <span id="battle-turn-num" class="text-sm">1</span></div>
           <div id="battle-phase-display" class="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-extrabold border border-amber-500/30">行動決定フェーズ</div>
-          <div id="online-battle-timer" class="hidden mt-1 text-[11px] font-black text-emerald-300">🌐 残り <span id="online-battle-timer-value">90</span> 秒</div>
         </div>
 
         <div class="flex items-center gap-2 flex-row-reverse">
@@ -629,6 +628,10 @@
             <div class="text-[10px] text-rose-400 font-bold">AP: <span id="battle-enemy-ap" class="text-white text-xs">0</span>/100</div>
           </div>
         </div>
+      </div>
+
+      <div class="flex justify-end -mt-2 min-h-[1.5rem]" aria-live="polite">
+        <div id="online-battle-timer" class="hidden px-2 py-1 rounded-md border border-emerald-800/70 bg-slate-950/90 text-[11px] font-black text-emerald-300">🌐 残り <span id="online-battle-timer-value">90</span> 秒</div>
       </div>
 
       <!-- 相手の公開マジックカード：戦闘ヘッダー直下、敵キャラカードの上に常時表示 -->
@@ -3935,7 +3938,10 @@
 
           if (activeSkill && skillNeedsManualTarget(activeSkill)) {
             const candidates = getManualTargetCandidates(activeSkill, activeActor);
-            if (candidates.some(t => t.instanceId === u.instanceId)) {
+            const existingTargetIsValid = candidates.some(t => String(t.instanceId) === String(activeAction?.targetInstanceId));
+            // 対象が未指定/無効な間だけカードタップを対象指定として扱う。
+            // 一度対象を指定した後の味方カードタップは、別キャラのコマンド選択に使える。
+            if (!existingTargetIsValid && candidates.some(t => String(t.instanceId) === String(u.instanceId))) {
               activeActor.reservedAction.targetInstanceId = u.instanceId;
               renderBattleState();
               return;
@@ -4551,6 +4557,7 @@
       if (!target || target.__playerTarget) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
 
       const beforeHp = target.currentHp;
+      if (target.currentHp <= 0 && ['heal_fixed','heal_max_hp_ratio','mod_max_hp_val'].includes(effect.type)) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
       if (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce' || effect.type === 'dmg_atk_ratio') {
         if (isMagic && effect.type === 'dmg_atk_ratio') return fail({ value: -50, kills: 0, damage: 0, healing: 0 });
         const raw = (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce') ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
@@ -5720,7 +5727,7 @@
     function runPassiveSkills(timing, onlyUnit=null) {
       const units=onlyUnit?[onlyUnit]:[...getActiveUnits('player'),...getActiveUnits('enemy')];
       units.forEach(u=>{
-        if((u.currentHp<=0 && timing!=='death' && timing!=='hp_decrease') || !u.isActive)return;
+        if((u.currentHp<=0 && timing!=='death') || !u.isActive)return;
         (u.skills||[]).forEach(sk=>{
           if(sk.type==='passive' && sk.timing===timing && evalCond(sk.selfCond,u,u.side==='player')){
             logBattle(`🌀 ${u.name} のパッシブ【${sk.name}】発動！`);
@@ -5744,6 +5751,8 @@
     }
     function triggerPassiveEvent(timing, subject) {
       if(!subject || passiveTriggerDepth>=10) return;
+      // HP減少トリガーは、ダメージ後も生存している場合のみ発動。致死ダメージから復活する循環を防ぐ。
+      if(timing==='hp_decrease' && subject.currentHp<=0) return;
       passiveTriggerDepth++; try { runPassiveSkills(timing,subject); } finally { passiveTriggerDepth--; }
     }
 
@@ -6089,6 +6098,7 @@
   let onlineExchangePending = null;
   let onlineExchangeDecisionLocked = false;
   let onlineExchangeReceivedCount = 0;
+  let onlineExchangeReceivedCards = [];
   let onlineExchangeOpponentSubmitted = false;
   let onlineDeckList = [];
   let onlineDeckOptions = null;
@@ -6407,7 +6417,7 @@
     onlineUiToken++;
     clearOnlinePreparationWatchdog();
     clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
-    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineExchangeSelected=[];onlineExchangeFilter='all';onlineExchangeSearch='';onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
+    onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineExchangeSelected=[];onlineExchangeFilter='all';onlineExchangeSearch='';onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeReceivedCards=[];onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
     onlineMode=false;$('online-controls')?.classList.add('hidden');
@@ -6640,7 +6650,8 @@
     if(!modal){modal=document.createElement('div');modal.id='card-exchange-decision-modal';modal.className='fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4';document.body.appendChild(modal);}
     const locked=onlineExchangeDecisionLocked;
     const message=locked?'あなたは「続ける」を選びました。相手の選択を待っています。':(opponentVoted?'相手は「続ける」を選びました。続けるか、ここで終了するか選んでください。':'続けて交換する場合は、相手も「続ける」を選ぶ必要があります。どちらかが「やめる」を選ぶと部屋を終了します。');
-    modal.innerHTML=`<div class="w-full max-w-md rounded-2xl border border-emerald-500/60 bg-slate-950 p-5 shadow-2xl space-y-4"><div class="text-center text-2xl font-black text-emerald-300">交換完了！</div><div class="text-center text-sm text-slate-200">相手から${onlineExchangeReceivedCount}枚のカードを受け取り、所持カードに保存しました。</div><div class="text-center text-xs text-slate-400">${message}</div><div class="grid grid-cols-2 gap-3"><button type="button" onclick="chooseCardExchangeContinue(true)" class="py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black" ${locked?'disabled':''}>続ける</button><button type="button" onclick="chooseCardExchangeContinue(false)" class="py-3 rounded-lg bg-rose-700 hover:bg-rose-600 font-black" ${locked?'disabled':''}>やめる</button></div></div>`;
+    const receivedCardsHtml=(onlineExchangeReceivedCards||[]).length?`<div class="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[34vh] overflow-y-auto">${onlineExchangeReceivedCards.map(c=>{const img=String(c.image||c.imageUrl||'');return `<div class="min-w-0 rounded-lg border border-slate-700 bg-slate-900 p-1.5 text-center"><img src="${esc(img)}" alt="${esc(c.name||'受け取ったカード')}" class="mx-auto w-full max-w-[82px] aspect-[3/4] object-cover rounded bg-slate-800" onerror="this.style.visibility='hidden'"><div class="mt-1 text-[10px] font-bold text-slate-100 break-words">${esc(c.name||'名称未設定')}</div><div class="text-[9px] text-slate-400">${c.cardType==='magic'?'マジック':'キャラクター'}</div></div>`;}).join('')}</div>`:(onlineExchangeReceivedCount===0?'<div class="text-center text-xs text-slate-400">今回はカードを受け取っていません（0枚交換）。</div>':'');
+    modal.innerHTML=`<div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-emerald-500/60 bg-slate-950 p-5 shadow-2xl space-y-4"><div class="text-center text-2xl font-black text-emerald-300">交換完了！</div><div class="text-center text-sm text-slate-200">相手から${onlineExchangeReceivedCount}枚のカードを受け取り、所持カードに保存しました。</div>${receivedCardsHtml}<div class="text-center text-xs text-slate-400">${message}</div><div class="grid grid-cols-2 gap-3"><button type="button" onclick="chooseCardExchangeContinue(true)" class="py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black" ${locked?'disabled':''}>続ける</button><button type="button" onclick="chooseCardExchangeContinue(false)" class="py-3 rounded-lg bg-rose-700 hover:bg-rose-600 font-black" ${locked?'disabled':''}>やめる</button></div></div>`;
   }
   window.chooseCardExchangeContinue=function(keepGoing){
     if(onlineExchangeDecisionLocked)return;
@@ -6655,21 +6666,27 @@
     pending.saving=true;
     try{
       allCards=await getAllFromStore('cards');
+      const receivedCards=[];
       for(const source of pending.cards){
         const sourceId=String(source.sourceCardId||source.id||'');
-        if(allCards.some(c=>String(c.exchangeBatchId||'')===pending.exchangeId&&String(c.exchangeSourceCardId||'')===sourceId))continue;
-        const card={...source};delete card.sourceCardId;
-        card.id=generateCardId();
-        if(pending.images.has(sourceId))card.image=pending.images.get(sourceId);
-        else {delete card.image; if(card.imageUrl==null)delete card.imageUrl;}
-        card.exchangeSourceCardId=sourceId;
-        card.exchangeBatchId=pending.exchangeId;
-        card.exchangeSourceName=String(pending.fromName||'相手');
-        card.exchangeReceivedAt=Date.now();
-        await saveToStore('cards',card);
-        allCards.push(card);
+        let card=allCards.find(c=>String(c.exchangeBatchId||'')===pending.exchangeId&&String(c.exchangeSourceCardId||'')===sourceId);
+        if(!card){
+          card={...source};delete card.sourceCardId;
+          card.id=generateCardId();
+          if(pending.images.has(sourceId))card.image=pending.images.get(sourceId);
+          else {delete card.image; if(card.imageUrl==null)delete card.imageUrl;}
+          card.exchangeSourceCardId=sourceId;
+          card.exchangeOriginCardId=String(source.originCardId||source.exchangeOriginCardId||sourceId);
+          card.exchangeBatchId=pending.exchangeId;
+          card.exchangeSourceName=String(pending.fromName||'相手');
+          card.exchangeReceivedAt=Date.now();
+          await saveToStore('cards',card);
+          allCards.push(card);
+        } else if(pending.images.has(sourceId)&&!card.image){card.image=pending.images.get(sourceId);await saveToStore('cards',card);}
+        receivedCards.push(card);
       }
       allCards=await getAllFromStore('cards');
+      onlineExchangeReceivedCards=receivedCards;
       try{refreshAttributeDatalist();renderDeckList();}catch(_){/* current view may be the online lobby */}
       const exchangeId=pending.exchangeId;
       onlineExchangePending=null;
@@ -7121,13 +7138,13 @@ ${reason}`:''}`;
       onlineExchangeDecisionLocked=!!m.myVote;showCardExchangeDecision(onlineExchangeReceivedCount,!m.myVote);return;
     }
     if(m.type==='card_exchange_next_round'){
-      removeCardExchangeDecisionModal();onlineExchangeSelected=[];onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeOpponentSubmitted=false;onlineExchangeFilter='all';onlineExchangeSearch='';setOnlineStatus('次のカード交換を開始できます。');renderOnlineSelection();return;
+      removeCardExchangeDecisionModal();onlineExchangeSelected=[];onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeReceivedCards=[];onlineExchangeOpponentSubmitted=false;onlineExchangeFilter='all';onlineExchangeSearch='';setOnlineStatus('次のカード交換を開始できます。');renderOnlineSelection();return;
     }
     if(m.type==='room_list'){renderRooms(m.rooms||[]);return;}
     if(m.type==='room_joined'){
       onlineCreateInFlight=false; clearTimeout(onlineCreateWatchdog); const btn=$('online-create-room-btn'); if(btn){btn.disabled=false;btn.innerText='部屋を作成';}
       clearTimeout(onlineDeckRequestTimer);onlineDeckRequestTimer=null;
-      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineExchangeSelected=[];onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckOptions=null;onlineDeckRequestId=null;onlineDeckList=Array.isArray(m.myDecks)?m.myDecks:[];onlineRentalDecks=Array.isArray(m.rentalDecks)?m.rentalDecks:[];
+      onlineRoom=m.room;onlineSlot=m.slot;onlineSpectating=false;onlineReady=false;onlineAssetsReady=false;onlineSelection=null;onlinePool=null;onlineExchangeSelected=[];onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeReceivedCards=[];onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckOptions=null;onlineDeckRequestId=null;onlineDeckList=Array.isArray(m.myDecks)?m.myDecks:[];onlineRentalDecks=Array.isArray(m.rentalDecks)?m.rentalDecks:[];
       // 部屋参加時は必ずオンライン画面へ移動し、アプリ本体のIndexedDB読込完了後にデッキUIを描画する。
       switchView('online');renderRoomPanel();renderPlayerList([]);
       $('online-selection-area').innerHTML='<div class="text-xs text-slate-400">オンライン用カード・デッキ情報を読み込んでいます…</div>';
