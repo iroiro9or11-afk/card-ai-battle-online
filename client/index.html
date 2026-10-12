@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.29.1</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.29.2</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -631,7 +631,7 @@
       </div>
 
       <div class="flex justify-end -mt-2 min-h-[1.5rem]" aria-live="polite">
-        <div id="online-battle-timer" title="ドラッグしてタイマー位置を変更" class="hidden px-2 py-1 rounded-md border border-emerald-800/70 bg-slate-950/90 text-[11px] font-black text-emerald-300 cursor-move select-none touch-none">⠿ 🌐 残り <span id="online-battle-timer-value">90</span> 秒</div>
+        <div id="online-battle-timer" class="hidden px-2 py-1 rounded-md border border-emerald-800/70 bg-slate-950/90 text-[11px] font-black text-emerald-300">🌐 残り <span id="online-battle-timer-value">90</span> 秒</div>
       </div>
 
       <!-- 相手の公開マジックカード：戦闘ヘッダー直下、敵キャラカードの上に常時表示 -->
@@ -6065,9 +6065,9 @@
 
   <div id="online-controls" class="hidden fixed top-20 right-3 z-[55] bg-slate-950/95 border border-emerald-500/60 rounded-xl shadow-2xl p-2.5 backdrop-blur min-w-[190px]">
     <div class="font-black text-emerald-300 text-xs">🌐 オンライン対戦</div>
-    <div id="online-timer" class="text-2xl font-black text-amber-300 leading-tight">90</div>
     <div id="online-confirmed-status" class="text-[10px] text-slate-400 mt-1">行動を選択して「行動決定」を押してください。</div>
   </div>
+  <div id="online-timer" title="ドラッグして大きいカウントタイマーの位置を変更" class="hidden fixed top-36 right-3 z-[80] px-3 py-2 rounded-xl border border-emerald-500/60 bg-slate-950/95 shadow-2xl backdrop-blur text-2xl font-black text-amber-300 leading-tight cursor-move select-none touch-none">90</div>
 
 <script>
 (function(){
@@ -6078,7 +6078,7 @@
     while (!window.__cardBattleAppReady && Date.now() < until) await new Promise(r=>setTimeout(r,50));
     return !!window.__cardBattleAppReady;
   };
-  // タイマーはドラッグで任意の位置へ移動可能。位置はこのブラウザに保存する。
+  // 大きいカウントタイマー本体のみをドラッグで移動可能にする。小さい戦闘ヘッダー側や操作パネルは移動させない。
   function makeDraggable(el, storageKey, handle=el) {
     if (!el || !handle || el.dataset.dragBound === '1') return;
     el.dataset.dragBound = '1';
@@ -6112,8 +6112,7 @@
     };
     handle.addEventListener('pointerup',finish); handle.addEventListener('pointercancel',finish);
   }
-  makeDraggable(document.getElementById('online-battle-timer'),'cardBattle.onlineTimerPosition.v3291');
-  makeDraggable(document.getElementById('online-controls'),'cardBattle.onlineControlsPosition.v3291',document.querySelector('#online-controls > div:first-child'));
+  makeDraggable(document.getElementById('online-timer'),'cardBattle.largeOnlineTimerPosition.v3292');
 
   let onlineWS = null;
   let onlineAuthenticated = false;
@@ -6460,7 +6459,7 @@
     onlineRoom=null;onlineSlot=null;onlineReady=false;onlineSpectating=false;onlinePool=null;onlineRentalDecks=[];onlineExchangeSelected=[];onlineExchangeFilter='all';onlineExchangeSearch='';onlineExchangeSubmitted=false;onlineExchangePending=null;onlineExchangeDecisionLocked=false;onlineExchangeReceivedCount=0;onlineExchangeReceivedCards=[];onlineExchangeOpponentSubmitted=false;removeCardExchangeDecisionModal();onlineDeckList=[];onlineDeckOptions=null;onlineSelection=null;onlineDeckRequestId=null;onlineSubmitted=false;onlineLastTurn=0;onlineLastDecisionToken=null;onlinePrepareMarker=null;onlinePrepareAckToken=null;onlineLastState=null;onlineEventQueue=[];onlineEventProcessing=false;onlineDeferredState=null;onlineDeferredEnd=null;onlineRematchRequested=false;
     clearInterval(onlineTimerHandle);onlineDeadline=0;onlineTimerEndMonotonic=0;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;
     $('online-room-panel')?.classList.add('hidden');$('online-lobby')?.classList.remove('hidden');$('online-pool-area')?.classList.add('hidden');
-    onlineMode=false;$('online-controls')?.classList.add('hidden');
+    onlineMode=false;$('online-controls')?.classList.add('hidden');$('online-timer')?.classList.add('hidden');
   }
   function leaveOnlineRoom(){sendOnline('room_leave');resetOnlineRoomLocal();}
   window.leaveOnlineRoom=leaveOnlineRoom;
@@ -6787,6 +6786,7 @@
     const timerVisible=!!(onlineMode&&!isSpectator&&(decision||paused));
     const panel=$('decision-command-panel');if(panel)panel.classList.toggle('hidden',!decision);
     $('online-controls')?.classList.toggle('hidden',!decision);
+    $('online-timer')?.classList.toggle('hidden',!timerVisible);
     $('online-battle-timer')?.classList.toggle('hidden',!timerVisible);
     if(decision){
       renderCommandPanel();renderMagicHand();renderEnemyMagicHand();updateReservationSummary();renderOnlineControls();
@@ -6826,6 +6826,7 @@
         const preparing=st.phase==='preparing';
         $('decision-command-panel')?.classList.toggle('hidden',preparing);
         $('online-controls')?.classList.toggle('hidden',preparing);
+        $('online-timer')?.classList.toggle('hidden',preparing);
         $('online-battle-timer')?.classList.add('hidden');
         if(preparing) showOnlinePreparingTimer(); else renderOnlineControls();
         setOnlineStatus(preparing
@@ -6946,21 +6947,21 @@
   }
   function showOnlinePreparingTimer(){
     clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;
-    $('online-controls')?.classList.add('hidden');$('online-battle-timer')?.classList.add('hidden');$('decision-command-panel')?.classList.add('hidden');
+    $('online-controls')?.classList.add('hidden');$('online-timer')?.classList.add('hidden');$('online-battle-timer')?.classList.add('hidden');$('decision-command-panel')?.classList.add('hidden');
     if($('online-timer'))$('online-timer').innerText='—';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='—';
     if($('online-confirmed-status'))$('online-confirmed-status').innerText='開始時・ターン開始パッシブを処理しています…';
   }
   function showOnlineExecutionTimer(){
     clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;
     // The 90-second timer exists only during an actionable decision phase.
-    $('online-controls')?.classList.add('hidden');$('online-battle-timer')?.classList.add('hidden');$('decision-command-panel')?.classList.add('hidden');
+    $('online-controls')?.classList.add('hidden');$('online-timer')?.classList.add('hidden');$('online-battle-timer')?.classList.add('hidden');$('decision-command-panel')?.classList.add('hidden');
     if($('online-timer'))$('online-timer').innerText='—';
     if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='—';
     if($('online-timer'))$('online-timer').classList.remove('text-rose-400');
     if($('online-battle-timer'))$('online-battle-timer').classList.remove('text-rose-300');
     if($('online-confirmed-status'))$('online-confirmed-status').innerText='行動を実行中です。';
   }
-  function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
+  function showOnlinePausedTimer(){clearInterval(onlineTimerHandle);onlineTimerHandle=null;onlineDeadline=0;onlineTimerEndMonotonic=0;$('online-timer')?.classList.remove('hidden');if($('online-timer'))$('online-timer').innerText='⏸';if($('online-battle-timer-value'))$('online-battle-timer-value').innerText='⏸';if($('online-confirmed-status'))$('online-confirmed-status').innerText='接続待ちのためタイマーを一時停止しています。';}
   function clearOnlinePreparationWatchdog(){if(onlinePrepareWatchdog!==null){clearTimeout(onlinePrepareWatchdog);onlinePrepareWatchdog=null;}}
   function resetOnlineTurn(){onlineSubmitted=false;onlinePending={units:{},magicId:null};onlineSelectedUnitId=null;if(window.battleState){battleState.reservedMagic=null;battleState.reservedMagicTargetInstanceId=null;battleState.reservedMagicSubTargetInstanceId=null;battleState.reservedEnemyMagicTargetInstanceId=null;battleState.reservedEnemyMagicSubTargetInstanceId=null;}renderOnlineControls();}
 
@@ -7072,7 +7073,7 @@ ${reason}`:''}`;
       if(onlineDeferredEnd){
         const end=onlineDeferredEnd;onlineDeferredEnd=null;onlineDeferredState=null;
         safeApplyOnlineState(end.state);
-        $('online-controls')?.classList.add('hidden');
+        $('online-controls')?.classList.add('hidden');$('online-timer')?.classList.add('hidden');
         showOnlineBattleResult(end.winner,end.state,end.reason||null);
       }else if(onlineDeferredState){
         const st=onlineDeferredState;onlineDeferredState=null;
@@ -7312,7 +7313,7 @@ ${reason}`:''}`;
     if(m.type==='player_disconnected'){showOnlinePausedTimer();setOnlineStatus('対戦プレイヤーの接続が切断されました。再接続を待っています。');return;}
     if(m.type==='battle_end'){
       if(onlineEventQueue.length||onlineEventProcessing){onlineDeferredEnd={winner:m.winner,state:m.state,reason:m.reason||null};return;}
-      safeApplyOnlineState(m.state);$('online-controls')?.classList.add('hidden');showOnlineBattleResult(m.winner,m.state,m.reason||null);return;
+      safeApplyOnlineState(m.state);$('online-controls')?.classList.add('hidden');$('online-timer')?.classList.add('hidden');showOnlineBattleResult(m.winner,m.state,m.reason||null);return;
     }
     if(m.type==='rematch_update'){applyOnlineRematchUpdate(m);return;}
     if(m.type==='rematch_starting'){onlineRematchRequested=false;hideBattleResultModal();setOnlineStatus('両者が再戦を希望しました。新しい対戦を準備しています…');return;}
