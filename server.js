@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.29.0';
+const SERVER_VERSION = '3.29.1';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -773,7 +773,7 @@ function triggerPassiveTiming(b, timing, subject=null) {
   try {
     const candidates = [];
     for (const u of allUnits(b)) {
-      if (u.currentHp <= 0 && timing !== 'death') continue;
+      if (u.currentHp <= 0 && timing !== 'death' && timing !== 'hp_decrease') continue;
       if (!u.isActive && timing !== 'death') continue;
       if (timing === 'death') { if (u !== subject) continue; }
       else if (timing === 'ally_death') { if (!subject || u.side !== subject.side || u === subject) continue; }
