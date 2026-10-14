@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
-const SERVER_VERSION = '3.29.3';
+const SERVER_VERSION = '3.29.4';
 const CLIENT = path.join(__dirname, 'client', 'index.html');
 const rooms = new Map();
 const sessions = new Map();
@@ -22,6 +22,8 @@ const MAIN_ATTRIBUTES = Object.freeze(["人間", "亜人", "機械", "モンス�
 
 const ABNORMALITY_DEFS = Object.freeze({
   poison: { name:'毒', kind:'debuff' },
+  burn: { name:'火傷', kind:'debuff' },
+  pressure: { name:'重圧', kind:'debuff' },
   paralysis: { name:'麻痺', kind:'debuff' },
   freeze: { name:'凍結', kind:'debuff' },
   slow: { name:'鈍足', kind:'debuff' },
@@ -687,6 +689,7 @@ function buildUnit(card, side, active) {
     buffs: [],
     debuffs: [],
     statuses: [],
+    shields: [],
     reservedAction: { type: 'attack', targetInstanceId: null }
   };
 }
@@ -722,7 +725,7 @@ function effSpeed(u) {
     .reduce((a, x) => a + Number(x.val || 0), 0);
   return (u.statuses || []).some(x => x.type === 'slow' && durationActive(x.duration)) ? Math.floor(base / 2) : base;
 }
-function damage(u, amount, bypassReceivedDamageModifiers=false) {
+function damage(u, amount, bypassReceivedDamageModifiers=false, bypassShields=false) {
   let finalAmount = Math.max(0, Number(amount) || 0);
   if (!bypassReceivedDamageModifiers) {
     const receivedRatio = [...(u.buffs || []), ...(u.debuffs || [])]
@@ -730,10 +733,24 @@ function damage(u, amount, bypassReceivedDamageModifiers=false) {
       .reduce((sum, x) => sum + (x.type === 'dmg_cut' ? -(Number(x.val)||0) : (Number(x.val)||0)), 0);
     finalAmount *= Math.max(0, 1 + receivedRatio / 100);
   }
-  const d = Math.max(0, Math.round(finalAmount));
-  const before = u.currentHp;
-  u.currentHp = Math.max(0, u.currentHp - d);
-  return { before, after: u.currentHp, damage: d };
+  const incomingDamage = Math.max(0, Math.round(finalAmount));
+  let remainingDamage = incomingDamage, absorbed = 0;
+  if (!bypassShields && remainingDamage > 0) {
+    u.shields = Array.isArray(u.shields) ? u.shields : [];
+    // 古いシールドから順に消費し、割れた層だけを取り除く。
+    for (const shield of u.shields) {
+      if (remainingDamage <= 0) break;
+      const available = Math.max(0, Number(shield.remaining ?? shield.amount) || 0);
+      const used = Math.min(available, remainingDamage);
+      shield.remaining = available - used;
+      remainingDamage -= used;
+      absorbed += used;
+    }
+    u.shields = u.shields.filter(shield => Number(shield.remaining ?? shield.amount) > 0 && durationActive(shield.duration));
+  }
+  const before = Math.max(0, Number(u.currentHp) || 0);
+  u.currentHp = Math.max(0, before - remainingDamage);
+  return { before, after: u.currentHp, damage: before - u.currentHp, absorbed, incomingDamage };
 }
 function addStatus(t, s, isBuff) {
   const arr = isBuff ? (t.buffs || (t.buffs = [])) : (t.debuffs || (t.debuffs = []));
@@ -773,17 +790,17 @@ function pushPassiveEvent(b, u, sk, result, target=null, targetDetails=[]) {
   b.pendingEvents = b.pendingEvents || [];
   b.pendingEvents.push(ev);
 }
-function triggerPassiveTiming(b, timing, subject=null) {
+function triggerPassiveTiming(b, timing, subject=null, attacker=null) {
   b._passiveTriggerDepth = Number(b._passiveTriggerDepth||0) + 1;
   if (b._passiveTriggerDepth > 10) { b._passiveTriggerDepth--; return; }
   try {
     const candidates = [];
     for (const u of allUnits(b)) {
-      if (u.currentHp <= 0 && timing !== 'death' && timing !== 'hp_decrease') continue;
+      if (u.currentHp <= 0 && timing !== 'death' && timing !== 'hp_decrease' && timing !== 'damage_taken') continue;
       if (!u.isActive && timing !== 'death') continue;
       if (timing === 'death') { if (u !== subject) continue; }
       else if (timing === 'ally_death') { if (!subject || u.side !== subject.side || u === subject) continue; }
-      else if (timing === 'hp_increase' || timing === 'hp_decrease') { if (u !== subject) continue; }
+      else if (timing === 'hp_increase' || timing === 'hp_decrease' || timing === 'damage_taken') { if (u !== subject) continue; }
       candidates.push(u);
     }
     for (const u of candidates) {
@@ -791,7 +808,9 @@ function triggerPassiveTiming(b, timing, subject=null) {
         if (sk.type !== 'passive' || sk.timing !== timing || !evalCond(b, sk.selfCond, u)) continue;
         b._statusApplicationTiming = timing;
         const before = u.currentHp;
-        const ts = targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
+        const ts = sk.targetType === 'attacker'
+          ? (timing === 'damage_taken' && attacker?.instanceId ? [attacker] : [])
+          : targets(b,u,sk.targetType,sk.targetCond,sk.targetInstanceId);
         const touched=[]; const targetBefore=new Map();
         const trackTarget=t=>{if(!t||t.__playerTarget||t.instanceId==null)return;if(!targetBefore.has(t.instanceId))targetBefore.set(t.instanceId,hpSnapshot(t));if(!touched.some(x=>String(x.instanceId)===String(t.instanceId)))touched.push(t);};
         const lines=[];
@@ -802,7 +821,9 @@ function triggerPassiveTiming(b, timing, subject=null) {
           const subType = sk.subEffect.targetType || sk.targetType;
           const subTargets = subType === 'same_main_target'
             ? ts.filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'}))
-            : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
+            : subType === 'attacker'
+              ? (timing === 'damage_taken' && attacker?.instanceId ? [attacker].filter(t => matchesTarget(t, sk.subEffect.targetCond || {type:'none'})) : [])
+              : targets(b,u,subType,sk.subEffect.targetCond||{type:'none'},sk.subEffect.targetInstanceId);
           for (const t of subTargets) { trackTarget(t); const r=applyEffect(b,sk.subEffect,t,u,false); if(r) lines.push(r); }
         }
         b._statusApplicationTiming = null;
@@ -837,6 +858,8 @@ function matchesTarget(t, c) {
   if (c.type === 'hp_ratio_lte') return t.maxHp > 0 && t.currentHp / t.maxHp * 100 <= Number(c.val);
   if (c.type === 'attr_is') return t.mainAttr === c.attr || (t.subAttrs || []).includes(c.attr);
   if (c.type === 'attr_not') return !(t.mainAttr === c.attr || (t.subAttrs || []).includes(c.attr));
+  if (c.type === 'status_is') return hasStatus(t, c.status);
+  if (c.type === 'any_status') return hasAnyStatus(t);
   return false;
 }
 function evalCond(b, cond, actor) {
@@ -895,7 +918,7 @@ function resolveSingleTarget(b, actor, type, pool, selectedTarget=null) {
   return [randomItem(eligible)];
 }
 function targets(b, actor, type, cond, selected, isMagic=false) {
-  if (type === 'same_main_target') return [];
+  if (type === 'same_main_target' || type === 'attacker') return [];
   if (type === 'player_self') return [{ __playerTarget: 'self', side:actor.side, name: actor.side === 'player1' ? b.p1.name : b.p2.name }];
   if (type === 'player_opp') return [{ __playerTarget: 'opp', side:actor.side === 'player1' ? 'player2' : 'player1', name: actor.side === 'player1' ? b.p2.name : b.p1.name }];
   if (type === 'self') return [actor];
@@ -925,15 +948,20 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   if (eff.type === 'dmg_atk_ratio') {
     if (isMagic) return null;
     const r = damage(target, Math.round(eff.val / 100 * effAtk(actor)));
+    if (r.incomingDamage > 0) triggerPassiveTiming(b,'damage_taken',target,actor);
     if (r.damage > 0) triggerPassiveTiming(b,'hp_decrease',target);
     if (target.currentHp <= 0 && r.before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
-    return `${target.name}に${r.damage}ダメージ`;
+    const shieldText = r.absorbed > 0 ? `（シールドが${r.absorbed}吸収）` : '';
+    return `${target.name}に${r.damage}ダメージ${shieldText}`;
   }
   if (eff.type === 'dmg_fixed' || eff.type === 'dmg_fixed_pierce') {
-    const r = damage(target, Number(eff.val) || 0, eff.type === 'dmg_fixed_pierce');
+    const piercing = eff.type === 'dmg_fixed_pierce';
+    const r = damage(target, Number(eff.val) || 0, piercing, piercing);
+    if (r.incomingDamage > 0) triggerPassiveTiming(b,'damage_taken',target,actor);
     if (r.damage > 0) triggerPassiveTiming(b,'hp_decrease',target);
     if (target.currentHp <= 0 && r.before > 0) { triggerPassiveTiming(b,'death',target); triggerPassiveTiming(b,'ally_death',target); }
-    return `${target.name}に${r.damage}${eff.type === 'dmg_fixed_pierce' ? 'の固定貫通ダメージ' : 'ダメージ'}`;
+    const shieldText = r.absorbed > 0 ? `（シールドが${r.absorbed}吸収）` : '';
+    return `${target.name}に${r.damage}${piercing ? 'の固定貫通ダメージ' : 'ダメージ'}${shieldText}`;
   }
   if (eff.type === 'heal_fixed' || eff.type === 'heal_max_hp_ratio') {
     if ((target.debuffs || []).some(x => x.type === 'heal_block' && durationActive(x.duration))) return '回復禁止中';
@@ -942,6 +970,13 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
     target.currentHp = Math.min(target.maxHp, target.currentHp + v);
     if (target.currentHp > before) triggerPassiveTiming(b,'hp_increase',target);
     return `${target.name}のHP +${target.currentHp - before}`;
+  }
+  if (eff.type === 'shield') {
+    const amount = Math.max(0, Math.round(Number(eff.val) || 0));
+    if (amount <= 0) return `${target.name}にシールドを付与できない（値が0）`;
+    target.shields = Array.isArray(target.shields) ? target.shields : [];
+    target.shields.push({ amount, remaining:amount, duration, appliedTurn, source:actor?.name || 'effect' });
+    return `${target.name}にシールド${amount}を付与（${durationText(duration)}）`;
   }
   if (eff.type === 'damage_taken_ratio' || eff.type === 'damage_cut_ratio') {
     // 新仕様: 正数=被ダメージ増加(デバフ)、負数=被ダメージ減少(バフ)。
@@ -1003,7 +1038,7 @@ function applyEffect(b, eff, target, actor, isMagic=false) {
   return null;
 }
 function passiveOne(b, timing, u) {
-  if (!u || (u.currentHp <= 0 && timing !== 'hp_decrease') || !u.isActive) return;
+  if (!u || (u.currentHp <= 0 && timing !== 'hp_decrease' && timing !== 'damage_taken') || !u.isActive) return;
   for (const sk of u.skills || []) {
     if (sk.type !== 'passive' || sk.timing !== timing || !evalCond(b, sk.selfCond, u)) continue;
     b._statusApplicationTiming = timing;
@@ -1039,6 +1074,7 @@ function tickStatuses(b) {
     u.buffs = tick(u.buffs);
     u.debuffs = tick(u.debuffs);
     u.statuses = tick(u.statuses);
+    u.shields = tick(u.shields);
     const before = u.currentHp;
     refreshEffectiveMaxHp(u, false);
     if (u.currentHp < before) triggerPassiveTiming(b,'hp_decrease',u);
@@ -1053,11 +1089,19 @@ function processEndTurnAbnormalities(r) {
   for (const u of allUnits(b)) {
     if (u.currentHp <= 0 || !u.isActive) continue;
     if (hasStatus(u,'poison')) {
-      const before=u.currentHp; const rmg=damage(u,Math.round(u.maxHp*0.10));
-      const ev={type:'STATUS_DAMAGE',actor:pubUnit(u,false),target:pubUnit(u,false),actionName:'毒',effect:'最大HPの10%ダメージ',result:`毒により${rmg.damage}ダメージ${u.currentHp<=0?'／撃破！':''}`,description:'毒：ターン終了間際に最大HPの10%のダメージ。',targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp}};
+      const before=u.currentHp; const rmg=damage(u,Math.round(u.maxHp*0.10),true,true);
+      const ev={type:'STATUS_DAMAGE',actor:pubUnit(u,false),target:pubUnit(u,false),actionName:'毒',effect:'最大HPの10%ダメージ（シールド貫通）',result:`毒により${rmg.damage}ダメージ${u.currentHp<=0?'／撃破！':''}`,description:'毒：ターン終了間際に最大HPの10%のダメージ。シールドを貫通する。',targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp}};
       b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev});
       if(rmg.damage>0) triggerPassiveTiming(b,'hp_decrease',u);
       if(u.currentHp<=0 && before>0){ triggerPassiveTiming(b,'death',u); triggerPassiveTiming(b,'ally_death',u); flushPendingEvents(r); }
+    }
+    if (u.currentHp > 0 && hasStatus(u,'burn')) {
+      const before=u.currentHp;
+      const amount=Math.min(Math.max(0,before-1), Math.max(1,Math.round(before*0.12)));
+      const rmg=damage(u,amount,true,true);
+      const ev={type:'STATUS_DAMAGE',actor:pubUnit(u,false),target:pubUnit(u,false),actionName:'火傷',effect:'現在HPの12%ダメージ（シールド貫通・HP1で踏みとどまる）',result:`火傷により${rmg.damage}ダメージ${u.currentHp<=1?'（HP1で踏みとどまった）':''}`,description:'火傷：ターン終了間際に現在HPの12%のダメージ。シールドを貫通し、火傷ではHPが1未満にならない。',targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp}};
+      b.events.push(ev); broadcastBattle(r,'battle_event',{event:ev});
+      if(rmg.damage>0) triggerPassiveTiming(b,'hp_decrease',u);
     }
   }
 }
@@ -1085,7 +1129,7 @@ function pubUnit(u, includeImage=false) {
     instanceId:String(u.instanceId), cardId:String(u.cardId), name:String(u.name || ''), mainAttr:u.mainAttr || '', subAttrs:Array.isArray(u.subAttrs)?clone(u.subAttrs):[],
     baseMaxHp:Math.max(0, finiteNumber(u.baseMaxHp ?? u.maxHp,0)), maxHp:hp.max, currentHp:hp.current, atk:finiteNumber(u.atk,0), priority:finiteNumber(u.priority,0), rank:u.rank != null && Number.isFinite(Number(u.rank)) ? Number(u.rank) : null,
     effectiveAtk:finiteNumber(effAtk(u),0), effectiveSpeed:finiteNumber(effSpeed(u),0), side:u.side, isActive:!!u.isActive,
-    buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []),
+    buffs:clone(u.buffs || []), debuffs:clone(u.debuffs || []), statuses:clone(u.statuses || []), shields:clone(u.shields || []),
     skills:clone(u.skills || [])
   };
   if (includeImage) out.image = typeof u.image === 'string' ? u.image : null;
@@ -1363,7 +1407,7 @@ function chooseAutoForSide(b, side) {
     const usable=[];
     if (!blocked) {
       for (let i=0; i<(u.skills || []).length; i++) {
-        const sk=u.skills[i], cost=Math.max(0,Number(sk.cost)||0);
+        const sk=u.skills[i], cost=Math.max(0,Number(sk.cost)||0) + (hasStatus(u,'pressure') ? 5 : 0);
         if (sk.type!=='active' || cost>remaining || !evalCond(b,sk.selfCond,u)) continue;
         const main = manual(sk.targetType) ? candidatesFor(u,sk.targetType,sk.targetCond) : [];
         if (manual(sk.targetType) && !main.length) continue;
@@ -1449,7 +1493,7 @@ function validateActionSet(b, side, actions) {
     const sk = u.skills?.[Number(a.skillIndex)];
     if (!sk || sk.type !== 'active') throw new Error('存在しないスキルが指定されています。');
     const skillBlockedNow = (u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration));
-    const cost = Math.max(0, Number(sk.cost || 0));
+    const cost = Math.max(0, Number(sk.cost || 0)) + (hasStatus(u,'pressure') ? 5 : 0);
     const pool = targetPool(b, u, sk.targetType).filter(t => matchesTarget(t, sk.targetCond));
     const skillConditionMetNow = evalCond(b, sk.selfCond, u);
     const canExecuteSkillNow = skillConditionMetNow && !skillBlockedNow;
@@ -1548,8 +1592,9 @@ function executeAction(b, side, u, action) {
     }
     const hp = hpSnapshot(t);
     const r = damage(t, finiteNumber(effAtk(u),0));
-    // 通常攻撃もダメージ適用直後にHP減少時パッシブを発動する。
+    // ダメージを受けた時のパッシブ→HP減少→死亡の順に反応する。
     const actionAfter=hpSnapshot(t);
+    if (r.incomingDamage > 0) triggerPassiveTiming(b,'damage_taken',t,u);
     if (r.damage > 0) triggerPassiveTiming(b,'hp_decrease',t);
     if (hp.current > 0 && t.currentHp <= 0) { triggerPassiveTiming(b,'death',t); triggerPassiveTiming(b,'ally_death',t); }
     return {
@@ -1565,8 +1610,9 @@ function executeAction(b, side, u, action) {
   if (!sk) return null;
   if (!evalCond(b, sk.selfCond, u)) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'発動条件未達',result:'不発（AP消費なし）',description:sk.desc || sk.description || ''};
   if ((u.debuffs || []).some(x => x.type === 'skill_block' && durationActive(x.duration))) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'スキル使用禁止',result:'不発',description:sk.desc || ''};
-  const cost = Number(sk.cost || 0);
-  if (resource.ap < cost) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'AP不足',result:'不発',description:sk.desc || ''};
+  const baseCost = Math.max(0, Number(sk.cost || 0));
+  const cost = baseCost + (hasStatus(u,'pressure') ? 5 : 0);
+  if (resource.ap < cost) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:`AP不足（必要AP ${cost}）`,result:'不発（AP消費なし）',description:sk.desc || ''};
   const main = targets(b,u,sk.targetType,sk.targetCond,action.targetInstanceId,false);
   if (!main.length && !['self','player_self','player_opp'].includes(sk.targetType)) return {type:'SKILL_USE',actor:pubUnit(u,false),actionName:sk.name,effect:'有効な対象なし',result:'不発（AP消費なし）',description:sk.desc || sk.description || ''};
   resource.ap -= cost;
