@@ -168,7 +168,7 @@
   <header class="bg-slate-900 border-b border-slate-800 p-3 sticky top-0 z-40 shadow-md">
     <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
       <h1 class="text-lg font-black text-amber-400 flex items-center gap-2 tracking-wider">
-        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.29.3</span>
+        <span>⚔️</span> AI Card Battle <span class="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-bold">ONLINE v3.29.4</span>
       </h1>
       <nav class="flex flex-wrap gap-2">
         <button onclick="switchView('battle-setup')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition">対戦準備</button>
@@ -915,6 +915,8 @@
 
     const STATUS_DEFS = {
       poison: { name: '毒', kind: 'debuff' },
+      burn: { name: '火傷', kind: 'debuff' },
+      pressure: { name: '重圧', kind: 'debuff' },
       paralysis: { name: '麻痺', kind: 'debuff' },
       freeze: { name: '凍結', kind: 'debuff' },
       slow: { name: '鈍足', kind: 'debuff' },
@@ -1097,14 +1099,15 @@
           death: "死亡時",
           ally_death: "味方死亡時",
           hp_increase: "HP増加時",
-          hp_decrease: "HP減少時"
+          hp_decrease: "HP減少時",
+          damage_taken: "ダメージを受けたとき"
         }[skill.timing] || "パッシブ発動時";
         parts.push(`【パッシブ：${timingText}】`);
       }
 
       if (skill.selfCond && skill.selfCond.type !== "none") {
         const condTxt = getCondText(skill.selfCond, "self");
-        if (condTxt.endsWith("場合")) parts.push(condTxt + "、");
+        if (condTxt.endsWith("場合") || /(のとき|以内|以降)$/.test(condTxt)) parts.push(condTxt + "、");
         else parts.push(condTxt + "のとき、");
       }
 
@@ -1138,7 +1141,7 @@
         case "all_enemy_attr": return `敵全員が[${cond.attr || '炎'}]属性`;
         case "turn_lte": return `${cond.val}ターン目以内`;
         case "turn_gte": return `${cond.val}ターン目以降`;
-        case "self_status": return `自分が[${statusName(cond.status)}]のとき`;
+        case "self_status": return `自分が${statusName(cond.status)}状態のとき`;
         case "self_any_status": return `自分が状態異常のとき`;
         case "ally_has_status": return `[${statusName(cond.status)}]の味方がいる場合`;
         case "ally_has_any_status": return `状態異常の味方がいる場合`;
@@ -1157,6 +1160,8 @@
         else if (targetCond.type === "attr_not") condStr = `[${targetCond.attr}]属性以外の`;
         else if (targetCond.type === "hp_ratio_gte") condStr = `HP${targetCond.val}%以上の`;
         else if (targetCond.type === "hp_ratio_lte") condStr = `HP${targetCond.val}%以下の`;
+        else if (targetCond.type === "status_is") condStr = `${statusName(targetCond.status)}状態の`;
+        else if (targetCond.type === "any_status") condStr = `状態異常の`;
       }
       switch(targetType) {
         case "self": return "自分自身";
@@ -1170,6 +1175,7 @@
         case "all_field": return condStr + "敵味方全体";
         case "player_self": return "自分(プレイヤー)";
         case "player_opp": return "相手(プレイヤー)";
+        case "attacker": return "攻撃相手";
         default: return condStr + "対象";
       }
     }
@@ -1180,7 +1186,8 @@
       
       switch(eff.type) {
         case "dmg_fixed": return `${eff.val}の固定ダメージ`;
-        case "dmg_fixed_pierce": return `${eff.val}の固定貫通ダメージ(受けるダメージ増減を無視)`;
+        case "dmg_fixed_pierce": return `${eff.val}の固定貫通ダメージ(受けるダメージ増減・シールドを無視)`;
+        case "shield": return `${eff.val}のシールドを付与${durText}`;
         case "dmg_atk_ratio": return `攻撃力×${eff.val}%のダメージ`;
         case "heal_fixed": return `${eff.val}回復`;
         case "heal_max_hp_ratio": return `最大HPの${eff.val}%回復`;
@@ -1751,6 +1758,7 @@
               <option value="ally_death">味方死亡時</option>
               <option value="hp_increase">HP増加時</option>
               <option value="hp_decrease">HP減少時</option>
+              <option value="damage_taken">ダメージを受けたとき</option>
             </select>
           </div>
           ` : ''}
@@ -1779,7 +1787,7 @@
               </select>
               <input type="number" class="${prefix}-self-cond-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="50" placeholder="数値/％/ターン" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
               <input type="text" list="registered-attributes-list" class="${prefix}-self-cond-attr bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="炎" placeholder="属性" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-              <select class="${prefix}-self-cond-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})"><option value="poison">毒</option><option value="paralysis">麻痺</option><option value="freeze">凍結</option><option value="slow">鈍足</option></select>
+              <select class="${prefix}-self-cond-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
             </div>
           </div>
 
@@ -1800,6 +1808,7 @@
                   <option value="all_field">敵味方全体</option>
                   <option value="player_self">自分(プレイヤー)</option>
                   <option value="player_opp">相手(プレイヤー)</option>
+                  <option value="attacker">攻撃相手（被ダメージ時パッシブ専用）</option>
                 </select>
               </div>
               <div>
@@ -1810,12 +1819,15 @@
                   <option value="hp_ratio_lte">対象のHPが○％以下</option>
                   <option value="attr_is">対象が◯属性</option>
                   <option value="attr_not">対象が◯属性以外</option>
+                  <option value="status_is">対象が(状態異常)</option>
+                  <option value="any_status">対象が状態異常</option>
                 </select>
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-1">
+            <div class="grid grid-cols-3 gap-1">
               <input type="number" class="${prefix}-target-cond-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="50" placeholder="HP%" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
               <input type="text" list="registered-attributes-list" class="${prefix}-target-cond-attr bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="炎" placeholder="属性名" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+              <select class="${prefix}-target-cond-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
             </div>
           </div>
 
@@ -1825,7 +1837,8 @@
               <select class="${prefix}-main-eff-type bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                 <option value="dmg_atk_ratio">攻撃力×○％ダメージ</option>
                 <option value="dmg_fixed">○の固定ダメージ</option>
-                    <option value="dmg_fixed_pierce">○の固定貫通ダメージ（受けるダメージ増減を無視）</option>
+                <option value="dmg_fixed_pierce">○の固定貫通ダメージ（受けるダメージ増減・シールドを無視）</option>
+                <option value="shield">○のシールドを付与</option>
                 <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                 <option value="heal_fixed">○回復</option>
                 <option value="mod_atk_ratio">攻撃力を○％増加/減少(バフ/デバフ)</option>
@@ -1872,6 +1885,8 @@
                     <option value="all_enemy">敵全体</option>
                     <option value="all_ally">味方全体</option>
                     <option value="player_self">自分(プレイヤー)</option>
+                    <option value="player_opp">相手(プレイヤー)</option>
+                    <option value="attacker">攻撃相手（被ダメージ時パッシブ専用）</option>
                   </select>
                 </div>
                 <div>
@@ -1879,7 +1894,8 @@
                   <select class="${prefix}-sub-eff-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                     <option value="dmg_atk_ratio">攻撃力×○％ダメージ</option>
                     <option value="dmg_fixed">○の固定ダメージ</option>
-                    <option value="dmg_fixed_pierce">○の固定貫通ダメージ（受けるダメージ増減を無視）</option>
+                    <option value="dmg_fixed_pierce">○の固定貫通ダメージ（受けるダメージ増減・シールドを無視）</option>
+                    <option value="shield">○のシールドを付与</option>
                     <option value="heal_max_hp_ratio">最大HPの○％回復</option>
                     <option value="heal_fixed">○回復</option>
                     <option value="mod_atk_ratio">攻撃力を○％増加/減少</option>
@@ -1902,12 +1918,13 @@
                 <div>
                   <span class="text-[8px] text-slate-400">追加効果の対象条件:</span>
                   <select class="${prefix}-sub-target-cond-type bg-slate-800 text-[10px] rounded w-full" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
-                    <option value="none">条件なし</option><option value="hp_ratio_gte">対象のHPが○％以上</option><option value="hp_ratio_lte">対象のHPが○％以下</option><option value="attr_is">対象が◯属性</option><option value="attr_not">対象が◯属性以外</option>
+                    <option value="none">条件なし</option><option value="hp_ratio_gte">対象のHPが○％以上</option><option value="hp_ratio_lte">対象のHPが○％以下</option><option value="attr_is">対象が◯属性</option><option value="attr_not">対象が◯属性以外</option><option value="status_is">対象が(状態異常)</option><option value="any_status">対象が状態異常</option>
                   </select>
                 </div>
-                <div class="grid grid-cols-2 gap-1">
+                <div class="grid grid-cols-3 gap-1">
                   <input type="number" class="${prefix}-sub-target-cond-val bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="50" placeholder="HP%" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
                   <input type="text" list="registered-attributes-list" class="${prefix}-sub-target-cond-attr bg-slate-950 border border-slate-700 rounded px-1 text-[10px]" value="炎" placeholder="属性名" oninput="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">
+                  <select class="${prefix}-sub-target-cond-status bg-slate-800 text-[10px] rounded" onchange="updateSkillFormDisplay('${prefix}', '${skillType}', ${isMagic})">${statusOptions()}</select>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-1">
@@ -1959,7 +1976,8 @@
       const targetCond = {
         type: getVal(`${prefix}-target-cond-type`) || "none",
         val: parseInt(getVal(`${prefix}-target-cond-val`)) || 0,
-        attr: getVal(`${prefix}-target-cond-attr`) || "炎"
+        attr: getVal(`${prefix}-target-cond-attr`) || "炎",
+        status: getVal(`${prefix}-target-cond-status`) || "poison"
       };
 
       const mainEffect = {
@@ -1973,7 +1991,7 @@
       const hasSubEffect = !!isChecked(`${prefix}-has-sub`);
       const subEffect = {
         targetType: getVal(`${prefix}-sub-target-type`) || "same_main_target",
-        targetCond: { type:getVal(`${prefix}-sub-target-cond-type`)||"none", val:parseInt(getVal(`${prefix}-sub-target-cond-val`))||0, attr:getVal(`${prefix}-sub-target-cond-attr`)||"炎" },
+        targetCond: { type:getVal(`${prefix}-sub-target-cond-type`)||"none", val:parseInt(getVal(`${prefix}-sub-target-cond-val`))||0, attr:getVal(`${prefix}-sub-target-cond-attr`)||"炎", status:getVal(`${prefix}-sub-target-cond-status`)||"poison" },
         type: getVal(`${prefix}-sub-eff-type`) || "heal_fixed",
         val: parseInt(getVal(`${prefix}-sub-eff-val`)) || 0,
         duration: getVal(`${prefix}-sub-eff-duration-mode`) === "permanent" ? -1 : (parseInt(getVal(`${prefix}-sub-eff-dur`)) || 1),
@@ -1990,6 +2008,14 @@
     }
 
     function updateSkillFormDisplay(prefix, skillType, isMagic = false) {
+      const timingValue = document.querySelector(`.${prefix}-timing`)?.value || 'turn_start';
+      const attackerAllowed = skillType === 'passive' && timingValue === 'damage_taken' && !isMagic;
+      for (const suffix of ['target-type','sub-target-type']) {
+        const select = document.querySelector(`.${prefix}-${suffix}`);
+        const option = select?.querySelector('option[value="attacker"]');
+        if (option) option.disabled = !attackerAllowed;
+        if (!attackerAllowed && select?.value === 'attacker') select.value = suffix === 'sub-target-type' ? 'same_main_target' : (isMagic ? 'select_enemy_1' : 'self');
+      }
       const hasSub = document.querySelector(`.${prefix}-has-sub`)?.checked;
       const subPanel = document.querySelector(`.${prefix}-sub-panel`);
       if (subPanel) subPanel.classList.toggle("hidden", !hasSub);
@@ -2517,10 +2543,10 @@
     function populateSkillEditor(prefix, skill, type, isMagic=false) {
       setEditorField(prefix,'name',skill.name); setEditorField(prefix,'cost',skill.cost||0); setEditorField(prefix,'timing',skill.timing||'turn_start');
       setEditorField(prefix,'self-cond-type',skill.selfCond?.type||'none'); setEditorField(prefix,'self-cond-val',skill.selfCond?.val||0); setEditorField(prefix,'self-cond-attr',skill.selfCond?.attr||'炎'); setEditorField(prefix,'self-cond-status',skill.selfCond?.status||'poison');
-      setEditorField(prefix,'target-type',skill.targetType||'self'); setEditorField(prefix,'target-cond-type',skill.targetCond?.type||'none'); setEditorField(prefix,'target-cond-val',skill.targetCond?.val||0); setEditorField(prefix,'target-cond-attr',skill.targetCond?.attr||'炎');
+      setEditorField(prefix,'target-type',skill.targetType||'self'); setEditorField(prefix,'target-cond-type',skill.targetCond?.type||'none'); setEditorField(prefix,'target-cond-val',skill.targetCond?.val||0); setEditorField(prefix,'target-cond-attr',skill.targetCond?.attr||'炎'); setEditorField(prefix,'target-cond-status',skill.targetCond?.status||'poison');
       const mainPermanent = Number(skill.mainEffect?.duration) === -1;
       setEditorField(prefix,'main-eff-type',skill.mainEffect?.type||'dmg_atk_ratio'); setEditorField(prefix,'main-eff-val',skill.mainEffect?.val||0); setEditorField(prefix,'main-eff-dur',mainPermanent?2:(skill.mainEffect?.duration||1)); setEditorField(prefix,'main-eff-duration-mode',mainPermanent?'permanent':'turns'); setEditorField(prefix,'main-eff-status',skill.mainEffect?.status||'poison');
-      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'same_main_target'); setEditorField(prefix,'sub-target-cond-type',skill.subEffect?.targetCond?.type||'none'); setEditorField(prefix,'sub-target-cond-val',skill.subEffect?.targetCond?.val||0); setEditorField(prefix,'sub-target-cond-attr',skill.subEffect?.targetCond?.attr||'炎'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); const subPermanent=Number(skill.subEffect?.duration)===-1; setEditorField(prefix,'sub-eff-dur',subPermanent?2:(skill.subEffect?.duration||1)); setEditorField(prefix,'sub-eff-duration-mode',subPermanent?'permanent':'turns'); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
+      setEditorChecked(prefix,'has-sub',skill.hasSubEffect); setEditorField(prefix,'sub-target-type',skill.subEffect?.targetType||'same_main_target'); setEditorField(prefix,'sub-target-cond-type',skill.subEffect?.targetCond?.type||'none'); setEditorField(prefix,'sub-target-cond-val',skill.subEffect?.targetCond?.val||0); setEditorField(prefix,'sub-target-cond-attr',skill.subEffect?.targetCond?.attr||'炎'); setEditorField(prefix,'sub-target-cond-status',skill.subEffect?.targetCond?.status||'poison'); setEditorField(prefix,'sub-eff-type',skill.subEffect?.type||'heal_fixed'); setEditorField(prefix,'sub-eff-val',skill.subEffect?.val||0); const subPermanent=Number(skill.subEffect?.duration)===-1; setEditorField(prefix,'sub-eff-dur',subPermanent?2:(skill.subEffect?.duration||1)); setEditorField(prefix,'sub-eff-duration-mode',subPermanent?'permanent':'turns'); setEditorField(prefix,'sub-eff-status',skill.subEffect?.status||'poison');
       toggleDurationMode(prefix,'main-eff',type,isMagic); toggleDurationMode(prefix,'sub-eff',type,isMagic); updateSkillFormDisplay(prefix,type,isMagic);
     }
     function openCardEditor(cardId) {
@@ -2562,9 +2588,9 @@
       document.getElementById("detail-atk").innerText = getEffectiveAtk(unit);
       document.getElementById("detail-prio").innerText = getEffectiveSpeed(unit);
       const statusLine = (arr, title, cls) => arr.length ? `<div class="mb-3"><div class="font-black ${cls} mb-1">${title}</div><div class="space-y-1">${arr.map(x=>`<div class="bg-slate-900 border border-slate-800 rounded px-2 py-1.5"><b>${x.type==='status'?statusName(x.status):x.type}</b>：${x.type==='status' ? '' : (x.val !== undefined ? (x.val>=0?'+':'')+x.val : '')}${durationActive(x.duration) ? ` ／ 残り${durationText(x.duration)}` : ''}</div>`).join('')}</div></div>` : `<div class="text-slate-500">${title}なし</div>`;
-      const buffs = unit.buffs || [], debuffs = unit.debuffs || [];
+      const buffs = unit.buffs || [], debuffs = unit.debuffs || [], shields = unit.shields || [];
       const detailSkills = Array.isArray(unit.skills) && unit.skills.length ? unit.skills : (base.skills || []);
-      const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}${statusLine((unit.statuses||[]).map(x=>({...x,val:statusName(x.type)})),'🟣 状態異常','text-purple-300')}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(detailSkills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
+      const html = `<div class="mb-3"><b class="text-amber-300 text-base">戦闘中ステータス</b><div class="grid grid-cols-2 gap-2 mt-2"><div>現在HP: <b>${unit.currentHp}/${unit.maxHp}</b></div><div>現在行動値: <b class="text-sky-300">${getEffectiveSpeed(unit)}</b></div></div></div>${statusLine(buffs,'🟢 バフ','text-emerald-300')}${statusLine(debuffs,'🔴 デバフ','text-rose-300')}${statusLine((unit.statuses||[]).map(x=>({...x,val:statusName(x.type)})),'🟣 状態異常','text-purple-300')}${shields.length ? `<div class="mb-3"><div class="font-black text-cyan-300 mb-1">🛡 シールド</div><div class="space-y-1">${shields.map((x,i)=>`<div class="bg-slate-900 border border-cyan-900 rounded px-2 py-1.5">${i+1}層目：残り${Number(x.remaining ?? x.amount) || 0} / ${Number(x.amount)||0}（${durationActive(x.duration)?`残り${durationText(x.duration)}`:'期限切れ'}）</div>`).join('')}</div></div>` : '<div class="text-slate-500">シールドなし</div>'}<div class="pt-3 border-t border-slate-800"><b class="text-amber-300">スキル一覧</b>${(detailSkills||[]).map(s=>`<div class="bg-slate-900 p-3 rounded border border-slate-800 text-sm mt-2"><div class="font-black text-amber-200">[${s.type?.toUpperCase()||'SKILL'}] ${s.name} <span class="text-xs text-slate-400">AP:${s.cost||0}</span></div><div class="skill-detail-desc mt-1 text-slate-200">${s.desc||''}</div></div>`).join('')}</div>`;
       document.getElementById("detail-card-body").innerHTML = html;
       document.getElementById("btn-edit-card").classList.add('hidden');
       document.getElementById("btn-delete-card").classList.add('hidden');
@@ -4174,6 +4200,8 @@
       if (targetCond.type === 'attr_not') {
         return !(target.mainAttr === targetCond.attr || (target.subAttrs || []).includes(targetCond.attr));
       }
+      if (targetCond.type === 'status_is') return unitHasStatus(target, targetCond.status);
+      if (targetCond.type === 'any_status') return (target.statuses || []).some(x => durationActive(x.duration));
       return false;
     }
 
@@ -4263,7 +4291,7 @@
       for (const u of (battleState.playerUnits || [])) {
         if (!u || u.currentHp <= 0 || !u.reservedAction || u.reservedAction.type !== 'skill') continue;
         const sk = u.skills?.[u.reservedAction.skillIndex];
-        if (sk) totalCost += Math.max(0, Number(sk.cost) || 0);
+        if (sk) totalCost += Math.max(0, Number(sk.cost) || 0) + (unitHasStatus(u,'pressure') ? 5 : 0);
       }
       if (battleState.reservedMagic?.effect) {
         totalCost += Math.max(0, Number(battleState.reservedMagic.effect.cost) || 0);
@@ -4359,6 +4387,7 @@
         buffs: (unit.buffs || []).map(x => ({ ...x })),
         debuffs: (unit.debuffs || []).map(x => ({ ...x })),
         statuses: (unit.statuses || []).map(x => ({ ...x })),
+        shields: (unit.shields || []).map(x => ({ ...x })),
         side: unit.side,
         isActive: !!unit.isActive
       };
@@ -4449,6 +4478,8 @@
       if (cond.type === 'hp_ratio_lte') return target.maxHp > 0 && target.currentHp / target.maxHp * 100 <= Number(cond.val);
       if (cond.type === 'attr_is') return target.mainAttr === cond.attr || (target.subAttrs || []).includes(cond.attr);
       if (cond.type === 'attr_not') return !(target.mainAttr === cond.attr || (target.subAttrs || []).includes(cond.attr));
+      if (cond.type === 'status_is') return aiPlannerHasStatus(target, cond.status);
+      if (cond.type === 'any_status') return (target.statuses || []).some(x => durationActive(x.duration));
       return true;
     }
 
@@ -4541,6 +4572,22 @@
       dest.push(item);
     }
 
+    function aiPlannerAbsorbShield(target, rawDamage, piercing=false) {
+      let remaining = Math.max(0, Math.round(Number(rawDamage)||0));
+      if (!piercing && remaining > 0) {
+        target.shields = Array.isArray(target.shields) ? target.shields : [];
+        for (const shield of target.shields) {
+          if (remaining <= 0) break;
+          const available = Math.max(0, Number(shield.remaining ?? shield.amount)||0);
+          const used = Math.min(available, remaining);
+          shield.remaining = available - used;
+          remaining -= used;
+        }
+        target.shields = target.shields.filter(sh => Number(sh.remaining ?? sh.amount)>0 && durationActive(sh.duration));
+      }
+      return remaining;
+    }
+
     function aiPlannerApplyEffect(state, effect, target, actor, isMagic = false) {
       const ok = obj => ({ ...obj, success: true });
       const fail = obj => ({ ...obj, success: false });
@@ -4561,7 +4608,8 @@
       if (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce' || effect.type === 'dmg_atk_ratio') {
         if (isMagic && effect.type === 'dmg_atk_ratio') return fail({ value: -50, kills: 0, damage: 0, healing: 0 });
         const raw = (effect.type === 'dmg_fixed' || effect.type === 'dmg_fixed_pierce') ? Number(effect.val) || 0 : Math.round(aiPlannerEffectiveAtk(actor) * ((Number(effect.val) || 0) / 100));
-        const actual = effect.type === 'dmg_fixed_pierce' ? Math.max(0, Math.round(raw)) : aiPlannerDamageAfterCut(target, raw);
+        const afterCut = effect.type === 'dmg_fixed_pierce' ? Math.max(0, Math.round(raw)) : aiPlannerDamageAfterCut(target, raw);
+        const actual = aiPlannerAbsorbShield(target, afterCut, effect.type === 'dmg_fixed_pierce');
         target.currentHp = Math.max(0, target.currentHp - actual);
         return ok({
           value: actual * 1.15 + (beforeHp > 0 && target.currentHp <= 0 ? 1300 : 0),
@@ -4569,6 +4617,13 @@
           damage: actual,
           healing: 0
         });
+      }
+      if (effect.type === 'shield') {
+        const amount = Math.max(0, Math.round(Number(effect.val) || 0));
+        if (amount <= 0) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
+        target.shields = target.shields || [];
+        target.shields.push({ amount, remaining:amount, duration:normalizeDuration(effect.duration) });
+        return ok({ value: amount * (target.side === actor.side ? 0.12 : -0.03), kills: 0, damage: 0, healing: 0 });
       }
       if (effect.type === 'heal_fixed' || effect.type === 'heal_max_hp_ratio') {
         if ((target.debuffs || []).some(x => x.type === 'heal_block' && durationActive(x.duration))) return fail({ value: 0, kills: 0, damage: 0, healing: 0 });
@@ -4629,7 +4684,7 @@
     function aiPlannerApplySkill(state, actorId, skill, explicitTargetId = null, isMagic = false, explicitSubTargetId = null) {
       const actor = aiPlannerFindUnit(state, actorId);
       if (!actor || actor.currentHp <= 0 || !skill) return { value: -9999, kills: 0, damage: 0, healing: 0 };
-      const cost = Math.max(0, Number(skill.cost) || 0);
+      const cost = Math.max(0, Number(skill.cost) || 0) + (!isMagic && aiPlannerHasStatus(actor, 'pressure') ? 5 : 0);
       const apKey = actor.side === 'player' ? 'playerAp' : 'enemyAp';
       if (state[apKey] < cost) return { value: -9999, kills: 0, damage: 0, healing: 0 };
       state[apKey] -= cost;
@@ -4674,7 +4729,8 @@
       if (!actualTarget) return { value: -20, kills: 0, damage: 0, healing: 0 };
       const raw = aiPlannerEffectiveAtk(actor);
       const before = actualTarget.currentHp;
-      const actual = aiPlannerDamageAfterCut(actualTarget, raw);
+      const afterCut = aiPlannerDamageAfterCut(actualTarget, raw);
+      const actual = aiPlannerAbsorbShield(actualTarget, afterCut, false);
       actualTarget.currentHp = Math.max(0, actualTarget.currentHp - actual);
       return { value: actual * 1.05 + (before > 0 && actualTarget.currentHp <= 0 ? 1300 : 0), kills: before > 0 && actualTarget.currentHp <= 0 ? 1 : 0, damage: actual, healing: 0 };
     }
@@ -4790,7 +4846,7 @@
       if (!skillBlocked) {
         (actor.skills || []).forEach((sk, sIdx) => {
           if (sk.type !== 'active' || !aiPlannerCondition(sk.selfCond, actor, state)) return;
-          const cost = Math.max(0, Number(sk.cost) || 0);
+          const cost = Math.max(0, Number(sk.cost) || 0) + (aiPlannerHasStatus(actor, 'pressure') ? 5 : 0);
           if ((side === 'player' ? state.playerAp : state.enemyAp) < cost) return;
           const targets = aiPlannerCandidateTargets(state, actor, sk);
           if (skillNeedsManualTarget(sk) && targets.length === 0) return;
@@ -4981,7 +5037,7 @@
         const usable = [];
         if (!blocked) (u.skills || []).forEach((sk, sIdx) => {
           if (sk.type !== 'active' || !evalCond(sk.selfCond, u, side === 'player')) return;
-          const cost = Number(sk.cost || 0);
+          const cost = Math.max(0, Number(sk.cost || 0)) + (unitHasStatus(u, 'pressure') ? 5 : 0);
           if (cost > remainingAp) return;
           const candidates = getAiTargetsForSkill(sk, u);
           if (skillNeedsManualTarget(sk) && !candidates.length) return;
@@ -5014,7 +5070,7 @@
             u.reservedAction = {type:'skill',skillIndex:pick.sIdx,targetInstanceId:target?.instanceId||null,subTargetInstanceId:subTarget?.instanceId||null};
           }
           // AP is a shared budget; subtract the picked skill exactly once.
-          if (u.reservedAction.type === 'skill') remainingAp -= Number(pick.sk.cost||0);
+          if (u.reservedAction.type === 'skill') remainingAp -= Math.max(0,Number(pick.sk.cost||0)) + (unitHasStatus(u,'pressure') ? 5 : 0);
         } else {
           const target = aliveEnemies.slice().sort((a,b)=>((a.currentHp/a.maxHp)-(b.currentHp/b.maxHp)) || (a.currentHp-b.currentHp))[0] || aliveEnemies[Math.floor(Math.random()*aliveEnemies.length)];
           u.reservedAction = {type:'attack',targetInstanceId:target?.instanceId||null};
@@ -5086,7 +5142,7 @@
         const a = u.reservedAction;
         if (a?.type !== 'skill') return sum;
         const sk = u.skills?.[a.skillIndex];
-        return sum + Number(sk?.cost || 0);
+        return sum + Math.max(0,Number(sk?.cost || 0)) + (unitHasStatus(u,'pressure') ? 5 : 0);
       }, 0);
       const ap = Math.max(0, Number(battleState.enemyAp) || 0) - reservedUnitCost;
       const actor = {side:'enemy',currentHp:1,maxHp:1,buffs:[],debuffs:[],statuses:[]};
@@ -5350,12 +5406,12 @@
         const raw = getEffectiveAtk(unit);
         const actorHpBefore = { current: unit.currentHp, max: unit.maxHp };
         const before = target.currentHp;
-        dealDamage(target, raw);
+        const damageResult = dealDamage(target, raw);
         const dealt = before - target.currentHp;
         logBattle(`⚔️ ${unit.name} の通常攻撃！ ${target.name} に ${dealt} ダメージ！`);
         const attackPopup = showActionPopup(unit, "通常攻撃", {cardType:'unit',name:unit.name,image:getCardImage(unit)||unit.image,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit)}, {
           target: target.name + ` (HP ${before} → ${target.currentHp})`,
-          effect: `基礎攻撃力 ${raw} = ${raw} ダメージ`,
+          effect: `攻撃力 ${raw} のダメージ${damageResult.absorbed ? `（シールドが${damageResult.absorbed}吸収）` : ''}`,
           result: `${dealt} ダメージ${target.currentHp <= 0 ? '／撃破！' : ''}`,
           targetEntity: target,
           actorHpBefore,
@@ -5364,8 +5420,9 @@
           targetHpAfter: { current: target.currentHp, max: target.maxHp },
           targetDetails: [{ entity:target, hpBefore:{current:before,max:target.maxHp}, hpAfter:{current:target.currentHp,max:target.maxHp} }]
         });
-        // 通常攻撃でもHPが実際に減った瞬間に反応パッシブを解決する。
-        // 通常攻撃ポップアップを先にキューへ積み、反応パッシブの演出はその後に続ける。
+        // 攻撃を受けたパッシブ→HP減少→死亡の順で判定する。
+        // 原因となる通常攻撃ポップアップを先にキューへ積んでから反応を解決する。
+        if (damageResult.incomingDamage > 0) triggerPassiveEvent('damage_taken', target, unit);
         if (target.currentHp < before) triggerPassiveEvent('hp_decrease', target);
         if (before > 0 && target.currentHp <= 0) {
           triggerPassiveEvent('death', target);
@@ -5388,7 +5445,11 @@
         await showActionPopup(unit, sk.name, sk, {target:'自分',effect:'スキル使用禁止',result:'不発',description: sk.desc || sk.description || buildAutoSkillDescriptionFromData(sk)});
         return;
       }
-      const cost = sk.cost || 0;
+      const cost = Math.max(0, Number(sk.cost) || 0) + (unitHasStatus(unit, 'pressure') ? 5 : 0);
+      if ((isPlayer ? battleState.playerAp : battleState.enemyAp) < cost) {
+        await showActionPopup(unit, sk.name, {cardType:'unit',name:unit.name,image:getCardImage(unit)||unit.image,hp:unit.maxHp,atk:getEffectiveAtk(unit),prio:getEffectiveSpeed(unit)}, {target:'AP不足',effect:`必要AP ${cost}`,result:'不発（AP消費なし）',description:sk.desc || sk.description || buildAutoSkillDescriptionFromData(sk)});
+        return;
+      }
       const mainTargetsPreview = resolveTargets(sk.targetType, sk.targetCond, unit, isPlayer, act.targetInstanceId);
       if (!mainTargetsPreview.length && !['self','player_self','player_opp'].includes(sk.targetType)) {
         logBattle(`⚠️ ${unit.name} のスキル【${sk.name}】は有効な対象がいないため不発（AP消費なし）。`);
@@ -5541,19 +5602,31 @@
         }
         const baseAtk = actor ? getEffectiveAtk(actor) : 1000;
         const dmg = Math.round(baseAtk * (eff.val / 100));
-        const beforeHp=target.currentHp; dealDamage(target, dmg);
+        const beforeHp=target.currentHp; const damageResult=dealDamage(target, dmg); const actualDamage=beforeHp-target.currentHp;
+        if (damageResult.incomingDamage > 0) triggerPassiveEvent('damage_taken', target, actor);
         if(target.currentHp<beforeHp) triggerPassiveEvent('hp_decrease',target);
         if(target.currentHp<=0&&beforeHp>0){ triggerPassiveEvent('death',target); [...getActiveUnits(target.side==='player'?'player':'enemy')].filter(u=>u!==target).forEach(u=>triggerPassiveEvent('ally_death',u)); }
         logBattle(`💥 ${target.name} に ${beforeHp-target.currentHp} のダメージ！`);
-        return {effect:`攻撃力×${eff.val}%ダメージ`, result:`${target.name} に ${dmg} ダメージ`};
+        return {effect:`攻撃力×${eff.val}%ダメージ${damageResult.absorbed ? `（シールドが${damageResult.absorbed}吸収）` : ''}`, result:`${target.name} に ${actualDamage} ダメージ${target.currentHp<=0?'／撃破！':''}`};
       }
 
       if (eff.type === "dmg_fixed" || eff.type === "dmg_fixed_pierce") {
-        const beforeHp = target.currentHp; dealDamage(target, eff.val, eff.type === 'dmg_fixed_pierce'); const actual = beforeHp - target.currentHp;
+        const beforeHp = target.currentHp; const damageResult=dealDamage(target, eff.val, eff.type === 'dmg_fixed_pierce', eff.type === 'dmg_fixed_pierce'); const actual = beforeHp - target.currentHp;
+        if (damageResult.incomingDamage > 0) triggerPassiveEvent('damage_taken', target, actor);
         if(actual>0) triggerPassiveEvent('hp_decrease',target);
         if(target.currentHp<=0&&beforeHp>0){ triggerPassiveEvent('death',target); [...getActiveUnits(target.side==='player'?'player':'enemy')].filter(u=>u!==target).forEach(u=>triggerPassiveEvent('ally_death',u)); }
         logBattle(`💥 ${target.name} に ${actual} の固定ダメージ！`);
-        return {effect:eff.type==='dmg_fixed_pierce'?`${eff.val}の固定貫通ダメージ`:`${eff.val}の固定ダメージ`, result:`${target.name} に ${actual} ダメージ${target.currentHp<=0?'／撃破！':''}`};
+        return {effect:eff.type==='dmg_fixed_pierce'?`${eff.val}の固定貫通ダメージ`:`${eff.val}の固定ダメージ${damageResult.absorbed ? `（シールドが${damageResult.absorbed}吸収）` : ''}`, result:`${target.name} に ${actual} ダメージ${damageResult.absorbed ? `（シールド吸収 ${damageResult.absorbed}）` : ''}${target.currentHp<=0?'／撃破！':''}`};
+      }
+
+      if (eff.type === "shield") {
+        const amount = Math.max(0, Math.round(Number(eff.val) || 0));
+        if (amount <= 0) return {effect:'シールド付与失敗',result:`${target.name}にシールドを付与できない（値が0）`};
+        target.shields = Array.isArray(target.shields) ? target.shields : [];
+        const appliedTurn = battleState._statusApplicationTiming === 'battle_start' ? battleState.turn - 1 : battleState.turn;
+        target.shields.push({amount,remaining:amount,duration,appliedTurn,source:actor?.name||'effect'});
+        logBattle(`🛡 ${target.name} にシールド ${amount} を付与！`);
+        return {effect:`${amount}のシールドを付与（${durationText(duration)}）`,result:`${target.name}にシールド${amount}を付与`};
       }
 
       if (eff.type === "heal_max_hp_ratio" || eff.type === "heal_fixed") {
@@ -5665,7 +5738,7 @@
       }
     }
 
-    function dealDamage(unit, amount, bypassReceivedDamageModifiers=false) {
+    function dealDamage(unit, amount, bypassReceivedDamageModifiers=false, bypassShields=false) {
       let finalAmount = Math.max(0, Number(amount)||0);
       if (!bypassReceivedDamageModifiers) {
         const receivedRatio = [...(unit.buffs||[]), ...(unit.debuffs||[])]
@@ -5673,8 +5746,24 @@
           .reduce((sum,b) => sum + (b.type === 'dmg_cut' ? -(Number(b.val)||0) : (Number(b.val)||0)),0);
         finalAmount *= Math.max(0, 1 + receivedRatio / 100);
       }
-      const finalDmg = Math.max(0, Math.round(finalAmount));
-      unit.currentHp = Math.max(0, unit.currentHp - finalDmg);
+      const incomingDamage = Math.max(0, Math.round(finalAmount));
+      let remainingDamage = incomingDamage, absorbed = 0;
+      if (!bypassShields && remainingDamage > 0) {
+        unit.shields = Array.isArray(unit.shields) ? unit.shields : [];
+        // 先に付与されたシールドから順に肩代わりする。
+        for (const shield of unit.shields) {
+          if (remainingDamage <= 0) break;
+          const available = Math.max(0, Number(shield.remaining ?? shield.amount) || 0);
+          const used = Math.min(available, remainingDamage);
+          shield.remaining = available - used;
+          remainingDamage -= used;
+          absorbed += used;
+        }
+        unit.shields = unit.shields.filter(shield => Number(shield.remaining ?? shield.amount) > 0 && durationActive(shield.duration));
+      }
+      const before = Math.max(0, Number(unit.currentHp)||0);
+      unit.currentHp = Math.max(0, before - remainingDamage);
+      return { before, after:unit.currentHp, damage:before-unit.currentHp, absorbed, incomingDamage };
     }
 
     function evalCond(cond, actor, isPlayer) {
@@ -5748,10 +5837,10 @@
       const jobs = deferredPassivePopupJobs.splice(0);
       jobs.forEach(job => job());
     }
-    function runPassiveSkills(timing, onlyUnit=null) {
+    function runPassiveSkills(timing, onlyUnit=null, attacker=null) {
       const units=onlyUnit?[onlyUnit]:[...getActiveUnits('player'),...getActiveUnits('enemy')];
       units.forEach(u=>{
-        if((u.currentHp<=0 && timing!=='death' && timing!=='hp_decrease') || !u.isActive)return;
+        if((u.currentHp<=0 && timing!=='death' && timing!=='hp_decrease' && timing!=='damage_taken') || !u.isActive)return;
         (u.skills||[]).forEach(sk=>{
           if(sk.type==='passive' && sk.timing===timing && evalCond(sk.selfCond,u,u.side==='player')){
             logBattle(`🌀 ${u.name} のパッシブ【${sk.name}】発動！`);
@@ -5760,11 +5849,11 @@
             battleState._statusApplicationTiming = timing;
             const effectLines=[]; let firstTarget=null; let mainEffectSucceeded=false; const passiveTargets=[]; const passiveTargetBefore=new Map();
             try {
-              const mainTargets=resolveTargets(sk.targetType,sk.targetCond,u,isPlayer,sk.targetInstanceId);
+              const mainTargets=sk.targetType==='attacker' ? (timing==='damage_taken' && attacker?.instanceId ? [attacker].filter(t=>matchesTargetCondition(t,sk.targetCond||{type:'none'})) : []) : resolveTargets(sk.targetType,sk.targetCond,u,isPlayer,sk.targetInstanceId);
               mainTargets.forEach(t=>{ if(!t.__playerTarget){if(!firstTarget)firstTarget=t;if(!passiveTargetBefore.has(t.instanceId))passiveTargetBefore.set(t.instanceId,{current:t.currentHp,max:t.maxHp});if(!passiveTargets.some(x=>x.instanceId===t.instanceId))passiveTargets.push(t);} const r=applyEffect(sk.mainEffect,t,isPlayer,false,u); if(effectResultSucceeded(r)){mainEffectSucceeded=true;} if(r){effectLines.push(r.result||r.effect||r);} });
               if(mainEffectSucceeded&&sk.hasSubEffect&&sk.subEffect){
                 const subType=sk.subEffect.targetType||'same_main_target';
-                const subTargets=subType==='same_main_target'?mainTargets.filter(t=>matchesTargetCondition(t,sk.subEffect.targetCond||{type:'none'})):resolveTargets(subType,sk.subEffect.targetCond||{type:'none'},u,isPlayer);
+                const subTargets=subType==='same_main_target'?mainTargets.filter(t=>matchesTargetCondition(t,sk.subEffect.targetCond||{type:'none'})):subType==='attacker'?(timing==='damage_taken'&&attacker?.instanceId?[attacker].filter(t=>matchesTargetCondition(t,sk.subEffect.targetCond||{type:'none'})):[]):resolveTargets(subType,sk.subEffect.targetCond||{type:'none'},u,isPlayer);
                 subTargets.forEach(t=>{if(t&&!t.__playerTarget){if(!passiveTargetBefore.has(t.instanceId))passiveTargetBefore.set(t.instanceId,{current:t.currentHp,max:t.maxHp});if(!passiveTargets.some(x=>x.instanceId===t.instanceId))passiveTargets.push(t);} const r=applyEffect(sk.subEffect,t,isPlayer,false,u); if(r)effectLines.push(r.result||r.effect||r); });
               }
             } finally { battleState._statusApplicationTiming = previousTiming; }
@@ -5773,21 +5862,30 @@
         });
       });
     }
-    function triggerPassiveEvent(timing, subject) {
+    function triggerPassiveEvent(timing, subject, attacker=null) {
       if(!subject || passiveTriggerDepth>=10) return;
-      // HP減少パッシブは致死ダメージでも発動する。復活はHP変更効果側で禁止する。
-      passiveTriggerDepth++; try { runPassiveSkills(timing,subject); } finally { passiveTriggerDepth--; }
+      // ダメージ反応パッシブは被害者だけを対象にし、攻撃相手を明示的に渡す。
+      passiveTriggerDepth++; try { runPassiveSkills(timing,subject,attacker); } finally { passiveTriggerDepth--; }
     }
 
     async function processEndTurnAbnormalitiesOffline() {
       [...battleState.playerUnits,...battleState.enemyUnits].forEach(u=>{
         if(u.currentHp<=0||!u.isActive)return;
         if((u.statuses||[]).some(x=>x.type==='poison'&&durationActive(x.duration))){
-          const before=u.currentHp; dealDamage(u,Math.round(u.maxHp*0.10)); const dmg=before-u.currentHp;
+          const before=u.currentHp; dealDamage(u,Math.round(u.maxHp*0.10),true,true); const dmg=before-u.currentHp;
           logBattle(`☠️ ${u.name} は毒で ${dmg} ダメージ！`);
-          showActionPopup(u,'毒',{cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)},{target:u.name,effect:'最大HPの10%ダメージ',result:`${dmg} ダメージ${u.currentHp<=0?'／撃破！':''}`,targetEntity:u,targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp},description:'毒：ターン終了間際に最大HPの10%のダメージ。'});
+          showActionPopup(u,'毒',{cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)},{target:u.name,effect:'最大HPの10%ダメージ',result:`${dmg} ダメージ${u.currentHp<=0?'／撃破！':''}`,targetEntity:u,targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp},description:'毒：ターン終了間際に最大HPの10%のダメージ。シールドを貫通する。'});
           if(dmg>0) triggerPassiveEvent('hp_decrease',u);
           if(u.currentHp<=0&&before>0){triggerPassiveEvent('death',u);[...getActiveUnits(u.side==='player'?'player':'enemy')].filter(x=>x!==u).forEach(x=>triggerPassiveEvent('ally_death',x));}
+        }
+        if (u.currentHp > 0 && (u.statuses||[]).some(x=>x.type==='burn'&&durationActive(x.duration))) {
+          const before=u.currentHp;
+          const amount=Math.min(Math.max(0,before-1),Math.max(1,Math.round(before*0.12)));
+          dealDamage(u,amount,true,true);
+          const dmg=before-u.currentHp;
+          logBattle(`🔥 ${u.name} は火傷で ${dmg} ダメージ！（HP1未満にならない）`);
+          showActionPopup(u,'火傷',{cardType:'unit',name:u.name,image:getCardImage(u)||u.image,hp:u.maxHp,atk:getEffectiveAtk(u),prio:getEffectiveSpeed(u)},{target:u.name,effect:'現在HPの12%ダメージ（シールド貫通）',result:`${dmg} ダメージ${u.currentHp<=1?'（HP1で踏みとどまった）':''}`,targetEntity:u,targetHpBefore:{current:before,max:u.maxHp},targetHpAfter:{current:u.currentHp,max:u.maxHp},description:'火傷：ターン終了時に現在HPの12%のダメージ。シールドを貫通し、火傷ではHPが1未満にならない。'});
+          if(dmg>0) triggerPassiveEvent('hp_decrease',u);
         }
       });
     }
@@ -5805,6 +5903,7 @@
         u.buffs = tick(u.buffs);
         u.debuffs = tick(u.debuffs);
         u.statuses = tick(u.statuses);
+        u.shields = tick(u.shields);
         const before = u.currentHp;
         refreshEffectiveMaxHp(u, false);
         if (u.currentHp < before) triggerPassiveEvent('hp_decrease', u);
